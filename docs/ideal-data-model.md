@@ -17,6 +17,19 @@
 | 想定永続化 | RDB（PostgreSQL想定）。フロントは正規化キャッシュ + localStorage はUI状態とオフライン下書きのみ |
 | 記法 | TypeScript interface（精度重視・言語非依存）。`?` は任意、`// 旧:` は現状コードとの対応 |
 
+### 関連ドキュメント / 成果物
+
+| ファイル | 内容 |
+| --- | --- |
+| [`docs/operation-layer-deep-dive.md`](./operation-layer-deep-dive.md) | 運行層 Trip/Leg/Stop/Assignment の深掘り設計（不変条件・運行パターン別の表現・派生ビュー） |
+| [`db/schema.sql`](../db/schema.sql) | 実際のDDL（PostgreSQL 16）。型・制約・索引・派生ビュー。**適用検証済み** |
+| [`migration/transform_prototype.mjs`](../migration/transform_prototype.mjs) | 現行プロトタイプJSデータ → 新スキーマ への移行(ETL)スクリプト |
+| [`db/seed_from_prototype.sql`](../db/seed_from_prototype.sql) | 上記が生成する投入SQL（中継案件 `20240524104` 等を含む） |
+| [`db/README.md`](../db/README.md) | 適用手順・検証済みの性質 |
+
+> 上記DDL・移行は PostgreSQL 16 で実際に適用し、EXCLUDE制約による重複配車の拒否、
+> 派生ビューによる旧3画面の復元まで動作確認済み。
+
 ---
 
 ## 2. 現状データ構造の課題（分析結果）
