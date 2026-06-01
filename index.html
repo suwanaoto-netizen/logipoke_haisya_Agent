@@ -34234,6 +34234,10 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
 }
 .dwb-btn-bulk:hover { background: #ea580c; transform: translateY(-1px); box-shadow: 0 2px 6px rgba(249, 115, 22, 0.3); }
 .dwb-btn-bulk:disabled { background: #d1d5db; color: #6b7280; cursor: not-allowed; transform: none; box-shadow: none; }
+/* 「当日未確定 N件を一括仮確定」ボタンのみ新規登録と同じグリーンに（選択モードはオレンジ維持）。
+   :disabled 時は上の .dwb-btn-bulk:disabled（グレー）を活かすため :not(:disabled) を付与 */
+#dwb-btn-bulk-confirm:not(:disabled) { background: #1a7a5e; }
+#dwb-btn-bulk-confirm:not(:disabled):hover { background: #155f49; box-shadow: 0 2px 6px rgba(26, 122, 94, 0.3); }
 .dwb-btn-undo, .dwb-btn-redo {
   width: 28px; height: 28px;
   background: #fff;
