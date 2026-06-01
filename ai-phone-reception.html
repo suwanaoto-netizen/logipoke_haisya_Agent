@@ -4,8 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ロジポケ配車Agent - AI電話受付</title>
+<script>/* 埋め込み(?embed=1)時は自前のグローバルヘッダ/サイドバーを隠し、コンテンツだけ表示する */
+if (location.search.indexOf('embed=1') !== -1) document.documentElement.classList.add('embed');</script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+  /* 埋め込みモード（index.html のコンテンツ領域に表示）: 自前のグローバルヘッダ/サイドバーを隠す */
+  html.embed .global-header,
+  html.embed .sidebar { display: none !important; }
 
   :root {
     --sidebar-bg: #1A6B56;
@@ -1953,7 +1959,12 @@ function hideMiniWidget() {
    別タブで他ページを開く
    ============================================================ */
 function navTo(page) {
-  // ロジポケ配車Agent本体を「単一の業務タブ」で開く（page引数はハッシュとして渡す）。
+  // 埋め込み(index.html内 iframe)時は、親のページ切替に委譲する（メインのサイドバーは保持）。
+  if (window.self !== window.top) {
+    try { window.parent.postMessage({ type: 'logipoke-nav', page: page }, '*'); } catch (e) {}
+    return;
+  }
+  // 単独表示時: ロジポケ配車Agent本体を「単一の業務タブ」で開く（page引数はハッシュとして渡す）。
   // ・features文字列('noopener')を渡すと一部ブラウザで小さなポップアップ窓になり重い本体が
   //   うまく開かないため、features は付けない（＝通常のタブ）。
   // ・名前付きターゲットで既存タブを再利用。2回目以降は同一タブのハッシュ変更だけになり、
