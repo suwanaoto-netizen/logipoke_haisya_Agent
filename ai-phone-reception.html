@@ -1709,8 +1709,6 @@
   </div>
 </div>
 
-<!-- 7層 正規化データモデル（SSoT）。受付は Reception(+AiExtraction) として登録する -->
-<script src="assets/logipoke-data-model.js"></script>
 <script>
 /* ============================================================
    AI電話受付 - 状態管理
@@ -1881,32 +1879,35 @@ function pushIntakeToBackend() {
   try {
     const now = new Date();
     const pad = function(n){ return String(n).padStart(2,'0'); };
-    // 受付IDは「AI + 日付時刻」で発行（本体側で重複チェックも実施）
+    // 案件IDは「AI + 日付時刻」で発行（本体側で重複チェックも実施）
     const newId = 'AI' + now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate())
                 + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
 
     // 受付内容（デモシナリオ：サンライズ物産 / 市原市→横浜港 / 4t平ボディ / 建材2.5t / 05/19 13時集荷）
-    // → 7層モデルの Reception(+AiExtraction) として正規化。goods/deadline/住所は値オブジェクト化される。
-    const reception = LogipokeDB.createReception(null, {
+    const intake = {
       id: newId,
-      channel: 'ai_phone',
-      receivedAt: now.toISOString(),
       client: '株式会社サンライズ物産',
       from: '千葉県市原市',
       to: '神奈川県横浜市（横浜港）',
       goods: '建材 / 2,500kg / 常温（4t平ボディ）',
       deadline: '05/19 13:00 集荷指定',
       conditions: 'バース予約済み / 担当：佐藤様',
-      confidence: 'high',
-      vehicleType: '4t平ボディ'
-    });
+      ch: 'tel',
+      source: 'ai-phone-reception',
+      receivedAt: now.toISOString(),
+      time: pad(now.getHours()) + ':' + pad(now.getMinutes())
+    };
 
-    // 正規化 Reception ストア（localStorage の正規化キー）へ追加。
-    // 同オリジンの他タブ（index.html）には storage イベントで通知が飛ぶ。
-    LogipokeDB.pushReception(reception);
-    console.log('[AI電話受付] Reception を登録しました:', reception.id);
+    // 既存キューに追加
+    const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
+    const queue = raw ? JSON.parse(raw) : [];
+    queue.push(intake);
+    localStorage.setItem(INTAKE_QUEUE_KEY, JSON.stringify(queue));
+
+    // 同タブ内に index.html の SPA が無いことを通知（同オリジン他タブには storage イベントが飛ぶ）
+    console.log('[AI電話受付] 案件をキューにプッシュしました:', intake.id);
   } catch (e) {
-    console.warn('[AI電話受付] Reception 登録に失敗しました:', e);
+    console.warn('[AI電話受付] 案件キューへの書込に失敗しました:', e);
   }
 }
 
@@ -1987,8 +1988,9 @@ function showCompleteToast() {
   // 直近にプッシュしたキューから最新案件IDを取得
   let latestId = '';
   try {
-    const list = LogipokeDB.loadReceptions();
-    if (list.length > 0) latestId = list[list.length - 1].id;
+    const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
+    const queue = raw ? JSON.parse(raw) : [];
+    if (queue.length > 0) latestId = queue[queue.length - 1].id;
   } catch(e){}
 
   const toast = document.createElement('div');
@@ -2038,8 +2040,9 @@ function prependDemoLog() {
   // キューから最新IDを取得
   let latestId = 'C-2821';
   try {
-    const list = LogipokeDB.loadReceptions();
-    if (list.length > 0) latestId = list[list.length - 1].id;
+    const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
+    const queue = raw ? JSON.parse(raw) : [];
+    if (queue.length > 0) latestId = queue[queue.length - 1].id;
   } catch(e){}
 
   const newRow = document.createElement('div');
