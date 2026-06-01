@@ -3554,6 +3554,18 @@
   .comm-type-badge.driver-dispatch { background:#e0e7ff; color:#4338ca; }
   .comm-type-badge.driver-approval { background:#dcfce7; color:#15803d; }
   .comm-type-badge.customer-confirm{ background:#fce7f3; color:#9d174d; }
+  /* 仮確定連携：連絡状況サブタブの未閲覧バッジ＆新着マーカー */
+  .comm-tab-badge {
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:16px; height:16px; padding:0 4px; margin-left:1px;
+    border-radius:8px; background:var(--red); color:#fff;
+    font-size:9px; font-weight:800; font-family:'Inter',sans-serif; line-height:1;
+  }
+  .comm-new-badge {
+    font-size:8.5px; font-weight:800; font-family:'Inter',sans-serif;
+    letter-spacing:.04em; padding:1px 5px; border-radius:4px;
+    background:var(--red); color:#fff; flex-shrink:0;
+  }
   .comm-direction {
     font-size:9px; font-weight:700;
     color:var(--text-muted);
@@ -18011,7 +18023,7 @@ function switchDispatchSubtab(sub) {
   if (sub === 'dnd') renderDnd();
   else if (sub === 'schedule') renderSchedule();
   else if (sub === 'dotai') renderDotai();
-  else if (sub === 'comm') renderCommLog();
+  else if (sub === 'comm') { renderCommLog(); if (typeof markCommLogRead === 'function') markCommLogRead(); }
 }
 
 // 時刻 → 0〜24 の割合(%)
@@ -21179,6 +21191,7 @@ function renderCommLog() {
             <div class="comm-icon ${item.channel}">${_commIcon(item.channel)}</div>
             <div class="comm-main">
               <div class="comm-main-head">
+                ${item._unread ? '<span class="comm-new-badge">NEW</span>' : ''}
                 <span class="comm-type-badge ${item.type}">${item.typeLabel}</span>
                 <span class="comm-direction ${item.direction}">${dirText}</span>
                 <span class="comm-counterparty">${item.counterparty}</span>
@@ -21210,6 +21223,89 @@ window.__commSetFilter = function(key, value) {
   _commFilter[key] = value;
   renderCommLog();
 };
+
+// ═══════════════════════════════════════════════════════════════
+//  仮確定 → 連絡状況タブ 情報連携 ＆ 未閲覧バッジ
+//  仮確定（単独／一括）で送信した配車指示ログを連絡状況タブへ積み、
+//  未閲覧の間は連絡状況サブタブに小さなバッジを出す。タブを開いたら消す。
+// ═══════════════════════════════════════════════════════════════
+
+// 連絡状況サブタブの未閲覧バッジを更新（未読 = _unread:true のエントリ数）
+function updateCommTabBadge() {
+  const btn = document.getElementById('dsubtab-comm');
+  if (!btn) return;
+  const data = window.__commLogData || [];
+  const unread = data.reduce((n, e) => n + (e && e._unread ? 1 : 0), 0);
+  let badge = document.getElementById('comm-tab-badge');
+  if (unread > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'comm-tab-badge';
+      badge.className = 'comm-tab-badge';
+      badge.setAttribute('aria-label', '未閲覧の連絡');
+      btn.appendChild(badge);
+    }
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+    badge.style.display = '';
+  } else if (badge) {
+    badge.style.display = 'none';
+  }
+}
+
+// 連絡状況を閲覧済みにする（未読フラグを落としてバッジを消す）
+function markCommLogRead() {
+  const data = window.__commLogData || [];
+  data.forEach(e => { if (e && e._unread) e._unread = false; });
+  updateCommTabBadge();
+}
+
+// 送信ログ1件を連絡状況タブのエントリへ変換して連携する
+function linkSendLogToCommTab(log) {
+  if (!log) return;
+  if (!window.__commLogData) {
+    window.__commLogData = (typeof _buildCommLogSamples === 'function') ? _buildCommLogSamples() : [];
+  }
+  const scheduled = log.status === 'pending';
+  // タイムライン上は連携した瞬間（＝仮確定時）に並べる
+  const when = log.sentAt ? new Date(log.sentAt)
+             : (log.createdAt ? new Date(log.createdAt) : new Date());
+  const driverName = log.driverName && log.driverName !== '—' ? log.driverName : '担当ドライバー';
+  const client = log.client && log.client !== '—' ? log.client : '配車案件';
+  const time = log.time && log.time !== '—' ? log.time : '';
+  const schedStr = (scheduled && log.scheduledAt)
+    ? new Date(log.scheduledAt).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
+    : '';
+  window.__commLogData.unshift({
+    id: 'CL-' + log.id,
+    type: 'driver-dispatch',
+    typeLabel: 'ドライバー配車指示',
+    channel: 'app',
+    direction: 'out',
+    counterparty: driverName,
+    subject: `【配車指示】${client}${time ? '　' + time : ''}`,
+    snippet: scheduled
+      ? `仮確定にともない ${driverName} への配車指示を予約しました（${client}${time ? ' / ' + time : ''}）。送信予定：${schedStr}。操作：${log.operator || '—'}。`
+      : `仮確定にともない ${driverName} へ配車指示を送信しました（${client}${time ? ' / ' + time : ''}）。操作：${log.operator || '—'}。`,
+    status: scheduled ? 'pending' : 'confirmed',
+    statusLabel: scheduled ? '送信予約' : '送信済み',
+    sentAt: when,
+    relatedCase: log.caseId || null,
+    relatedClient: (log.client && log.client !== '—') ? log.client : null,
+    relatedAssignment: null,
+    _unread: true,
+    _fromSendLog: true
+  });
+  // 連絡状況タブを表示中なら即時反映して既読扱い、それ以外はバッジのみ更新
+  if (typeof currentDispatchSubtab !== 'undefined' && currentDispatchSubtab === 'comm') {
+    renderCommLog();
+    markCommLogRead();
+  } else {
+    updateCommTabBadge();
+  }
+}
+window.linkSendLogToCommTab = linkSendLogToCommTab;
+window.updateCommTabBadge = updateCommTabBadge;
+window.markCommLogRead = markCommLogRead;
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -36693,13 +36789,6 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
       </div>
       <div class="afb-axis-divider"></div>
       <div class="afb-chips" id="afb-chips"></div>
-      <div class="afb-current-user" onclick="openSendLogModal()" title="クリックで指示送信ログを表示">
-        <span class="afb-current-user-avatar">${getMember(CURRENT_USER_ID).initial}</span>
-        <span>${getMember(CURRENT_USER_ID).name}</span>
-        <span style="color:#94a3b8;">|</span>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.65 3.35 2 2 0 0 1 3.62 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 5.5 5.5l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-        <span>送信ログ</span>
-      </div>
     `;
     wb.parentNode.insertBefore(bar, wb.nextSibling);
     refreshAssignFilterBar();
@@ -37523,6 +37612,7 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
       driverName: driver ? driver.driver : '—',
       client: block ? (block.client || block.label) : '—',
       time: block ? `${block.start}〜${block.end}` : '—',
+      caseId: block ? (block.caseListId || block.caseId || null) : null,
       mode,
       scheduledAt: scheduleAt ? scheduleAt.toISOString() : null,
       status: mode === 'immediate' ? 'sent' : 'pending',
@@ -37532,6 +37622,10 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
     });
     // 最大100件保持
     if (sendLogs.length > 100) sendLogs.length = 100;
+    // 仮確定の送信ログを連絡状況タブへ情報連携（未閲覧バッジ付き）
+    if (typeof window.linkSendLogToCommTab === 'function') {
+      window.linkSendLogToCommTab(sendLogs[0]);
+    }
   }
 
   // 送信ログモーダル
