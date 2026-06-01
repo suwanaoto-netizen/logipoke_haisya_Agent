@@ -4945,6 +4945,75 @@
     border-color:var(--red); border-style:dashed;
   }
 
+  /* ── AIおすすめ配車枠（カード選択／ドラッグ時に配車計画表で強調表示） ── */
+  /* 推奨ドライバー行の見出しセルを強調 */
+  .dnd-row.dnd-rec-target .dnd-driver-cell {
+    background:#eafaf3;
+    border-color:var(--accent);
+    box-shadow:inset 3px 0 0 0 var(--accent);
+  }
+  .dnd-row.dnd-rec-target .dnd-driver-name { color:#0d4a3a; }
+  /* 推奨時間枠オーバーレイ（ドロップ可否とは無関係の“ヒント”表示） */
+  .dnd-rec-slot {
+    position:absolute; top:3px; bottom:3px;
+    border-radius:6px; pointer-events:none; z-index:9;
+    background:repeating-linear-gradient(45deg,
+      rgba(59,184,136,.14), rgba(59,184,136,.14) 7px,
+      rgba(59,184,136,.26) 7px, rgba(59,184,136,.26) 14px);
+    border:2px dashed var(--accent);
+    box-shadow:0 0 0 2px rgba(255,255,255,.65), 0 4px 12px rgba(26,122,94,.28);
+    animation:dndRecPulse 1.25s ease-in-out infinite;
+  }
+  @keyframes dndRecPulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+  .dnd-rec-slot-tag {
+    position:absolute; left:50%; top:-21px; transform:translateX(-50%);
+    font-size:9.5px; font-weight:800; color:#fff;
+    background:var(--accent);
+    padding:2px 8px; border-radius:5px; white-space:nowrap;
+    box-shadow:0 2px 6px rgba(0,0,0,.22);
+    font-family:'Inter','Noto Sans JP',sans-serif; letter-spacing:.02em;
+  }
+  .dnd-rec-slot-tag::after {
+    content:''; position:absolute; left:50%; bottom:-4px; transform:translateX(-50%);
+    width:0; height:0;
+    border-left:4px solid transparent; border-right:4px solid transparent;
+    border-top:4px solid var(--accent);
+  }
+  /* 端寄り・最上段でのタグはみ出し回避 */
+  .dnd-rec-slot.tag-left  .dnd-rec-slot-tag { left:0;   transform:none; }
+  .dnd-rec-slot.tag-left  .dnd-rec-slot-tag::after { left:14px; }
+  .dnd-rec-slot.tag-right .dnd-rec-slot-tag { left:auto; right:0; transform:none; }
+  .dnd-rec-slot.tag-right .dnd-rec-slot-tag::after { left:auto; right:14px; }
+  .dnd-rec-slot.near-top  .dnd-rec-slot-tag { top:auto; bottom:-21px; }
+  .dnd-rec-slot.near-top  .dnd-rec-slot-tag::after {
+    bottom:auto; top:-4px; border-top:none; border-bottom:4px solid var(--accent);
+  }
+
+  /* ── 未割当カード：AI推奨配車先バッジ ── */
+  .dnd-card-airec {
+    display:flex; align-items:center; gap:5px; flex-wrap:wrap;
+    margin-top:6px; padding:4px 6px;
+    background:linear-gradient(135deg,#ecfdf5,#d1fae5);
+    border:1px solid #a7f3d0; border-radius:6px;
+    font-size:9px; line-height:1.25;
+  }
+  .dnd-card-airec-ico { font-size:11px; line-height:1; }
+  .dnd-card-airec-label {
+    font-weight:800; color:#047857;
+    background:#fff; border:1px solid #6ee7b7;
+    padding:1px 5px; border-radius:8px; letter-spacing:.02em;
+    flex-shrink:0;
+  }
+  .dnd-card-airec-target { font-weight:800; color:#065f46; min-width:0; }
+  .dnd-card-airec-time {
+    font-weight:700; color:#0d4a3a; font-family:'Inter',sans-serif;
+    margin-left:auto; flex-shrink:0;
+  }
+  .dnd-card-airec.none {
+    background:#f8fafc; border-color:var(--border); color:var(--text-muted);
+    font-weight:600;
+  }
+
   /* ── ドロップ時間プレビュー（ドラッグ中、トラック上に表示） ── */
   .dnd-drop-preview {
     position: absolute;
@@ -24140,6 +24209,205 @@ function findCaseAssignment(caseId) {
   return null;
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  配車AIレコメンド（配車計画表 / 未割当案件）
+//  案件カードが登録された時点で「どの車両のどの時間枠に割り当てるべきか」を
+//  AIが解析・指定する。カード選択／ドラッグ時に配車計画表上で推奨枠を強調表示する。
+//  ※ あくまで“おすすめ”であり、ユーザーは別の車両・時間帯にもドロップ可能。
+// ═══════════════════════════════════════════════════════════════
+
+// レコメンドは「未割当カード全体の配車プラン」として greedy に一括算出する。
+// 同じ車両・時間帯へ複数カードが重複推薦されないよう、確保済み枠を考慮する。
+// 盤面（dndAssignments）が再描画されるたびに renderDndTimeline() で破棄＝再計算。
+let _dndPlanCache = { dateKey: null, map: null };
+function _invalidateDndRecCache() { _dndPlanCache = { dateKey: null, map: null }; }
+
+// 公開API：案件 → 推奨配車先（配車プランから取得。無ければ単独算出）
+function getDndAiRecommendation(caseObj, dateKey) {
+  if (!caseObj) return null;
+  const key = dateKey || dndGetCurrentDateKey();
+  const plan = _dndGetRecPlan(key);
+  if (caseObj.id in plan) return plan[caseObj.id];
+  return computeDndAiRecommendation(caseObj, key, null);
+}
+
+// 指定日の配車プラン（caseId → rec）を構築・キャッシュ
+function _dndGetRecPlan(dateKey) {
+  if (_dndPlanCache.dateKey === dateKey && _dndPlanCache.map) return _dndPlanCache.map;
+  const map = _dndBuildRecPlan(dateKey);
+  _dndPlanCache = { dateKey: dateKey, map: map };
+  return map;
+}
+
+// 未割当（かつ未処理）カード全体を greedy に配車計画へ落とし込む。
+// 配置順：緊急 → 希望時刻が早い → 所要時間が長い（収めにくい案件から枠を確保）。
+// 既に推薦した枠は reserved に積み、後続案件はその枠を避ける（重複推薦の防止）。
+function _dndBuildRecPlan(dateKey) {
+  const map = Object.create(null);
+  if (typeof dndUnassignedCases === 'undefined') return map;
+  const pending = dndUnassignedCases.filter(c =>
+    (typeof isCaseAssigned !== 'function' || !isCaseAssigned(c.id)) &&
+    (typeof isCaseProcessed !== 'function' || !isCaseProcessed(c.id)));
+  pending.sort((a, b) => {
+    const ua = a.urgent ? 1 : 0, ub = b.urgent ? 1 : 0;
+    if (ua !== ub) return ub - ua;
+    const pa = timeToMin(a.preferredStart || '09:00'), pb = timeToMin(b.preferredStart || '09:00');
+    if (pa !== pb) return pa - pb;
+    return (b.durationH || 0) - (a.durationH || 0);
+  });
+  const reserved = Object.create(null); // driverId -> [{s,e}]
+  pending.forEach(c => {
+    const rec = computeDndAiRecommendation(c, dateKey, reserved);
+    map[c.id] = rec;
+    if (rec) {
+      const durMin = Math.round((rec.durationH || 0) * 60);
+      (reserved[rec.driverId] || (reserved[rec.driverId] = [])).push({ s: rec.startMin, e: rec.startMin + durMin });
+    }
+  });
+  return map;
+}
+
+// 指定ドライバー(車両)の当日スケジュールに、durMin分の案件を収められる
+// 最良の時間枠（希望時刻に最も近く・衝突なし・改善基準告示違反なし）を探す。
+// reservedBusy: 他カードへ既に推薦済みの確保枠（[{s,e}]）。衝突回避に加味する。
+function _findDndSlotForDriver(driverId, dateKey, durMin, prefMin, reservedBusy) {
+  const DAY = 24 * 60;
+  if (durMin <= 0 || durMin > DAY) return null;
+  const dayArr = (dndAssignments[driverId] && dndAssignments[driverId][dateKey]) || [];
+  // realBusy: 実際の割当のみ（隙間フィット判定・稼働有無に使用）
+  const realBusy = dayArr.map(b => ({ s: timeToMin(b.start), e: timeToMin(b.end) })).sort((a, b) => a.s - b.s);
+  // busy: 実割当＋他カードへの推薦確保枠（衝突回避・空き算出に使用）
+  let busy = realBusy.slice();
+  if (reservedBusy && reservedBusy.length) busy = busy.concat(reservedBusy.map(x => ({ s: x.s, e: x.e })));
+  busy.sort((a, b) => a.s - b.s);
+
+  // 空きギャップを抽出（durMin が入る隙間のみ）
+  const gaps = [];
+  let cursor = 0;
+  busy.forEach(b => {
+    if (b.s - cursor >= durMin) gaps.push({ s: cursor, e: b.s });
+    cursor = Math.max(cursor, b.e);
+  });
+  if (DAY - cursor >= durMin) gaps.push({ s: cursor, e: DAY });
+
+  // 候補開始時刻（15分丸め）：まず希望時刻ぴったり、次に各ギャップ内で希望時刻に最も近い位置
+  const snap = (m) => Math.max(0, Math.round(m / 15) * 15);
+  const cand = [];
+  const addCand = (st) => {
+    st = snap(st);
+    if (st + durMin > DAY) st = DAY - durMin;
+    if (st < 0) st = 0;
+    cand.push(st);
+  };
+  addCand(prefMin);
+  gaps.forEach(g => addCand(Math.max(g.s, Math.min(prefMin, g.e - durMin))));
+
+  // 希望時刻に近い順に評価
+  const seen = new Set();
+  const uniq = cand.filter(s => (seen.has(s) ? false : (seen.add(s), true)));
+  uniq.sort((a, b) => Math.abs(a - prefMin) - Math.abs(b - prefMin));
+
+  const fmt = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  for (const st of uniq) {
+    const en = st + durMin;
+    if (st < 0 || en > DAY) continue;
+    if (busy.some(b => st < b.e && en > b.s)) continue; // 衝突
+    const startStr = fmt(st), endStr = fmt(en);
+    const k = (typeof kaizenCheck === 'function')
+      ? kaizenCheck(driverId, dateKey, { start: startStr, end: endStr })
+      : { level: 'ok' };
+    if (k.level === 'violation') continue; // 改善基準告示違反の枠は推奨しない
+    // 隙間フィット・稼働有無は「実際の割当」基準（確保枠への過度なスタックを避ける）
+    const fillsGap = realBusy.some(b => Math.abs(b.e - st) <= 120 || Math.abs(b.s - en) <= 120);
+    return { start: startStr, end: endStr, startMin: st, kaizenLevel: k.level, fillsGap, hadWork: realBusy.length > 0 };
+  }
+  return null;
+}
+
+// 案件1件に対する最適配車先（車両＋時間枠）を算出する。
+// 制約：積載量・温度帯（冷蔵/冷凍）はハード制約。時間枠は衝突・違反を回避。
+// スコア：希望時刻への近さ／積載フィット／温度帯適合／既存スケジュールの隙間活用
+//         ／緊急度／自社優先 などを総合。
+function computeDndAiRecommendation(caseObj, dateKey, reserved) {
+  if (!caseObj || typeof dndDrivers === 'undefined') return null;
+  const dur = caseObj.durationH || 1;
+  if (dur <= 0) return null;
+  const durMin = Math.max(15, Math.round(dur * 60));
+  const goods = String(caseObj.goods || '');
+  const kgMatch = goods.match(/(\d+)\s*kg/);
+  const goodsKg = kgMatch ? parseInt(kgMatch[1], 10) : 0;
+  const needsFrozen = /冷凍/.test(goods);
+  const needsChilled = /冷蔵/.test(goods);
+  const needsPrecision = /精密/.test(goods);
+  const prefMin = timeToMin(caseObj.preferredStart || '09:00');
+  const urgent = !!caseObj.urgent;
+
+  let best = null;
+  dndDrivers.forEach(driver => {
+    // ── ハード制約 ──
+    if (goodsKg > 0 && driver.maxLoad && goodsKg > driver.maxLoad) return; // 積載量超過
+    const t = driver.type || '';
+    if (needsFrozen && t !== '冷凍') return;                       // 冷凍は冷凍車のみ
+    if (needsChilled && !(t === '冷蔵' || t === '冷凍')) return;   // 冷蔵は冷蔵/冷凍車
+
+    const slot = _findDndSlotForDriver(driver.id, dateKey, durMin, prefMin,
+      reserved ? reserved[driver.id] : null);
+    if (!slot) return; // この車両には収まる枠がない
+
+    // ── スコアリング ──
+    let score = 100;
+    const reasons = [];
+
+    const diffMin = Math.abs(slot.startMin - prefMin);
+    score -= Math.min(45, diffMin * 0.12);
+    if (diffMin <= 15) reasons.push('希望時刻どおりに配置可能');
+
+    if (goodsKg > 0 && driver.maxLoad) {
+      const fit = goodsKg / driver.maxLoad; // 0..1（1に近いほど車格がちょうど良い）
+      score += fit * 18;                    // 過剰な大型車を避け、ぴったりの車格を優先
+      if (fit >= 0.5) reasons.push('積載量にちょうど良い車格');
+    }
+
+    if (needsFrozen && t === '冷凍') { score += 12; reasons.push('冷凍車に適合'); }
+    else if (needsChilled && t === '冷蔵') { score += 12; reasons.push('冷蔵車に適合'); }
+    else if (needsChilled && t === '冷凍') { score += 4; } // 冷蔵を冷凍車で（過剰スペック）
+    else if (!needsChilled && !needsFrozen && (t === '冷蔵' || t === '冷凍')) { score -= 6; } // 常温品で冷蔵/冷凍車を占有しない
+    if (needsPrecision && (t === '箱' || t === 'ウィング')) { score += 5; reasons.push('精密品の積載に適した車両'); }
+
+    if (slot.fillsGap) { score += 14; reasons.push('既存スケジュールの空き時間に最適フィット'); }
+    else if (!slot.hadWork) { score += 2; } // 完全に空いている車両
+
+    if (slot.kaizenLevel === 'warn') score -= 18; // 改善基準告示の注意あり
+    if (urgent) {
+      score -= slot.startMin * 0.01; // 早い時間帯ほど良い
+      if (slot.startMin <= prefMin + 30) reasons.push('緊急案件を早い時間帯で対応');
+    }
+    if (driver.partner) score -= 12; // 自社ドライバーを優先
+
+    if (!best || score > best.score) {
+      best = {
+        driverId: driver.id,
+        driverName: driver.driver,
+        vehicleLabel: driver.vehicle,
+        partner: !!driver.partner,
+        start: slot.start,
+        end: slot.end,
+        startMin: slot.startMin,
+        startH: slot.startMin / 60,
+        durationH: dur,
+        kaizenLevel: slot.kaizenLevel,
+        score: score,
+        reasons: reasons,
+      };
+    }
+  });
+  return best;
+}
+
+// 後続レイヤー／デバッグ用に公開
+window.getDndAiRecommendation = getDndAiRecommendation;
+window.computeDndAiRecommendation = computeDndAiRecommendation;
+
 function renderDndList() {
   const list = document.getElementById('dnd-list');
   if (!list) return;
@@ -24267,6 +24535,7 @@ function renderDndList() {
     return;
   }
 
+  const recDateKey = dndGetCurrentDateKey();
   list.innerHTML = filtered.map(c => {
     const assignment = findCaseAssignment(c.id);
     const assigned = !!assignment;
@@ -24332,6 +24601,23 @@ function renderDndList() {
           協力会社へ依頼
         </button>` : '';
 
+    // AI推奨配車先（未割当・未処理のカードのみ）：登録時点でAI解析済みの「誰に・いつ」を提示
+    let recInfo = '';
+    if (!assigned && !processed) {
+      const rec = getDndAiRecommendation(c, recDateKey);
+      if (rec) {
+        const vehShort = String(rec.vehicleLabel || '').replace('車両', '').replace(/\s+/g, '');
+        recInfo = `<div class="dnd-card-airec" title="AI解析による推奨配車先です。ドラッグするとこの枠が配車計画表で強調表示されます（別の車両・時間帯にもドロップできます）。">
+          <span class="dnd-card-airec-ico">🤖</span>
+          <span class="dnd-card-airec-label">AI推奨</span>
+          <span class="dnd-card-airec-target">${rec.driverName}<span style="font-weight:600;color:#047857"> (${vehShort})</span></span>
+          <span class="dnd-card-airec-time">${rec.start}〜${rec.end}</span>
+        </div>`;
+      } else {
+        recInfo = `<div class="dnd-card-airec none" title="現在の配車計画表では適合する空き枠が見つかりません。手動で配車してください。">🤖 AI推奨: 適合枠なし（手動配車）</div>`;
+      }
+    }
+
     return `
       <div class="dnd-card ${assigned ? 'assigned' : ''} ${processed ? 'is-processed' : ''}"
            data-case-id="${c.id}"
@@ -24364,6 +24650,7 @@ function renderDndList() {
           <span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>
           ${c.urgent ? `<span class="dnd-card-chip urgent">⚡ ${c.deadline}</span>` : `<span class="dnd-card-chip">${c.deadline}</span>`}
         </div>
+        ${recInfo}
         ${assignedInfo}
         ${partnerBtn}
       </div>`;
@@ -24903,6 +25190,9 @@ function dndRowDrop(ev, driverId) {
 function renderDndTimeline() {
   const wrap = document.getElementById('dnd-timeline');
   if (!wrap) return;
+
+  // 盤面（割当）が再描画される＝AIレコメンドの前提が変わるのでキャッシュを破棄
+  _invalidateDndRecCache();
 
   // 再描画時はホバーツールチップを閉じる（要素が消えて宙ぶらりんになるのを防ぐ）
   if (typeof dndBlockTipHide === 'function') dndBlockTipHide();
@@ -25551,14 +25841,19 @@ function dndCardDragStart(e, caseId) {
   e.dataTransfer.setDragImage(img, 0, 0);
   e.target.classList.add('dragging');
   showDndGhost(e, caseId);
+  // ドラッグ開始＝AIおすすめ枠を配車計画表上に強調表示（必要なら画面内へスクロール）
+  showDndRecommendationTarget(caseId, true);
 }
 function dndCardMouseDown(e, caseId) {
-  // ゴーストの初期位置を保持するため
+  // カードを“選択”した時点でAIおすすめ枠をハイライト。
+  // 推奨行が画面外のときだけ配車計画表をスクロールして見せる（表示中なら動かさない）。
+  showDndRecommendationTarget(caseId, true);
 }
 function dndCardDragEnd(e) {
   e.target.classList.remove('dragging');
   hideDndGhost();
   hideAllDropTimePreviews();
+  hideDndRecommendationTarget();
   document.querySelectorAll('.dnd-track').forEach(t => {
     t.classList.remove('drop-hover', 'drop-invalid');
   });
@@ -25567,6 +25862,81 @@ function dndCardDragEnd(e) {
   dndDraggingBlockIdx = null;
   dndDraggingFromDateKey = null;
 }
+
+// ── AIおすすめ配車枠のハイライト（配車計画表上に推奨車両×時間枠を表示） ──
+// あくまで“ヒント”表示であり、ドロップ可否（canDropOnDriver）には一切影響しない。
+let _dndRecShownFor = null;
+let _dndRecForcedRow = null; // 担当フィルター等で隠れていた推奨行（解除時に元へ戻す）
+function showDndRecommendationTarget(caseId, doScroll) {
+  // 確定済みタブでは表示しない
+  if (typeof currentDispatchTab !== 'undefined' && currentDispatchTab === 'confirmed') return;
+  // 同じ案件で既に表示中なら作り直さない（mousedown→dragstart の二重発火対策）
+  if (_dndRecShownFor === caseId && document.querySelector('.dnd-rec-slot')) {
+    if (doScroll) _dndScrollRecIntoView();
+    return;
+  }
+  hideDndRecommendationTarget();
+  const caseObj = (typeof dndUnassignedCases !== 'undefined')
+    ? dndUnassignedCases.find(c => c.id === caseId) : null;
+  if (!caseObj) return;
+  const rec = getDndAiRecommendation(caseObj, dndGetCurrentDateKey());
+  if (!rec) return;
+  const track = document.querySelector('.dnd-track[data-driver-id="' + rec.driverId + '"]');
+  if (!track) return;
+  const row = track.closest('.dnd-row');
+  if (row) {
+    row.classList.add('dnd-rec-target');
+    // 担当/拠点フィルターで隠れている推奨行は一時的に表示して必ず見せる
+    // （.dimmed-by-filter は display:none !important のため inline !important で上書き）
+    if (row.classList.contains('dimmed-by-filter')) {
+      row.style.setProperty('display', 'grid', 'important');
+      _dndRecForcedRow = row;
+    }
+  }
+
+  const leftPct = (rec.startH / 24) * 100;
+  const widthPct = (rec.durationH / 24) * 100;
+  const slot = document.createElement('div');
+  slot.className = 'dnd-rec-slot';
+  if (leftPct < 8) slot.classList.add('tag-left');
+  else if (leftPct + widthPct > 92) slot.classList.add('tag-right');
+  try {
+    const rows = Array.from(document.querySelectorAll('#dnd-timeline .dnd-row'));
+    if (row && rows.indexOf(row) <= 1) slot.classList.add('near-top');
+  } catch (e) { /* noop */ }
+  slot.style.left = leftPct + '%';
+  slot.style.width = widthPct + '%';
+  slot.innerHTML = '<span class="dnd-rec-slot-tag">🤖 AIおすすめ ' + rec.start + '〜' + rec.end + '</span>';
+  track.appendChild(slot);
+  _dndRecShownFor = caseId;
+  if (doScroll) _dndScrollRecIntoView();
+}
+function _dndScrollRecIntoView() {
+  try {
+    const row = document.querySelector('.dnd-row.dnd-rec-target');
+    const tl = document.getElementById('dnd-timeline');
+    if (!row || !tl) return;
+    if (row.offsetParent === null || row.offsetHeight === 0) return; // まだ非表示なら何もしない
+    const rRect = row.getBoundingClientRect();
+    const tRect = tl.getBoundingClientRect();
+    // 既に（時刻ヘッダーに被らず）見えていれば動かさない
+    if (rRect.top >= tRect.top + 28 && rRect.bottom <= tRect.bottom) return;
+    // #dnd-timeline（ネストしたスクロール領域）内で行が中央に来るよう直接スクロール
+    const rowOffsetInContent = tl.scrollTop + (rRect.top - tRect.top);
+    const target = rowOffsetInContent - (tl.clientHeight - row.offsetHeight) / 2;
+    tl.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  } catch (e) { /* noop */ }
+}
+function hideDndRecommendationTarget() {
+  if (_dndRecForcedRow) { _dndRecForcedRow.style.removeProperty('display'); _dndRecForcedRow = null; }
+  document.querySelectorAll('.dnd-rec-slot').forEach(el => el.remove());
+  document.querySelectorAll('.dnd-row.dnd-rec-target').forEach(el => el.classList.remove('dnd-rec-target'));
+  _dndRecShownFor = null;
+}
+// クリックのみ（ドラッグ未開始）でマウスを離した場合はハイライトを消す
+document.addEventListener('mouseup', function () {
+  if (_dndRecShownFor && !dndDraggingCaseId) hideDndRecommendationTarget();
+});
 
 // ── ドラッグ&ドロップ：既存ブロック移動 ──
 function dndBlockDragStart(e, driverId, idx) {
