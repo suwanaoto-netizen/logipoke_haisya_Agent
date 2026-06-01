@@ -1953,10 +1953,14 @@ function hideMiniWidget() {
    別タブで他ページを開く
    ============================================================ */
 function navTo(page) {
-  // ロジポケ配車Agent本体を新しいタブで開く（page引数はハッシュとして渡す）
-  // ※ 実環境では showPage(page) を呼ぶSPA本体のURLに直接遷移する想定。
+  // ロジポケ配車Agent本体を「単一の業務タブ」で開く（page引数はハッシュとして渡す）。
+  // ・features文字列('noopener')を渡すと一部ブラウザで小さなポップアップ窓になり重い本体が
+  //   うまく開かないため、features は付けない（＝通常のタブ）。
+  // ・名前付きターゲットで既存タブを再利用。2回目以降は同一タブのハッシュ変更だけになり、
+  //   index.html 側の hashchange→applyHashRoute でリロードなしにスムーズ遷移する。
   const url = 'index.html#' + encodeURIComponent(page);
-  window.open(url, '_blank', 'noopener');
+  const win = window.open(url, 'logipokeMain');
+  if (win) { try { win.focus(); } catch (e) {} }
 
   // 通話中なら、別タブを開いたことを示すバナーを一時表示
   if (aiState === 'busy') {
