@@ -7,7 +7,8 @@
 
 | ファイル | 役割 |
 | --- | --- |
-| `index.html` | 配車管理画面（メイン）|
+| `index.html` | 配車計画表（新デザイン / React standalone バンドル。ブラウザ上で自己展開して動作）|
+| `index.legacy.html` | 旧・配車管理画面（フル機能 + 7層データモデル連携）。新デザイン導入前の稼働版を保全 |
 | `ai-phone-reception.html` | AI 電話受付画面 |
 
 両ページは `localStorage` 経由でデータを連携しています（AI 電話受付で取り込んだ案件が配車管理側の「未処理 / 未割当」に自動反映）。
@@ -26,6 +27,9 @@
 | `migration/verify_model.mjs` | モデルの検証（`node migration/verify_model.mjs`） |
 
 ### 移行状況（プロトタイプ本体）
+
+> 注: 下記の7層データモデル移行は `index.legacy.html`（旧・配車管理画面）に対するものです。
+> 現行の `index.html` は新デザイン（React standalone バンドル）に置き換わっています。
 
 現行 UI を壊さない「ストラングラー方式」で段階移行しています。
 
