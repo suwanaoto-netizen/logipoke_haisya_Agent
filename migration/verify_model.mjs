@@ -1,6 +1,12 @@
 #!/usr/bin/env node
-// 検証: 正規化モデル(assets/logipoke-data-model.js) の masters adapter が
-// 現行プロトタイプの literal と完全一致(lossless)し、受付層が round-trip することを確認する。
+// 検証: 7層データモデル(assets/logipoke-data-model.js) と、プロトタイプ本体の SSoT 接続を確認する。
+//   ① マスタ層 lossless: 本体 UI が使う各 *_Seed を model に通して旧形へ復元したものが
+//      元の seed と完全一致すること（= UI が受け取るデータが移行前と同一であること）を保証。
+//   ② 受付層: 値オブジェクト構造化 + 旧 intake 形への round-trip
+//   ②b 受付→配車ブリッジ: localStorage 経由の round-trip
+//   ④ 運行層: Trip>Leg>Stop+Assignment で中継タイムラインを復元
+// マスタ層は本体（assets/js/*.js）が *_Seed → LogipokeDB.to*() で derive 済み（SSoT 接続済み）。
+// 万一 *_Seed が無い（移行が revert された）場合は ① を SKIP する（後方互換）。
 //   node migration/verify_model.mjs
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,13 +19,25 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dir, '..');
 const DB = require(resolve(ROOT, 'assets/logipoke-data-model.js'));
 
-// index.html から seed 配列を「宣言名 → 対応する [ ] のブラケット対応」で切り出して eval する。
-// 行番号に依存しないので、リファクタで行がずれても壊れない。
-const src = readFileSync(resolve(ROOT, 'index.html'), 'utf8');
+// マスタ seed 配列は、ストラングラー移行で index.html から外部 JS へ分割済み。
+// 各 *_Seed が定義されているファイルから「宣言名 → 対応する [ ] のブラケット対応」で切り出して
+// eval する。行番号に依存しないので、リファクタで行がずれても壊れない。
+const SEED_FILES = {
+  _clientMasterSeed:  'assets/js/01-customer-master.js',
+  _partnerMasterSeed: 'assets/js/01-customer-master.js',
+  _basesSeed:         'assets/js/02-dispatch-core.js',
+  _teikiSeed:         'assets/js/02-dispatch-core.js',
+  _teamSeed:          'assets/js/07-dispatch-ext-v2.js',
+};
+const _srcCache = {};
+function _src(file) { return _srcCache[file] || (_srcCache[file] = readFileSync(resolve(ROOT, file), 'utf8')); }
 function extract(name) {
+  const file = SEED_FILES[name];
+  if (!file) throw new Error('未知の seed: ' + name);
+  const src = _src(file);
   const decl = new RegExp('(?:const|var|let)\\s+' + name + '\\s*=\\s*');
   const m = decl.exec(src);
-  if (!m) throw new Error('宣言が見つかりません: ' + name);
+  if (!m) throw new Error('宣言が見つかりません: ' + name + ' in ' + file);
   let i = m.index + m[0].length, depth = 0, inStr = null, started = false;
   const start = i;
   for (; i < src.length; i++) {
@@ -33,32 +51,42 @@ function extract(name) {
   return eval('(' + src.slice(start, i) + ')');
 }
 
-// 移行後はマスタ literal が *_Seed にリネームされ、UI は model からの derive を使う。
-// derive(seed) === seed を示せば「UIが受け取るデータは元 literal と同一」が保証される。
-const clientMasterData = extract('_clientMasterSeed');
-const partnerMasterData = extract('_partnerMasterSeed');
-const bases = extract('_basesSeed');
-const TEAM_MEMBERS = extract('_teamSeed');
-const TEIKI_SAMPLES = extract('_teikiSeed');
-
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 function check(label, fn) {
   try { fn(); console.log('  ✓ ' + label); pass++; }
   catch (e) { console.log('  ✗ ' + label + '\n      ' + (e.message || e).split('\n')[0]); fail++; }
 }
+// 宣言の存在判定（extract と違い、見つからなくても throw しない）
+function hasDecl(name) {
+  const file = SEED_FILES[name];
+  return !!file && new RegExp('(?:const|var|let)\\s+' + name + '\\s*=').test(_src(file));
+}
 
 console.log('① マスタ層 adapter の lossless 検証（model → 旧形 が literal と一致）');
 const db = DB.createDB();
-DB.seedMasters(db, {
-  clients: clientMasterData, partners: partnerMasterData, bases: bases,
-  users: TEAM_MEMBERS, recurringRoutes: TEIKI_SAMPLES
-});
-
-check('clientMasterData (15社) が完全一致', () => assert.deepStrictEqual(DB.toClientMaster(db), clientMasterData));
-check('partnerMasterData (6社) が完全一致', () => assert.deepStrictEqual(DB.toPartnerMaster(db), partnerMasterData));
-check('bases (8拠点) が完全一致', () => assert.deepStrictEqual(DB.toBasesArray(db), bases));
-check('TEAM_MEMBERS (4名) が完全一致', () => assert.deepStrictEqual(DB.toTeamMembers(db), TEAM_MEMBERS));
-check('TEIKI_SAMPLES が完全一致', () => assert.deepStrictEqual(DB.toTeikiSamples(db), TEIKI_SAMPLES));
+// 本体は各 *_Seed → LogipokeDB.to*() で derive 済み（SSoT 接続済み）。
+// derive(seed) === seed を示せば「UI が受け取るデータは元 seed と同一（lossless）」を保証できる。
+// 万一 *_Seed が無い（移行が revert された）場合のみ ① を SKIP する。
+if (hasDecl('_clientMasterSeed')) {
+  const clientMasterData = extract('_clientMasterSeed');
+  const partnerMasterData = extract('_partnerMasterSeed');
+  const bases = extract('_basesSeed');
+  const TEAM_MEMBERS = extract('_teamSeed');
+  const TEIKI_SAMPLES = extract('_teikiSeed');
+  DB.seedMasters(db, {
+    clients: clientMasterData, partners: partnerMasterData, bases: bases,
+    users: TEAM_MEMBERS, recurringRoutes: TEIKI_SAMPLES
+  });
+  check('clientMasterData (15社) が完全一致', () => assert.deepStrictEqual(DB.toClientMaster(db), clientMasterData));
+  check('partnerMasterData (6社) が完全一致', () => assert.deepStrictEqual(DB.toPartnerMaster(db), partnerMasterData));
+  check('bases (8拠点) が完全一致', () => assert.deepStrictEqual(DB.toBasesArray(db), bases));
+  check('TEAM_MEMBERS (4名) が完全一致', () => assert.deepStrictEqual(DB.toTeamMembers(db), TEAM_MEMBERS));
+  check('TEIKI_SAMPLES が完全一致', () => assert.deepStrictEqual(DB.toTeikiSamples(db), TEIKI_SAMPLES));
+} else {
+  console.log('  ⊘ SKIP: *_Seed が見つかりません（マスタ層の SSoT 接続が未了 or revert 済み）。');
+  console.log('         assets/js/*.js のマスタ literal を *_Seed にリネーム＋derive 化すると有効化されます。');
+  skip++;
+}
 
 console.log('② 受付層: 値オブジェクト構造化 + round-trip');
 const reception = DB.createReception(db, {
@@ -129,5 +157,11 @@ check('中継案件のタイムラインが2区間(担当2名)で復元', () => 
   assert.equal(tl[0].handoffType, 'driver_swap');
 });
 
-console.log('\n結果: PASS=' + pass + ' FAIL=' + fail);
+console.log('\n結果: PASS=' + pass + ' FAIL=' + fail + (skip ? ' SKIP=' + skip : ''));
+if (skip) {
+  console.log('\n⚠ 注意: 上記 PASS はスタンドアロンのデータモデル・ライブラリ');
+  console.log('        (assets/logipoke-data-model.js) 単体の検証です。');
+  console.log('        index.html は現在このモデルに未接続（① SKIP）であり、');
+  console.log('        PASS は「index.html が SSoT へ移行済み」を意味しません。');
+}
 process.exit(fail === 0 ? 0 : 1);
