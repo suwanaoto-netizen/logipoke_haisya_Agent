@@ -7,7 +7,7 @@
 
 | ファイル | 役割 |
 | --- | --- |
-| `index.html` | 配車計画表（新デザイン / React standalone バンドル。ブラウザ上で自己展開して動作）|
+| `index.html` | 配車計画表（新デザイン / React standalone バンドル）。7層データモデル + AI受付ブリッジに接続済み |
 | `index.legacy.html` | 旧・配車管理画面（フル機能 + 7層データモデル連携）。新デザイン導入前の稼働版を保全 |
 | `ai-phone-reception.html` | AI 電話受付画面 |
 
@@ -21,6 +21,8 @@
 | ファイル | 役割 |
 | --- | --- |
 | `assets/logipoke-data-model.js` | 7層 正規化データモデル本体（ブラウザ `window.LogipokeDB` / Node 両対応） |
+| `assets/logipoke-design-bridge.js` | 新デザイン ⇄ 7層モデル ブリッジ。AI受付(Reception)を `window.LP_DATA` に接続 |
+| `migration/repack_design.mjs` | 新デザインバンドルへ AI受付ライブ取込みを注入する再パックツール |
 | `docs/ideal-data-model.md` | データモデル設計書（7層 + 値オブジェクト） |
 | `docs/operation-layer-deep-dive.md` | 運行層 Trip/Leg/Stop/Assignment の深掘り |
 | `db/schema.sql` | 将来のバックエンド用 PostgreSQL DDL（in-browser 版と参照規約を一致） |
