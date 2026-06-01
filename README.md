@@ -7,8 +7,7 @@
 
 | ファイル | 役割 |
 | --- | --- |
-| `index.html` | 配車計画表（新デザイン / React standalone バンドル）。7層データモデル + AI受付ブリッジに接続済み |
-| `index.legacy.html` | 旧・配車管理画面（フル機能 + 7層データモデル連携）。新デザイン導入前の稼働版を保全 |
+| `index.html` | 配車管理画面（メイン）|
 | `ai-phone-reception.html` | AI 電話受付画面 |
 
 両ページは `localStorage` 経由でデータを連携しています（AI 電話受付で取り込んだ案件が配車管理側の「未処理 / 未割当」に自動反映）。
@@ -21,17 +20,12 @@
 | ファイル | 役割 |
 | --- | --- |
 | `assets/logipoke-data-model.js` | 7層 正規化データモデル本体（ブラウザ `window.LogipokeDB` / Node 両対応） |
-| `assets/logipoke-design-bridge.js` | 新デザイン ⇄ 7層モデル ブリッジ。AI受付(Reception)を `window.LP_DATA` に接続 |
-| `migration/repack_design.mjs` | 新デザインバンドルへ AI受付ライブ取込みを注入する再パックツール |
 | `docs/ideal-data-model.md` | データモデル設計書（7層 + 値オブジェクト） |
 | `docs/operation-layer-deep-dive.md` | 運行層 Trip/Leg/Stop/Assignment の深掘り |
 | `db/schema.sql` | 将来のバックエンド用 PostgreSQL DDL（in-browser 版と参照規約を一致） |
 | `migration/verify_model.mjs` | モデルの検証（`node migration/verify_model.mjs`） |
 
 ### 移行状況（プロトタイプ本体）
-
-> 注: 下記の7層データモデル移行は `index.legacy.html`（旧・配車管理画面）に対するものです。
-> 現行の `index.html` は新デザイン（React standalone バンドル）に置き換わっています。
 
 現行 UI を壊さない「ストラングラー方式」で段階移行しています。
 
