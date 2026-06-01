@@ -1,6 +1,12 @@
 #!/usr/bin/env node
-// 検証: 正規化モデル(assets/logipoke-data-model.js) の masters adapter が
-// 現行プロトタイプの literal と完全一致(lossless)し、受付層が round-trip することを確認する。
+// 検証: スタンドアロンのデータモデル(assets/logipoke-data-model.js) 単体が
+//   - 受付層: 値オブジェクト構造化 + 旧 intake 形への round-trip
+//   - 受付→配車ブリッジ: localStorage 経由の round-trip
+//   - 運行層: Trip>Leg>Stop+Assignment で中継タイムラインを復元
+//   を満たすことを確認する（ライブラリ単体の検証）。
+// ① マスタ層 lossless（model→旧形 が index.html の literal と一致）は、index.html が
+// SSoT に接続済み（マスタ literal が *_Seed にリネーム済み）の場合のみ実行し、未接続なら SKIP する。
+// → PASS は「ライブラリが正しい」ことを示し、「index.html が移行済み」を意味しない。
 //   node migration/verify_model.mjs
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -33,32 +39,44 @@ function extract(name) {
   return eval('(' + src.slice(start, i) + ')');
 }
 
-// 移行後はマスタ literal が *_Seed にリネームされ、UI は model からの derive を使う。
-// derive(seed) === seed を示せば「UIが受け取るデータは元 literal と同一」が保証される。
-const clientMasterData = extract('_clientMasterSeed');
-const partnerMasterData = extract('_partnerMasterSeed');
-const bases = extract('_basesSeed');
-const TEAM_MEMBERS = extract('_teamSeed');
-const TEIKI_SAMPLES = extract('_teikiSeed');
-
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 function check(label, fn) {
   try { fn(); console.log('  ✓ ' + label); pass++; }
   catch (e) { console.log('  ✗ ' + label + '\n      ' + (e.message || e).split('\n')[0]); fail++; }
 }
+// 宣言の存在判定（extract と違い、見つからなくても throw しない）
+function hasDecl(name) {
+  return new RegExp('(?:const|var|let)\\s+' + name + '\\s*=').test(src);
+}
 
 console.log('① マスタ層 adapter の lossless 検証（model → 旧形 が literal と一致）');
 const db = DB.createDB();
-DB.seedMasters(db, {
-  clients: clientMasterData, partners: partnerMasterData, bases: bases,
-  users: TEAM_MEMBERS, recurringRoutes: TEIKI_SAMPLES
-});
-
-check('clientMasterData (15社) が完全一致', () => assert.deepStrictEqual(DB.toClientMaster(db), clientMasterData));
-check('partnerMasterData (6社) が完全一致', () => assert.deepStrictEqual(DB.toPartnerMaster(db), partnerMasterData));
-check('bases (8拠点) が完全一致', () => assert.deepStrictEqual(DB.toBasesArray(db), bases));
-check('TEAM_MEMBERS (4名) が完全一致', () => assert.deepStrictEqual(DB.toTeamMembers(db), TEAM_MEMBERS));
-check('TEIKI_SAMPLES が完全一致', () => assert.deepStrictEqual(DB.toTeikiSamples(db), TEIKI_SAMPLES));
+// この検証は「index.html が SSoT に接続済み」= マスタ literal が *_Seed にリネームされ、
+// UI が model からの derive を使う状態でのみ成立する（derive(seed) === seed を示せば
+// 「UI が受け取るデータは元 literal と同一」を保証できる）。
+// 現行の index.html はまだ SSoT 未接続（clientMasterData 等のインライン literal を直接使用）
+// のため、*_Seed が無い場合は本検証をスキップし、未接続であることを明示する。
+if (hasDecl('_clientMasterSeed')) {
+  const clientMasterData = extract('_clientMasterSeed');
+  const partnerMasterData = extract('_partnerMasterSeed');
+  const bases = extract('_basesSeed');
+  const TEAM_MEMBERS = extract('_teamSeed');
+  const TEIKI_SAMPLES = extract('_teikiSeed');
+  DB.seedMasters(db, {
+    clients: clientMasterData, partners: partnerMasterData, bases: bases,
+    users: TEAM_MEMBERS, recurringRoutes: TEIKI_SAMPLES
+  });
+  check('clientMasterData (15社) が完全一致', () => assert.deepStrictEqual(DB.toClientMaster(db), clientMasterData));
+  check('partnerMasterData (6社) が完全一致', () => assert.deepStrictEqual(DB.toPartnerMaster(db), partnerMasterData));
+  check('bases (8拠点) が完全一致', () => assert.deepStrictEqual(DB.toBasesArray(db), bases));
+  check('TEAM_MEMBERS (4名) が完全一致', () => assert.deepStrictEqual(DB.toTeamMembers(db), TEAM_MEMBERS));
+  check('TEIKI_SAMPLES が完全一致', () => assert.deepStrictEqual(DB.toTeikiSamples(db), TEIKI_SAMPLES));
+} else {
+  console.log('  ⊘ SKIP: index.html は SSoT(assets/logipoke-data-model.js) 未接続です。');
+  console.log('         index.html は clientMasterData 等のインライン literal を直接使用中で、');
+  console.log('         *_Seed へのリネーム＋derive 化が未了のため lossless 検証は適用外です。');
+  skip++;
+}
 
 console.log('② 受付層: 値オブジェクト構造化 + round-trip');
 const reception = DB.createReception(db, {
@@ -129,5 +147,11 @@ check('中継案件のタイムラインが2区間(担当2名)で復元', () => 
   assert.equal(tl[0].handoffType, 'driver_swap');
 });
 
-console.log('\n結果: PASS=' + pass + ' FAIL=' + fail);
+console.log('\n結果: PASS=' + pass + ' FAIL=' + fail + (skip ? ' SKIP=' + skip : ''));
+if (skip) {
+  console.log('\n⚠ 注意: 上記 PASS はスタンドアロンのデータモデル・ライブラリ');
+  console.log('        (assets/logipoke-data-model.js) 単体の検証です。');
+  console.log('        index.html は現在このモデルに未接続（① SKIP）であり、');
+  console.log('        PASS は「index.html が SSoT へ移行済み」を意味しません。');
+}
 process.exit(fail === 0 ? 0 : 1);

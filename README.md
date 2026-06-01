@@ -10,37 +10,58 @@
 | `index.html` | 配車管理画面（メイン）|
 | `ai-phone-reception.html` | AI 電話受付画面 |
 
-両ページは `localStorage` 経由でデータを連携しています（AI 電話受付で取り込んだ案件が配車管理側の「未処理 / 未割当」に自動反映）。
+両ページは `localStorage`（キー: `logipoke_ai_intake_queue`）経由でデータを連携しています（AI 電話受付で取り込んだ案件が配車管理側の「未処理 / 未割当」に自動反映）。
 
 ## データモデル / アーキテクチャ
 
-理想の 7 層データモデル（マスタ / 受付 / 案件 / 運行 / 法令 / 運賃・請求 / 横断）を採用しています。
-設計の単一情報源（SSoT）は `assets/logipoke-data-model.js`（バックエンド不要のフロント実装）です。
+> **⚠ 実装の実態（重要）**
+> 7 層データモデルと SSoT は **設計・スタンドアロンのライブラリとしては存在しますが、
+> 現行プロトタイプ本体（`index.html` / `ai-phone-reception.html`）にはまだ接続されていません。**
+> 過去に接続を試みたコミットは revert 済みで、本体は今もインライン literal と
+> 旧 `localStorage` キーで動作しています。以下の 7 層モデル関連ファイルは
+> **未接続の構想（設計・将来用）** として扱ってください。
 
-| ファイル | 役割 |
-| --- | --- |
-| `assets/logipoke-data-model.js` | 7層 正規化データモデル本体（ブラウザ `window.LogipokeDB` / Node 両対応） |
-| `docs/ideal-data-model.md` | データモデル設計書（7層 + 値オブジェクト） |
-| `docs/operation-layer-deep-dive.md` | 運行層 Trip/Leg/Stop/Assignment の深掘り |
-| `db/schema.sql` | 将来のバックエンド用 PostgreSQL DDL（in-browser 版と参照規約を一致） |
-| `migration/verify_model.mjs` | モデルの検証（`node migration/verify_model.mjs`） |
+理想形として 7 層データモデル（マスタ / 受付 / 案件 / 運行 / 法令 / 運賃・請求 / 横断）を設計しており、
+その単一情報源（SSoT）候補が `assets/logipoke-data-model.js`（バックエンド不要のフロント実装）です。
 
-### 移行状況（プロトタイプ本体）
+### 未接続の構想（設計・ライブラリ・将来用）
 
-現行 UI を壊さない「ストラングラー方式」で段階移行しています。
+| ファイル | 役割 | 接続状況 |
+| --- | --- | --- |
+| `assets/logipoke-data-model.js` | 7層 正規化データモデル本体（`window.LogipokeDB` / Node 両対応） | ⛔ 本体 UI からは未参照 |
+| `docs/ideal-data-model.md` | データモデル設計書（7層 + 値オブジェクト） | 設計のみ |
+| `docs/operation-layer-deep-dive.md` | 運行層 Trip/Leg/Stop/Assignment の深掘り | 設計のみ |
+| `db/schema.sql` | 将来のバックエンド用 PostgreSQL DDL（34テーブル） | ⛔ 未使用（バックエンド未実装） |
+| `migration/verify_model.mjs` | 上記ライブラリ**単体**の検証（`node migration/verify_model.mjs`） | ✅ ライブラリのみ検証可 |
 
-- ✅ **① マスタ層**: 取引先 / 協力会社 / 拠点 / 社内ユーザー / 定期便 を正規化ストア(SSoT)から
-  derive するよう変更（旧 literal と完全一致を `verify_model.mjs` で検証済み = lossless）。
-- ✅ **② 受付層**: AI 電話受付を `Reception(+AiExtraction)` として正規化し、住所 / 荷 / 期限を
-  値オブジェクト（Location / Cargo / TimeWindow）へ構造化。`localStorage` の生キュー
-  （旧 `logipoke_ai_intake_queue`）を正規化キー（`logipoke_db_receptions_v1`）へ置換。
-- 🔜 ドライバー / 車両 / 案件 / 運行（scheduleData・dnd・assignments）の各画面は、
-  同じモデルへ順次移行予定（運行層は `Trip>Leg>Stop+Assignment` に集約）。
+### 現行プロトタイプ本体の実態
+
+- **マスタ層**: `index.html` は `clientMasterData` / `partnerMasterData` / `TEAM_MEMBERS` /
+  `TEIKI_SAMPLES` など **インライン literal を直接使用**。SSoT(`LogipokeDB`)からの derive には
+  **未移行**（新デザイン＋SSoT 接続を入れたコミットは revert 済み）。
+- **受付層**: AI 電話受付 ↔ 配車本体の連携は **旧キー `logipoke_ai_intake_queue`**（生 JSON キュー）で実装。
+  設計上の正規化キー `logipoke_db_receptions_v1` / `Reception(+AiExtraction)` への構造化は**未接続**。
+- **その他**（ドライバー / 車両 / 案件 / 運行）も本体は独自の literal / state で動作。
+
+### 検証スクリプトについて
 
 ```bash
-# モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）
 node migration/verify_model.mjs
 ```
+
+このスクリプトが検証するのは **`assets/logipoke-data-model.js` ライブラリ単体**（値オブジェクト構造化 /
+受付ブリッジの round-trip / 中継運行のタイムライン復元）です。
+**① マスタ層の lossless 検証は、本体 `index.html` が SSoT に未接続のため SKIP されます。**
+表示される `PASS` は「ライブラリが正しい」ことを示すもので、「`index.html` が移行済み」を意味しません。
+
+### 今後（移行の方向性）
+
+現行 UI を壊さない「ストラングラー方式」での段階移行を想定しています（いずれも**未着手 / 一部 revert 済み**）。
+
+1. `index.html` に `assets/logipoke-data-model.js` を読み込み、マスタ literal を `*_Seed` 化して
+   `LogipokeDB` からの derive に置換（`verify_model.mjs` の ① が緑になることを移行完了の判定に使う）。
+2. 受付キューを `logipoke_ai_intake_queue` → 正規化 `Reception` ストアへ移行。
+3. 運行層を `Trip>Leg>Stop+Assignment` へ集約。
 
 ## ローカルで動かす
 
