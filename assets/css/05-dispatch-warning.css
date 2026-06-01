@@ -1,0 +1,478 @@
+/* ── 警告サマリーバー ── */
+.dispatch-warning-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: linear-gradient(90deg, #fffbeb 0%, #fef3c7 100%);
+  border-bottom: 1px solid #fde68a;
+  font-size: 12px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+}
+.dispatch-warning-bar.all-clear {
+  background: linear-gradient(90deg, #f0fdf4 0%, #dcfce7 100%);
+  border-bottom-color: #bbf7d0;
+}
+.dwb-title {
+  font-weight: 700;
+  color: #92400e;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.dispatch-warning-bar.all-clear .dwb-title { color: #065f46; }
+.dwb-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+.dwb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s;
+  border: 1px solid transparent;
+}
+.dwb-chip:hover { transform: translateY(-1px); filter: brightness(1.05); }
+.dwb-chip.violation { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+.dwb-chip.warn { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.dwb-chip.unconfirmed { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+.dwb-chip.confirmed { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+.dwb-chip-num { font-family: 'Inter', sans-serif; font-weight: 800; }
+.dwb-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.dwb-btn-bulk {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  background: var(--orange);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.dwb-btn-bulk:hover { background: #ea580c; transform: translateY(-1px); box-shadow: 0 2px 6px rgba(249, 115, 22, 0.3); }
+.dwb-btn-bulk:disabled { background: #d1d5db; color: #6b7280; cursor: not-allowed; transform: none; box-shadow: none; }
+/* 「当日未確定 N件を一括仮確定」ボタンのみ新規登録と同じグリーンに（選択モードはオレンジ維持）。
+   :disabled 時は上の .dwb-btn-bulk:disabled（グレー）を活かすため :not(:disabled) を付与 */
+#dwb-btn-bulk-confirm:not(:disabled) { background: #1a7a5e; }
+#dwb-btn-bulk-confirm:not(:disabled):hover { background: #155f49; box-shadow: 0 2px 6px rgba(26, 122, 94, 0.3); }
+.dwb-btn-undo, .dwb-btn-redo {
+  width: 28px; height: 28px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  transition: all 0.15s;
+}
+.dwb-btn-undo:hover:not(:disabled),
+.dwb-btn-redo:hover:not(:disabled) {
+  background: #f3f4f6;
+  color: #1a7a5e;
+  border-color: #1a7a5e;
+}
+.dwb-btn-undo:disabled, .dwb-btn-redo:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── ドライバー行 拘束時間ゲージ ── */
+.dnd-duty-gauge {
+  margin-top: 2px;
+  width: 100%;
+  height: 3px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+.dnd-duty-gauge-fill {
+  height: 100%;
+  transition: width 0.3s, background 0.3s;
+}
+.dnd-duty-gauge-fill.safe { background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%); }
+.dnd-duty-gauge-fill.warn { background: linear-gradient(90deg, #f59e0b 0%, #fbbf24 100%); }
+.dnd-duty-gauge-fill.danger { background: linear-gradient(90deg, #dc2626 0%, #ef4444 100%); }
+.dnd-duty-label {
+  font-size: 8.5px;
+  color: #6b7280;
+  margin-top: 1px;
+  display: flex;
+  justify-content: space-between;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  line-height: 1.1;
+}
+.dnd-duty-label .duty-val { color: #1a7a5e; }
+.dnd-duty-label .duty-val.warn { color: #d97706; }
+.dnd-duty-label .duty-val.danger { color: #dc2626; }
+
+/* ── 配車ブロックの選択チェック / 確定状態 ── */
+.dnd-block.confirmed-block {
+  box-shadow: 0 0 0 2px #16a34a inset, 0 2px 4px rgba(22, 163, 74, 0.2);
+}
+.dnd-block.confirmed-block::after {
+  content: '✓';
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #fff;
+  background: #16a34a;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.dnd-block-select {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1.5px solid #fff;
+  display: none;
+  cursor: pointer;
+  z-index: 5;
+  align-items: center;
+  justify-content: center;
+}
+.bulk-select-mode .dnd-block:not(.is-confirmed):not([data-preset="true"]) .dnd-block-select {
+  display: flex;
+}
+.dnd-block.bulk-selected {
+  box-shadow: 0 0 0 3px #f97316 inset, 0 2px 8px rgba(249, 115, 22, 0.4);
+  transform: translateY(-1px);
+}
+.dnd-block.bulk-selected .dnd-block-select {
+  background: #f97316;
+  border-color: #fff;
+}
+.dnd-block.bulk-selected .dnd-block-select::after {
+  content: '✓';
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+/* ── 右ペイン詳細スライドオーバー ── */
+.dnd-detail-pane {
+  position: fixed;
+  top: 0;
+  right: -460px;
+  width: 440px;
+  height: 100vh;
+  background: #fff;
+  border-left: 1px solid #e5e7eb;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  z-index: 950;
+  display: flex;
+  flex-direction: column;
+  transition: right 0.25s ease-out;
+  overflow: hidden;
+}
+.dnd-detail-pane.open { right: 0; }
+.dnd-detail-header {
+  background: var(--sidebar-bg);
+  color: #fff;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.dnd-detail-header-title {
+  font-size: 13px;
+  font-weight: 700;
+  flex: 1;
+}
+.dnd-detail-close {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: #fff;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.dnd-detail-close:hover { background: rgba(255, 255, 255, 0.3); }
+.dnd-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+.dnd-detail-section {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.dnd-detail-section:last-child { border-bottom: none; }
+.dnd-detail-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #6b7280;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.dnd-detail-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.dnd-detail-label { color: #6b7280; min-width: 80px; flex-shrink: 0; }
+.dnd-detail-val { color: #111827; font-weight: 500; flex: 1; }
+.dnd-detail-client {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 4px;
+}
+.dnd-detail-route {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #4b5563;
+  margin-bottom: 8px;
+}
+.dnd-detail-route-arrow { color: var(--accent); font-weight: 700; }
+.dnd-detail-time-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  background: var(--accent-pale);
+  border-radius: 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sidebar-bg);
+}
+.dnd-detail-urgent-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 10px;
+  margin-left: 6px;
+}
+.dnd-detail-actions {
+  padding: 10px 14px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.dnd-detail-btn {
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: none;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s;
+  white-space: nowrap;
+  font-family: 'Noto Sans JP', sans-serif;
+  flex-shrink: 0;
+}
+.dnd-detail-btn svg { width:11px; height:11px; flex-shrink:0; }
+/* メインアクション（確定）だけ flex で右端まで広げる */
+.dnd-detail-btn.primary {
+  background: #1a7a5e;
+  color: #fff;
+  flex: 1;
+  min-width: 110px;
+}
+.dnd-detail-btn.primary:hover { background: #155f49; box-shadow: 0 2px 6px rgba(26, 122, 94, 0.3); }
+.dnd-detail-btn.secondary {
+  background: #fff;
+  color: var(--text-primary);
+  border: 1px solid #d1d5db;
+}
+.dnd-detail-btn.secondary:hover { background: #f3f4f6; }
+.dnd-detail-btn.partner {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+.dnd-detail-btn.partner:hover { background: #fde68a; border-color: #f59e0b; color: #78350f; }
+.dnd-detail-btn.relay-add {
+  background: #f0fdfa;
+  color: #0f766e;
+  border: 1.5px solid #0d9488;
+  padding: 6px 11px;
+}
+.dnd-detail-btn.relay-add:hover {
+  background: #0d9488; color: #fff;
+  box-shadow: 0 2px 6px rgba(13,148,136,.3);
+}
+.dnd-detail-btn:disabled {
+  background: #e5e7eb !important;
+  color: #9ca3af !important;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.dnd-detail-law-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.dnd-detail-law-chip.ok { background: #d1fae5; color: #065f46; }
+.dnd-detail-law-chip.warn { background: #fef3c7; color: #92400e; }
+.dnd-detail-law-chip.violation { background: #fee2e2; color: #991b1b; }
+
+/* ── 一括確定モーダル ── */
+.bulk-confirm-list {
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.bulk-confirm-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+}
+.bulk-confirm-item:last-child { border-bottom: none; }
+.bulk-confirm-item.has-warn { background: #fffbeb; }
+.bulk-confirm-color {
+  width: 4px;
+  height: 30px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.bulk-confirm-main { flex: 1; min-width: 0; }
+.bulk-confirm-client {
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bulk-confirm-meta {
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 1px;
+}
+.bulk-confirm-time {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sidebar-bg);
+  flex-shrink: 0;
+}
+.bulk-confirm-status {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.bulk-confirm-status.ok { background: #d1fae5; color: #065f46; }
+.bulk-confirm-status.warn { background: #fef3c7; color: #92400e; }
+
+/* ── キーボードショートカットヘルプ ── */
+.kbd-help-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.kbd-help-modal-overlay.open { display: flex; }
+.kbd-help-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  width: 500px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.kbd-help-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kbd-help-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.kbd-help-row:last-child { border-bottom: none; }
+.kbd-help-desc { font-size: 13px; color: #374151; }
+.kbd-key {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+  margin-left: 4px;
+}
+
+/* ── ヘルプボタン ── */
+.dwb-btn-help {
+  width: 28px; height: 28px;
+  background: transparent;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #6b7280;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+}
+.dwb-btn-help:hover { background: #fff; color: #1a7a5e; border-color: #1a7a5e; }

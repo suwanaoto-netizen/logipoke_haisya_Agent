@@ -12,6 +12,24 @@
 
 両ページは `localStorage`（キー: `logipoke_ai_intake_queue`）経由でデータを連携しています（AI 電話受付で取り込んだ案件が配車管理側の「未処理 / 未割当」に自動反映）。
 
+### アセット構成（`index.html` の物理分割）
+
+肥大化（旧 41,605 行 / 2.0MB）を避けるため、`index.html` にインラインだった CSS / JS を
+**ビルド不要のまま**外部ファイルへ物理分割しています（`<link>` / `<script src>` で読み込み。
+**読み込み順・挙動は分割前と完全に同一**で、抽出は無損失であることを検証済み）。
+
+| ディレクトリ | 内容 |
+| --- | --- |
+| `assets/css/01-base.css` … `07-settings.css` | 旧 `<style>` ブロック（7ファイル） |
+| `assets/js/01-customer-master.js` … `15-ai-intake-bridge.js` | 旧 `<script>` ブロック（15ファイル） |
+
+- `assets/js/02-dispatch-core.js` が配車コア（データ＋ロジック）の本体で最大。
+- `assets/js/01-customer-master.js` に取引先 / 協力会社などのマスタ literal を含む。
+- Chart.js / html2canvas / jsPDF は従来どおり CDN から読み込み。
+
+> 注: これは「巨大 1 ファイルを**レビュー可能にする**」ための機械的分割です。
+> ファイル内の「データとロジックの分離」「`assets/logipoke-data-model.js` への接続」は別タスク（下記）。
+
 ## データモデル / アーキテクチャ
 
 > **⚠ 実装の実態（重要）**
