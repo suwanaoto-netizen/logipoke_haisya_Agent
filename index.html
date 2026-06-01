@@ -9008,11 +9008,13 @@
     .cust-pattern-chip { font-size:9px;font-weight:700;padding:2px 7px;border-radius:6px;background:#EAF5F0;color:#0D4A3A;border:1px solid #3BB888;white-space:nowrap; }
     </style>
 
+    <!-- 7層 正規化データモデル（SSoT）。マスタ/受付はこのモジュール経由で扱う -->
+    <script src="assets/logipoke-data-model.js"></script>
     <script>
     // ══ 顧客管理データ ══
 
-    // 取引先（案件一覧と連動）
-    const clientMasterData = [
+    // 取引先（正規化ストアへ取り込む seed）
+    const _clientMasterSeed = [
       { id:'CL-001', defaultFormatId:'FMT-001', name:'株式会社○○商事', area:'埼玉県川口市', contact:'山田 花子', tel:'048-111-2222', email:'y.hanako@marumarushouji.co.jp', type:'定期', cases:['20240524001','20240524101','20240524001','20240523090','20240522080','20240521070'] },
       { id:'CL-002', defaultFormatId:'FMT-002', name:'△△食品株式会社', area:'千葉県船橋市', contact:'鈴木 一郎', tel:'047-333-4444', email:'suzuki@sansankm.co.jp', type:'定期', cases:['20240524002','20240524100','20240522055','20240520040'] },
       { defaultFormatId:'FMT-001', id:'CL-003', name:'株式会社□□製作所', area:'茨城県つくば市', contact:'佐藤 二郎', tel:'029-555-6666', email:'sato@kakukakus.co.jp', type:'スポット', cases:['20240524003','20240518020'] },
@@ -9030,8 +9032,8 @@
       { defaultFormatId:'FMT-001', id:'CL-015', name:'全国食品流通株式会社', area:'埼玉県さいたま市', contact:'清水 十四', tel:'048-3333-4444', email:'shimizu@zenkoku-shokuhin.co.jp', type:'定期', cases:['20240517030','20240516020','20240515010','20240514005'] },
     ];
 
-    // 協力会社
-    const partnerMasterData = [
+    // 協力会社（正規化ストアへ取り込む seed）
+    const _partnerMasterSeed = [
       { id:'PT-001', name:'北関東物流株式会社', area:'埼玉県熊谷市', contact:'安藤 清志', tel:'048-222-3333', email:'ando@kitatrans.co.jp', vehicleTypes:['4tウィング','2tトラック'], cases:['20240524100','20240521110'] },
       { id:'PT-002', name:'東海急送株式会社', area:'静岡県浜松市', contact:'伊勢 誠一', tel:'053-444-5555', email:'ise@tokakyuso.co.jp', vehicleTypes:['10tトラック','4tウィング'], cases:['20240519055','20240515010'] },
       { id:'PT-003', name:'九州ネット輸送株式会社', area:'福岡県北九州市', contact:'岡部 雄介', tel:'093-666-7777', email:'okabe@kyunet.co.jp', vehicleTypes:['4tウィング','冷蔵車'], cases:['20240524105'] },
@@ -9039,6 +9041,14 @@
       { id:'PT-005', name:'北海道運輸株式会社', area:'北海道札幌市', contact:'本間 浩二', tel:'011-000-1111', email:'honma@hokkaido-unyu.co.jp', vehicleTypes:['10tトラック','冷蔵車'], cases:['20240521095'] },
       { id:'PT-006', name:'関西エクスプレス株式会社', area:'大阪府堺市', contact:'丸山 隆司', tel:'072-222-3333', email:'maruyama@kansai-ex.co.jp', vehicleTypes:['4tウィング','チャーター'], cases:['20240513002'] },
     ];
+
+    // ── 7層モデルへ移行: マスタは正規化ストア(SSoT)から derive する ──
+    //   旧 clientMasterData / partnerMasterData と完全一致することを
+    //   migration/verify_model.mjs で検証済み（lossless）。
+    const _appDB = (window.LogipokeAppDB = window.LogipokeAppDB || LogipokeDB.createDB());
+    LogipokeDB.seedMasters(_appDB, { clients: _clientMasterSeed, partners: _partnerMasterSeed });
+    const clientMasterData = LogipokeDB.toClientMaster(_appDB);
+    const partnerMasterData = LogipokeDB.toPartnerMaster(_appDB);
 
     // 全案件一覧（未処理+処理中+処理済み+過去案件）
     const allCasesMasterData = [
@@ -12773,8 +12783,8 @@ function saveTeikiCase() {
   closeTeikiModal();
 }
 
-// ── サンプル定期案件データ ──
-var TEIKI_SAMPLES = [
+// ── サンプル定期案件データ（正規化ストアへ取り込む seed）──
+var _teikiSeed = [
   {
     name: '東京〜大阪 定期便',
     pattern: 'trunk',
@@ -12845,6 +12855,10 @@ var TEIKI_SAMPLES = [
     }
   }
 ];
+
+// ── 7層モデルへ移行: 定期便も正規化ストア(SSoT)から derive（旧形と一致を検証済み）──
+LogipokeDB.seedMasters(window.LogipokeAppDB, { recurringRoutes: _teikiSeed });
+var TEIKI_SAMPLES = LogipokeDB.toTeikiSamples(window.LogipokeAppDB);
 
 // 定期案件編集
 function editTeiki(idx) {
@@ -18037,7 +18051,7 @@ function durationToPercent(startStr, endStr) {
 // 既存の個別案件 vehicles[].base は「川口市」等の市区町村名で入っているため、
 // マイグレーション時に aliases を介して baseId に変換する
 // ─────────────────────────────────────────────────────────────
-const bases = [
+const _basesSeed = [
   { id:'B001', name:'川口拠点',  region:'関東', aliases:['川口市','川口','埼玉県川口市'] },
   { id:'B002', name:'戸田拠点',  region:'関東', aliases:['戸田市','戸田','埼玉県戸田市'] },
   { id:'B003', name:'川崎拠点',  region:'関東', aliases:['川崎市','川崎','神奈川県川崎市'] },
@@ -18047,6 +18061,9 @@ const bases = [
   { id:'B007', name:'横浜拠点',  region:'関東', aliases:['横浜市','横浜','神奈川県横浜市'] },
   { id:'B008', name:'大田拠点',  region:'関東', aliases:['大田区','大田','東京都大田区'] },
 ];
+// ── 7層モデルへ移行: 拠点も正規化ストア(SSoT)から derive（旧形と一致を検証済み）──
+LogipokeDB.seedMasters(window.LogipokeAppDB, { bases: _basesSeed });
+const bases = LogipokeDB.toBasesArray(window.LogipokeAppDB);
 const _baseById = Object.fromEntries(bases.map(b => [b.id, b]));
 function getBaseById(id) { return _baseById[id] || null; }
 
@@ -36563,12 +36580,15 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   //  ユーザー / 担当分担モデル
   // ════════════════════════════════════════════════════════════════
   // プロトタイプなので、メンバーリストとして固定で持つ（実運用ではテナント側マスタ）
-  const TEAM_MEMBERS = [
+  const _teamSeed = [
     { id: 'me',  name: '配車 太郎',   color: '#1a7a5e', initial: '太' },
     { id: 'u2',  name: '田中 花子',   color: '#dc2626', initial: '田' },
     { id: 'u3',  name: '佐々木 健',   color: '#7c3aed', initial: '佐' },
     { id: 'u4',  name: '吉田 美咲',   color: '#0891b2', initial: '吉' },
   ];
+  // ── 7層モデルへ移行: 社内ユーザーも正規化ストア(SSoT)から derive（旧形と一致を検証済み）──
+  LogipokeDB.seedMasters(window.LogipokeAppDB, { users: _teamSeed });
+  const TEAM_MEMBERS = LogipokeDB.toTeamMembers(window.LogipokeAppDB);
   const CURRENT_USER_ID = 'me';
 
   // ドライバー担当割当（プロトタイプ初期値：50台を4人のチームに分散）
@@ -41471,19 +41491,31 @@ function _runPartnerStep(index) {
 
   // localStorage 上のキューを全部取り込み、空にする
   function drainIntakeQueue() {
-    var queue = [];
+    var items = [];
+    // ① 正規化 Reception ストア（7層モデル。旧 INTAKE_QUEUE_KEY を置換）
+    try {
+      if (typeof LogipokeDB !== 'undefined') {
+        LogipokeDB.loadReceptions().forEach(function(r){
+          try { items.push(LogipokeDB.receptionToLegacyIntake(r)); } catch(e){}
+        });
+      }
+    } catch(e){}
+    // ② 旧キュー（後方互換のフォールバック）
     try {
       var raw = localStorage.getItem(INTAKE_QUEUE_KEY);
-      queue = raw ? JSON.parse(raw) : [];
-    } catch(e){ queue = []; }
-    if (!Array.isArray(queue) || queue.length === 0) return 0;
+      var legacy = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(legacy)) items = items.concat(legacy);
+    } catch(e){}
+
+    if (items.length === 0) return 0;
 
     var ingested = 0;
-    queue.forEach(function(item){
+    items.forEach(function(item){
       if (ingestIntakeItem(item)) ingested++;
     });
 
-    // 処理済みなのでキューを空にする
+    // 処理済みなので両ストアを空にする
+    try { if (typeof LogipokeDB !== 'undefined') LogipokeDB.clearReceptions(); } catch(e){}
     try { localStorage.removeItem(INTAKE_QUEUE_KEY); } catch(e){}
 
     if (ingested > 0) {
@@ -41570,7 +41602,8 @@ function _runPartnerStep(index) {
 
   // 他タブ（AI電話受付）からの書込み通知
   window.addEventListener('storage', function(ev){
-    if (ev.key === INTAKE_QUEUE_KEY && ev.newValue) {
+    var receptionKey = (typeof LogipokeDB !== 'undefined') ? LogipokeDB.RECEPTION_KEY : null;
+    if ((ev.key === INTAKE_QUEUE_KEY || ev.key === receptionKey) && ev.newValue) {
       drainIntakeQueue();
     }
   });

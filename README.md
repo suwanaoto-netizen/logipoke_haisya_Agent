@@ -12,6 +12,36 @@
 
 両ページは `localStorage` 経由でデータを連携しています（AI 電話受付で取り込んだ案件が配車管理側の「未処理 / 未割当」に自動反映）。
 
+## データモデル / アーキテクチャ
+
+理想の 7 層データモデル（マスタ / 受付 / 案件 / 運行 / 法令 / 運賃・請求 / 横断）を採用しています。
+設計の単一情報源（SSoT）は `assets/logipoke-data-model.js`（バックエンド不要のフロント実装）です。
+
+| ファイル | 役割 |
+| --- | --- |
+| `assets/logipoke-data-model.js` | 7層 正規化データモデル本体（ブラウザ `window.LogipokeDB` / Node 両対応） |
+| `docs/ideal-data-model.md` | データモデル設計書（7層 + 値オブジェクト） |
+| `docs/operation-layer-deep-dive.md` | 運行層 Trip/Leg/Stop/Assignment の深掘り |
+| `db/schema.sql` | 将来のバックエンド用 PostgreSQL DDL（in-browser 版と参照規約を一致） |
+| `migration/verify_model.mjs` | モデルの検証（`node migration/verify_model.mjs`） |
+
+### 移行状況（プロトタイプ本体）
+
+現行 UI を壊さない「ストラングラー方式」で段階移行しています。
+
+- ✅ **① マスタ層**: 取引先 / 協力会社 / 拠点 / 社内ユーザー / 定期便 を正規化ストア(SSoT)から
+  derive するよう変更（旧 literal と完全一致を `verify_model.mjs` で検証済み = lossless）。
+- ✅ **② 受付層**: AI 電話受付を `Reception(+AiExtraction)` として正規化し、住所 / 荷 / 期限を
+  値オブジェクト（Location / Cargo / TimeWindow）へ構造化。`localStorage` の生キュー
+  （旧 `logipoke_ai_intake_queue`）を正規化キー（`logipoke_db_receptions_v1`）へ置換。
+- 🔜 ドライバー / 車両 / 案件 / 運行（scheduleData・dnd・assignments）の各画面は、
+  同じモデルへ順次移行予定（運行層は `Trip>Leg>Stop+Assignment` に集約）。
+
+```bash
+# モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）
+node migration/verify_model.mjs
+```
+
 ## ローカルで動かす
 
 リポジトリを clone してブラウザで `index.html` を開くだけで動作します。
