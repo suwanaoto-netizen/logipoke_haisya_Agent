@@ -1775,6 +1775,10 @@
 
     <link rel="stylesheet" href="assets/css/03-customer.css">
 
+    <!-- 7層データモデル(SSoT)。マスタ層(取引先/協力会社/拠点/社内ユーザー/定期便)は
+         このモデルから derive される（01-customer-master.js / 02-dispatch-core.js / 07-dispatch-ext-v2.js で使用）。
+         必ず各 consumer より前に読み込むこと。 -->
+    <script src="assets/logipoke-data-model.js"></script>
     <script src="assets/js/01-customer-master.js"></script>
     <!-- ===== 収支レポートページ ===== -->
     <div class="page" id="page-report" style="overflow-y:auto !important">

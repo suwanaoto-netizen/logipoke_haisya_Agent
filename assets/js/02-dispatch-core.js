@@ -1169,7 +1169,7 @@ function saveTeikiCase() {
 }
 
 // ── サンプル定期案件データ ──
-var TEIKI_SAMPLES = [
+var _teikiSeed = [
   {
     name: '東京〜大阪 定期便',
     pattern: 'trunk',
@@ -1240,6 +1240,8 @@ var TEIKI_SAMPLES = [
     }
   }
 ];
+// SSoT(LogipokeDB)からderive。未読込時はseedにフォールバック（lossless検証済み）
+var TEIKI_SAMPLES = (typeof LogipokeDB!=='undefined'&&LogipokeDB.toTeikiSamples) ? LogipokeDB.toTeikiSamples(LogipokeDB.seedMasters(LogipokeDB.createDB(),{recurringRoutes:_teikiSeed})) : _teikiSeed;
 
 // 定期案件編集
 function editTeiki(idx) {
@@ -6432,7 +6434,7 @@ function durationToPercent(startStr, endStr) {
 // 既存の個別案件 vehicles[].base は「川口市」等の市区町村名で入っているため、
 // マイグレーション時に aliases を介して baseId に変換する
 // ─────────────────────────────────────────────────────────────
-const bases = [
+const _basesSeed = [
   { id:'B001', name:'川口拠点',  region:'関東', aliases:['川口市','川口','埼玉県川口市'] },
   { id:'B002', name:'戸田拠点',  region:'関東', aliases:['戸田市','戸田','埼玉県戸田市'] },
   { id:'B003', name:'川崎拠点',  region:'関東', aliases:['川崎市','川崎','神奈川県川崎市'] },
@@ -6442,6 +6444,8 @@ const bases = [
   { id:'B007', name:'横浜拠点',  region:'関東', aliases:['横浜市','横浜','神奈川県横浜市'] },
   { id:'B008', name:'大田拠点',  region:'関東', aliases:['大田区','大田','東京都大田区'] },
 ];
+// SSoT(LogipokeDB)からderive。未読込時はseedにフォールバック（lossless検証済み）
+const bases = (typeof LogipokeDB!=='undefined'&&LogipokeDB.toBasesArray) ? LogipokeDB.toBasesArray(LogipokeDB.seedMasters(LogipokeDB.createDB(),{bases:_basesSeed})) : _basesSeed;
 const _baseById = Object.fromEntries(bases.map(b => [b.id, b]));
 function getBaseById(id) { return _baseById[id] || null; }
 

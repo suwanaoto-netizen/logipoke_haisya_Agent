@@ -8,12 +8,14 @@
   //  ユーザー / 担当分担モデル
   // ════════════════════════════════════════════════════════════════
   // プロトタイプなので、メンバーリストとして固定で持つ（実運用ではテナント側マスタ）
-  const TEAM_MEMBERS = [
+  const _teamSeed = [
     { id: 'me',  name: '配車 太郎',   color: '#1a7a5e', initial: '太' },
     { id: 'u2',  name: '田中 花子',   color: '#dc2626', initial: '田' },
     { id: 'u3',  name: '佐々木 健',   color: '#7c3aed', initial: '佐' },
     { id: 'u4',  name: '吉田 美咲',   color: '#0891b2', initial: '吉' },
   ];
+  // SSoT(LogipokeDB)からderive。未読込時はseedにフォールバック（lossless検証済み）
+  const TEAM_MEMBERS = (typeof LogipokeDB!=='undefined'&&LogipokeDB.toTeamMembers) ? LogipokeDB.toTeamMembers(LogipokeDB.seedMasters(LogipokeDB.createDB(),{users:_teamSeed})) : _teamSeed;
   const CURRENT_USER_ID = 'me';
 
   // ドライバー担当割当（プロトタイプ初期値：50台を4人のチームに分散）

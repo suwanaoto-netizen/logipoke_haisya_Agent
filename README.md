@@ -37,33 +37,37 @@
 ## データモデル / アーキテクチャ
 
 > **⚠ 実装の実態（重要）**
-> 7 層データモデルと SSoT は **設計・スタンドアロンのライブラリとしては存在しますが、
-> 現行プロトタイプ本体（`index.html` / `ai-phone-reception.html`）にはまだ接続されていません。**
-> 過去に接続を試みたコミットは revert 済みで、本体は今もインライン literal と
-> 旧 `localStorage` キーで動作しています。以下の 7 層モデル関連ファイルは
-> **未接続の構想（設計・将来用）** として扱ってください。
+> 7 層データモデル(SSoT)のうち、**① マスタ層は本体プロトタイプに接続済み**です
+> （取引先 / 協力会社 / 拠点 / 社内ユーザー / 定期便を `LogipokeDB` から derive。
+> `node migration/verify_model.mjs` の ① が緑 = lossless を検証済み）。
+> **受付層 / 運行層など他層は、ライブラリとしては実装済みだが本体への接続は未了（今後）**です。
+> 下表の「接続状況」を参照してください。
 
-理想形として 7 層データモデル（マスタ / 受付 / 案件 / 運行 / 法令 / 運賃・請求 / 横断）を設計しており、
-その単一情報源（SSoT）候補が `assets/logipoke-data-model.js`（バックエンド不要のフロント実装）です。
+7 層データモデル（マスタ / 受付 / 案件 / 運行 / 法令 / 運賃・請求 / 横断）を設計し、
+その単一情報源（SSoT）が `assets/logipoke-data-model.js`（バックエンド不要のフロント実装）です。
 
-### 未接続の構想（設計・ライブラリ・将来用）
+### データモデル関連ファイル
 
 | ファイル | 役割 | 接続状況 |
 | --- | --- | --- |
-| `assets/logipoke-data-model.js` | 7層 正規化データモデル本体（`window.LogipokeDB` / Node 両対応） | ⛔ 本体 UI からは未参照 |
-| `docs/ideal-data-model.md` | データモデル設計書（7層 + 値オブジェクト） | 設計のみ |
-| `docs/operation-layer-deep-dive.md` | 運行層 Trip/Leg/Stop/Assignment の深掘り | 設計のみ |
+| `assets/logipoke-data-model.js` | 7層 正規化データモデル本体（`window.LogipokeDB` / Node 両対応） | ✅ マスタ層で本体 UI が参照 |
+| `docs/ideal-data-model.md` | データモデル設計書（7層 + 値オブジェクト） | 設計 |
+| `docs/operation-layer-deep-dive.md` | 運行層 Trip/Leg/Stop/Assignment の深掘り | 設計（運行層は未接続） |
 | `db/schema.sql` | 将来のバックエンド用 PostgreSQL DDL（34テーブル） | ⛔ 未使用（バックエンド未実装） |
-| `migration/verify_model.mjs` | 上記ライブラリ**単体**の検証（`node migration/verify_model.mjs`） | ✅ ライブラリのみ検証可 |
+| `migration/verify_model.mjs` | データモデル + **マスタ層 SSoT 接続**の検証（`node migration/verify_model.mjs`） | ✅ ① 接続検証 + ライブラリ検証 |
 
 ### 現行プロトタイプ本体の実態
 
-- **マスタ層**: `index.html` は `clientMasterData` / `partnerMasterData` / `TEAM_MEMBERS` /
-  `TEIKI_SAMPLES` など **インライン literal を直接使用**。SSoT(`LogipokeDB`)からの derive には
-  **未移行**（新デザイン＋SSoT 接続を入れたコミットは revert 済み）。
-- **受付層**: AI 電話受付 ↔ 配車本体の連携は **旧キー `logipoke_ai_intake_queue`**（生 JSON キュー）で実装。
-  設計上の正規化キー `logipoke_db_receptions_v1` / `Reception(+AiExtraction)` への構造化は**未接続**。
-- **その他**（ドライバー / 車両 / 案件 / 運行）も本体は独自の literal / state で動作。
+- **マスタ層 ✅ 接続済み**: 取引先 / 協力会社 / 拠点 / 社内ユーザー / 定期便は、各ファイルの
+  `_*Seed`（旧 literal）を `LogipokeDB.to*()` に通して **derive**（`clientMasterData` /
+  `partnerMasterData`（`assets/js/01-customer-master.js`）、`bases` / `TEIKI_SAMPLES`
+  （`02-dispatch-core.js`）、`TEAM_MEMBERS`（`07-dispatch-ext-v2.js`））。
+  `index.html` は consumer より前に `assets/logipoke-data-model.js` を読み込む。
+  derive 結果が元 seed と完全一致（lossless）であることは `verify_model.mjs` ① で検証済み。
+  万一 `LogipokeDB` 未読込時は seed へフォールバック（同一データのため挙動不変）。
+- **受付層 ⏳ 未接続**: AI 電話受付 ↔ 配車本体の連携は今も **旧キー `logipoke_ai_intake_queue`**（生 JSON キュー）。
+  正規化キー `logipoke_db_receptions_v1` / `Reception(+AiExtraction)` への移行は今後。
+- **運行層ほか ⏳ 未接続**（ドライバー / 車両 / 案件 / 運行）は本体の独自 state で動作。
 
 ### 検証スクリプトについて
 
@@ -71,19 +75,21 @@
 node migration/verify_model.mjs
 ```
 
-このスクリプトが検証するのは **`assets/logipoke-data-model.js` ライブラリ単体**（値オブジェクト構造化 /
-受付ブリッジの round-trip / 中継運行のタイムライン復元）です。
-**① マスタ層の lossless 検証は、本体 `index.html` が SSoT に未接続のため SKIP されます。**
-表示される `PASS` は「ライブラリが正しい」ことを示すもので、「`index.html` が移行済み」を意味しません。
+このスクリプトは以下を検証します（現状 **PASS=14 / FAIL=0**）:
+
+- **① マスタ層 SSoT 接続（lossless）**: 本体が使う各 `_*Seed` を model に通して旧形へ復元した結果が
+  元 seed と完全一致すること（= UI が受け取るデータが移行前と同一であること）。
+- ② 受付層の値オブジェクト構造化 / ②b 受付ブリッジの round-trip / ④ 中継運行タイムライン（ライブラリ）。
+
+マスタ層は接続済みのため ① は緑です。万一 `_*Seed` が無い（移行が revert された）場合は ① のみ SKIP します。
 
 ### 今後（移行の方向性）
 
-現行 UI を壊さない「ストラングラー方式」での段階移行を想定しています（いずれも**未着手 / 一部 revert 済み**）。
+現行 UI を壊さない「ストラングラー方式」で段階移行中です。
 
-1. `index.html` に `assets/logipoke-data-model.js` を読み込み、マスタ literal を `*_Seed` 化して
-   `LogipokeDB` からの derive に置換（`verify_model.mjs` の ① が緑になることを移行完了の判定に使う）。
-2. 受付キューを `logipoke_ai_intake_queue` → 正規化 `Reception` ストアへ移行。
-3. 運行層を `Trip>Leg>Stop+Assignment` へ集約。
+1. ✅ **マスタ層**: `_*Seed` → `LogipokeDB.to*()` で derive 済み（`verify_model.mjs` の ① が緑）。
+2. ⏳ 受付キューを `logipoke_ai_intake_queue` → 正規化 `Reception` ストアへ移行。
+3. ⏳ 運行層を `Trip>Leg>Stop+Assignment` へ集約。
 
 ## ローカルで動かす
 

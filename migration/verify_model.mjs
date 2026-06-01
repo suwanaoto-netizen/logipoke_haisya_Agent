@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// 検証: スタンドアロンのデータモデル(assets/logipoke-data-model.js) 単体が
-//   - 受付層: 値オブジェクト構造化 + 旧 intake 形への round-trip
-//   - 受付→配車ブリッジ: localStorage 経由の round-trip
-//   - 運行層: Trip>Leg>Stop+Assignment で中継タイムラインを復元
-//   を満たすことを確認する（ライブラリ単体の検証）。
-// ① マスタ層 lossless（model→旧形 が index.html の literal と一致）は、index.html が
-// SSoT に接続済み（マスタ literal が *_Seed にリネーム済み）の場合のみ実行し、未接続なら SKIP する。
-// → PASS は「ライブラリが正しい」ことを示し、「index.html が移行済み」を意味しない。
+// 検証: 7層データモデル(assets/logipoke-data-model.js) と、プロトタイプ本体の SSoT 接続を確認する。
+//   ① マスタ層 lossless: 本体 UI が使う各 *_Seed を model に通して旧形へ復元したものが
+//      元の seed と完全一致すること（= UI が受け取るデータが移行前と同一であること）を保証。
+//   ② 受付層: 値オブジェクト構造化 + 旧 intake 形への round-trip
+//   ②b 受付→配車ブリッジ: localStorage 経由の round-trip
+//   ④ 運行層: Trip>Leg>Stop+Assignment で中継タイムラインを復元
+// マスタ層は本体（assets/js/*.js）が *_Seed → LogipokeDB.to*() で derive 済み（SSoT 接続済み）。
+// 万一 *_Seed が無い（移行が revert された）場合は ① を SKIP する（後方互換）。
 //   node migration/verify_model.mjs
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -19,13 +19,25 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dir, '..');
 const DB = require(resolve(ROOT, 'assets/logipoke-data-model.js'));
 
-// index.html から seed 配列を「宣言名 → 対応する [ ] のブラケット対応」で切り出して eval する。
-// 行番号に依存しないので、リファクタで行がずれても壊れない。
-const src = readFileSync(resolve(ROOT, 'index.html'), 'utf8');
+// マスタ seed 配列は、ストラングラー移行で index.html から外部 JS へ分割済み。
+// 各 *_Seed が定義されているファイルから「宣言名 → 対応する [ ] のブラケット対応」で切り出して
+// eval する。行番号に依存しないので、リファクタで行がずれても壊れない。
+const SEED_FILES = {
+  _clientMasterSeed:  'assets/js/01-customer-master.js',
+  _partnerMasterSeed: 'assets/js/01-customer-master.js',
+  _basesSeed:         'assets/js/02-dispatch-core.js',
+  _teikiSeed:         'assets/js/02-dispatch-core.js',
+  _teamSeed:          'assets/js/07-dispatch-ext-v2.js',
+};
+const _srcCache = {};
+function _src(file) { return _srcCache[file] || (_srcCache[file] = readFileSync(resolve(ROOT, file), 'utf8')); }
 function extract(name) {
+  const file = SEED_FILES[name];
+  if (!file) throw new Error('未知の seed: ' + name);
+  const src = _src(file);
   const decl = new RegExp('(?:const|var|let)\\s+' + name + '\\s*=\\s*');
   const m = decl.exec(src);
-  if (!m) throw new Error('宣言が見つかりません: ' + name);
+  if (!m) throw new Error('宣言が見つかりません: ' + name + ' in ' + file);
   let i = m.index + m[0].length, depth = 0, inStr = null, started = false;
   const start = i;
   for (; i < src.length; i++) {
@@ -46,16 +58,15 @@ function check(label, fn) {
 }
 // 宣言の存在判定（extract と違い、見つからなくても throw しない）
 function hasDecl(name) {
-  return new RegExp('(?:const|var|let)\\s+' + name + '\\s*=').test(src);
+  const file = SEED_FILES[name];
+  return !!file && new RegExp('(?:const|var|let)\\s+' + name + '\\s*=').test(_src(file));
 }
 
 console.log('① マスタ層 adapter の lossless 検証（model → 旧形 が literal と一致）');
 const db = DB.createDB();
-// この検証は「index.html が SSoT に接続済み」= マスタ literal が *_Seed にリネームされ、
-// UI が model からの derive を使う状態でのみ成立する（derive(seed) === seed を示せば
-// 「UI が受け取るデータは元 literal と同一」を保証できる）。
-// 現行の index.html はまだ SSoT 未接続（clientMasterData 等のインライン literal を直接使用）
-// のため、*_Seed が無い場合は本検証をスキップし、未接続であることを明示する。
+// 本体は各 *_Seed → LogipokeDB.to*() で derive 済み（SSoT 接続済み）。
+// derive(seed) === seed を示せば「UI が受け取るデータは元 seed と同一（lossless）」を保証できる。
+// 万一 *_Seed が無い（移行が revert された）場合のみ ① を SKIP する。
 if (hasDecl('_clientMasterSeed')) {
   const clientMasterData = extract('_clientMasterSeed');
   const partnerMasterData = extract('_partnerMasterSeed');
@@ -72,9 +83,8 @@ if (hasDecl('_clientMasterSeed')) {
   check('TEAM_MEMBERS (4名) が完全一致', () => assert.deepStrictEqual(DB.toTeamMembers(db), TEAM_MEMBERS));
   check('TEIKI_SAMPLES が完全一致', () => assert.deepStrictEqual(DB.toTeikiSamples(db), TEIKI_SAMPLES));
 } else {
-  console.log('  ⊘ SKIP: index.html は SSoT(assets/logipoke-data-model.js) 未接続です。');
-  console.log('         index.html は clientMasterData 等のインライン literal を直接使用中で、');
-  console.log('         *_Seed へのリネーム＋derive 化が未了のため lossless 検証は適用外です。');
+  console.log('  ⊘ SKIP: *_Seed が見つかりません（マスタ層の SSoT 接続が未了 or revert 済み）。');
+  console.log('         assets/js/*.js のマスタ literal を *_Seed にリネーム＋derive 化すると有効化されます。');
   skip++;
 }
 

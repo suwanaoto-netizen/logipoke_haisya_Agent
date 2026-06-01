@@ -1,7 +1,7 @@
     // ══ 顧客管理データ ══
 
     // 取引先（案件一覧と連動）
-    const clientMasterData = [
+    const _clientMasterSeed = [
       { id:'CL-001', defaultFormatId:'FMT-001', name:'株式会社○○商事', area:'埼玉県川口市', contact:'山田 花子', tel:'048-111-2222', email:'y.hanako@marumarushouji.co.jp', type:'定期', cases:['20240524001','20240524101','20240524001','20240523090','20240522080','20240521070'] },
       { id:'CL-002', defaultFormatId:'FMT-002', name:'△△食品株式会社', area:'千葉県船橋市', contact:'鈴木 一郎', tel:'047-333-4444', email:'suzuki@sansankm.co.jp', type:'定期', cases:['20240524002','20240524100','20240522055','20240520040'] },
       { defaultFormatId:'FMT-001', id:'CL-003', name:'株式会社□□製作所', area:'茨城県つくば市', contact:'佐藤 二郎', tel:'029-555-6666', email:'sato@kakukakus.co.jp', type:'スポット', cases:['20240524003','20240518020'] },
@@ -18,9 +18,11 @@
       { defaultFormatId:'FMT-001', id:'CL-014', name:'東京精工株式会社', area:'東京都大田区', contact:'木村 十三', tel:'03-1111-2222', email:'kimura@tokyoseiko.co.jp', type:'特殊', cases:['20240518035','20240511001'] },
       { defaultFormatId:'FMT-001', id:'CL-015', name:'全国食品流通株式会社', area:'埼玉県さいたま市', contact:'清水 十四', tel:'048-3333-4444', email:'shimizu@zenkoku-shokuhin.co.jp', type:'定期', cases:['20240517030','20240516020','20240515010','20240514005'] },
     ];
+    // SSoT(LogipokeDB)からderive。未読込時はseedにフォールバック（lossless検証済み）
+    const clientMasterData = (typeof LogipokeDB!=='undefined'&&LogipokeDB.toClientMaster) ? LogipokeDB.toClientMaster(LogipokeDB.seedMasters(LogipokeDB.createDB(),{clients:_clientMasterSeed})) : _clientMasterSeed;
 
     // 協力会社
-    const partnerMasterData = [
+    const _partnerMasterSeed = [
       { id:'PT-001', name:'北関東物流株式会社', area:'埼玉県熊谷市', contact:'安藤 清志', tel:'048-222-3333', email:'ando@kitatrans.co.jp', vehicleTypes:['4tウィング','2tトラック'], cases:['20240524100','20240521110'] },
       { id:'PT-002', name:'東海急送株式会社', area:'静岡県浜松市', contact:'伊勢 誠一', tel:'053-444-5555', email:'ise@tokakyuso.co.jp', vehicleTypes:['10tトラック','4tウィング'], cases:['20240519055','20240515010'] },
       { id:'PT-003', name:'九州ネット輸送株式会社', area:'福岡県北九州市', contact:'岡部 雄介', tel:'093-666-7777', email:'okabe@kyunet.co.jp', vehicleTypes:['4tウィング','冷蔵車'], cases:['20240524105'] },
@@ -28,6 +30,8 @@
       { id:'PT-005', name:'北海道運輸株式会社', area:'北海道札幌市', contact:'本間 浩二', tel:'011-000-1111', email:'honma@hokkaido-unyu.co.jp', vehicleTypes:['10tトラック','冷蔵車'], cases:['20240521095'] },
       { id:'PT-006', name:'関西エクスプレス株式会社', area:'大阪府堺市', contact:'丸山 隆司', tel:'072-222-3333', email:'maruyama@kansai-ex.co.jp', vehicleTypes:['4tウィング','チャーター'], cases:['20240513002'] },
     ];
+    // SSoT(LogipokeDB)からderive。未読込時はseedにフォールバック（lossless検証済み）
+    const partnerMasterData = (typeof LogipokeDB!=='undefined'&&LogipokeDB.toPartnerMaster) ? LogipokeDB.toPartnerMaster(LogipokeDB.seedMasters(LogipokeDB.createDB(),{partners:_partnerMasterSeed})) : _partnerMasterSeed;
 
     // 全案件一覧（未処理+処理中+処理済み+過去案件）
     const allCasesMasterData = [
