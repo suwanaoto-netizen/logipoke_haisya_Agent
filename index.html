@@ -37091,8 +37091,8 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   })();
 
   // 担当フィルタ：'all' | 'mine' | userId
-  // 初期は「自分の担当」を選択した状態で表示
-  let assignFilter = 'mine';
+  // 初期は全車両を表示（担当・拠点を問わず割り当て可能。フィルタは絞り込み用途のみ）
+  let assignFilter = 'all';
 
   // ─────────────────────────────────────────────────────────────
   // Phase 1b：軸フィルタ拡張
@@ -37103,9 +37103,9 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   // 軸ごとの直近選択値は lastFilterValues に記憶（軸切替時に復元）
   // ─────────────────────────────────────────────────────────────
   let filterAxis = 'owner';     // 'owner' | 'base' | 'all'
-  let filterValue = 'mine';     // 軸に応じた値
+  let filterValue = 'all';      // 軸に応じた値（初期は「すべて」＝全車両表示）
   let lastFilterValues = {
-    owner: 'mine',              // owner軸の直近選択：'all'|'mine'|'unassigned'|userId
+    owner: 'all',               // owner軸の直近選択：'all'|'mine'|'unassigned'|userId
     base:  'all'                // base軸の直近選択：'all'|baseId|'__cross__'|'__partner__'
   };
 
@@ -37126,11 +37126,10 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
     return lock && lock.userId !== CURRENT_USER_ID;
   }
   function canEditDriver(driverId) {
-    if (isLockedByOther(driverId)) return false;
-    const owner = ownerOf(driverId);
-    // 担当未設定なら誰でも編集可。担当設定済みなら担当者のみ。
-    if (!owner) return true;
-    return owner === CURRENT_USER_ID;
+    // 担当（拠点・担当者）による配車制限は撤廃。
+    // 他拠点・他担当の車両にも自由に割り当て／確定／解除できる。
+    // 他ユーザーが「編集中」のロックだけは同時編集の安全策として引き続き保護する。
+    return !isLockedByOther(driverId);
   }
 
   // ════════════════════════════════════════════════════════════════
