@@ -1,8 +1,8 @@
     /* ══ 車両モーダル統一カラーパレット ══
-       ダークグリーン : #0D4A3A (--sidebar-bg)
+       ダークグリーン : var(--header-bg) (--sidebar-bg)
        ミッドグリーン : #1a5c4a
-       グレー系       : #374151 / #6b7280 / #9ca3af / #e5e7eb / #f3f4f6 / #f9fafb
-       黒             : #111827
+       グレー系       : var(--gray-700) / var(--text-secondary) / var(--text-muted) / var(--border) / var(--gray-100) / var(--gray-50)
+       黒             : var(--gray-900)
     */
 
     /* ── 詳細モーダル ── */
@@ -21,13 +21,13 @@
     .vd-tab.active { color: #fff; border-bottom-color: var(--accent); }
 
     /* 詳細ボディ背景 */
-    #vdetail-body { background: #f3f4f6; }
+    #vdetail-body { background: var(--gray-100); }
 
     /* 詳細内カード */
-    .vd-card { background:#fff; border-radius:10px; border:1px solid #e5e7eb; margin-bottom:12px; overflow:hidden; }
+    .vd-card { background:#fff; border-radius:10px; border:1px solid var(--border); margin-bottom:12px; overflow:hidden; }
     .vd-card-header {
       display:flex; align-items:center; gap:9px;
-      padding:11px 16px; background:#0D4A3A;
+      padding:11px 16px; background:var(--header-bg);
       border-bottom:1px solid #1a5c4a;
     }
     .vd-card-title { font-size:12px; font-weight:700; color:#fff; letter-spacing:.03em; }
@@ -36,23 +36,23 @@
     /* KPIカード行 */
     .vd-kpi-row { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px; }
     .vd-kpi {
-      background:#fff; border:1px solid #e5e7eb; border-radius:10px;
-      padding:12px 14px; border-left: 3px solid #0D4A3A;
+      background:#fff; border:1px solid var(--border); border-radius:10px;
+      padding:12px 14px; border-left: 3px solid var(--header-bg);
     }
-    .vd-kpi-label { font-size:10px; color:#6b7280; font-weight:600; margin-bottom:4px; letter-spacing:.04em; text-transform:uppercase; }
-    .vd-kpi-val { font-size:18px; font-weight:800; font-family:'Inter',sans-serif; color:#111827; }
-    .vd-kpi-sub { font-size:10px; color:#9ca3af; margin-top:2px; }
+    .vd-kpi-label { font-size:10px; color:var(--text-secondary); font-weight:600; margin-bottom:4px; letter-spacing:.04em; text-transform:uppercase; }
+    .vd-kpi-val { font-size:18px; font-weight:800; font-family:'Inter',sans-serif; color:var(--gray-900); }
+    .vd-kpi-sub { font-size:10px; color:var(--text-muted); margin-top:2px; }
 
     /* テーブル */
     .vd-table { width:100%; border-collapse:collapse; font-size:12px; }
     .vd-table th {
       padding:9px 10px; text-align:left; font-size:10px; font-weight:700;
-      color:#9ca3af; background:#111827; border-bottom:2px solid #1f2f28;
+      color:var(--text-muted); background:var(--gray-900); border-bottom:2px solid #1f2f28;
       white-space:nowrap; letter-spacing:.05em; text-transform:uppercase;
     }
-    .vd-table td { padding:9px 10px; border-bottom:1px solid #f3f4f6; vertical-align:middle; color:#374151; }
+    .vd-table td { padding:9px 10px; border-bottom:1px solid var(--gray-100); vertical-align:middle; color:var(--gray-700); }
     .vd-table tr:last-child td { border-bottom:none; }
-    .vd-table tr:hover td { background:#f9fafb; }
+    .vd-table tr:hover td { background:var(--gray-50); }
     .vd-table tfoot td { background:#1a2a24 !important; color:#fff; font-weight:700; }
 
     /* コストカテゴリバッジ — 全色をグレー系に統一 */
@@ -60,40 +60,40 @@
       display:inline-flex; align-items:center; gap:3px;
       font-size:10px; font-weight:700; padding:2px 8px;
       border-radius:5px; white-space:nowrap;
-      background:#e5e7eb; color:#374151;
+      background:var(--border); color:var(--gray-700);
     }
 
     /* コストバー */
-    .cost-bar-wrap { height:6px; background:#e5e7eb; border-radius:3px; overflow:hidden; margin-top:4px; }
-    .cost-bar-fill { height:100%; border-radius:3px; background:#0D4A3A; transition:width .4s ease; }
+    .cost-bar-wrap { height:6px; background:var(--border); border-radius:3px; overflow:hidden; margin-top:4px; }
+    .cost-bar-fill { height:100%; border-radius:3px; background:var(--header-bg); transition:width .4s ease; }
 
     /* ── 編集・追加モーダル ── */
     #vehicle-add-modal .modal { border:none; box-shadow:0 20px 60px rgba(0,0,0,0.35); }
     #vehicle-add-modal .modal-header {
-      background:#111827; border-bottom:2px solid #0D4A3A;
+      background:var(--gray-900); border-bottom:2px solid var(--header-bg);
     }
     #vehicle-add-modal .modal-header .modal-title { color:#fff; }
-    #vehicle-add-modal .modal-header svg { color:#6DD5A8 !important; stroke:#6DD5A8 !important; }
+    #vehicle-add-modal .modal-header svg { color:var(--accent-light) !important; stroke:var(--accent-light) !important; }
     #vehicle-add-modal .modal-close { color:rgba(255,255,255,0.7) !important; }
     #vehicle-add-modal .modal-close:hover { color:#fff !important; }
 
     /* 編集モーダルのタブバー */
     #vehicle-add-modal .modal > div:nth-child(2) {
-      background:#1a2a24 !important; border-bottom:1px solid #0D4A3A !important;
+      background:#1a2a24 !important; border-bottom:1px solid var(--header-bg) !important;
     }
     /* 編集モーダルのボディ */
-    #vehicle-add-modal .modal-body { background:#f9fafb; }
+    #vehicle-add-modal .modal-body { background:var(--gray-50); }
 
     /* フォームラベル */
-    #vehicle-add-modal .form-label { color:#374151; font-weight:600; }
+    #vehicle-add-modal .form-label { color:var(--gray-700); font-weight:600; }
     #vehicle-add-modal .form-input,
     #vehicle-add-modal .form-select {
-      border-color:#d1d5db; color:#111827;
+      border-color:var(--gray-300); color:var(--gray-900);
       transition: border-color .15s, box-shadow .15s;
     }
     #vehicle-add-modal .form-input:focus,
     #vehicle-add-modal .form-select:focus {
-      border-color:#0D4A3A;
+      border-color:var(--header-bg);
       box-shadow:0 0 0 3px rgba(13,74,58,.1);
       outline:none;
     }
@@ -101,60 +101,60 @@
     /* モーダルフッター */
     #vehicle-add-modal .modal-footer,
     #vehicle-detail-modal .modal-footer {
-      background:#f9fafb; border-top:1px solid #e5e7eb;
+      background:var(--gray-50); border-top:1px solid var(--border);
     }
 
     /* 保存ボタン */
     #vehicle-save-btn {
-      background:#0D4A3A !important; border-color:#0D4A3A !important; color:#fff !important;
+      background:var(--header-bg) !important; border-color:var(--header-bg) !important; color:#fff !important;
     }
     #vehicle-save-btn:hover { background:#1a5c4a !important; }
 
     /* 給油・コスト記録フォーム行 */
     .vf-entry-row {
-      background:#fff; border:1.5px solid #e5e7eb; border-radius:10px;
+      background:#fff; border:1.5px solid var(--border); border-radius:10px;
       padding:14px 14px 12px; margin-bottom:10px; position:relative;
     }
-    .vf-entry-row:hover { border-color:#0D4A3A; }
+    .vf-entry-row:hover { border-color:var(--header-bg); }
     .vf-entry-label {
       font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
-      color:#0D4A3A; margin-bottom:10px;
+      color:var(--header-bg); margin-bottom:10px;
       display:flex; align-items:center; gap:6px;
     }
     .vf-entry-del {
       position:absolute; top:10px; right:12px;
       background:none; border:none; cursor:pointer;
-      color:#9ca3af; font-size:16px; line-height:1;
+      color:var(--text-muted); font-size:16px; line-height:1;
       padding:2px 4px; border-radius:4px; transition:color .12s;
     }
-    .vf-entry-del:hover { color:#374151; }
+    .vf-entry-del:hover { color:var(--gray-700); }
 
     /* 追加ボタン */
     .vf-add-btn {
       width:100%; padding:11px; margin-top:6px;
-      border:2px dashed #d1d5db; border-radius:8px;
+      border:2px dashed var(--gray-300); border-radius:8px;
       background:transparent; cursor:pointer; font-size:12px; font-weight:600;
-      color:#6b7280; font-family:inherit; letter-spacing:.02em;
+      color:var(--text-secondary); font-family:inherit; letter-spacing:.02em;
       transition: all .15s;
     }
-    .vf-add-btn:hover { border-color:#0D4A3A; color:#0D4A3A; background:rgba(13,74,58,.04); }
+    .vf-add-btn:hover { border-color:var(--header-bg); color:var(--header-bg); background:rgba(13,74,58,.04); }
 
     /* info バナー */
     .vf-info-banner {
-      background:#f3f4f6; border:1px solid #e5e7eb; border-left:3px solid #0D4A3A;
+      background:var(--gray-100); border:1px solid var(--border); border-left:3px solid var(--header-bg);
       border-radius:8px; padding:10px 14px; margin-bottom:14px;
-      font-size:12px; color:#374151; line-height:1.6;
+      font-size:12px; color:var(--gray-700); line-height:1.6;
     }
 
     /* ドライバーアバター (詳細) */
     .vd-driver-avatar {
       width:48px; height:48px; border-radius:50%;
-      background:#0D4A3A; color:#fff;
+      background:var(--header-bg); color:#fff;
       font-size:17px; font-weight:700;
       display:flex; align-items:center; justify-content:center; flex-shrink:0;
     }
 
     /* ステータスバッジ override — モーダル内 */
-    #vehicle-detail-modal span[style*="dcfce7"] { background:#e5e7eb !important; color:#374151 !important; }
-    #vehicle-detail-modal span[style*="dbeafe"] { background:#e5e7eb !important; color:#374151 !important; }
-    #vehicle-detail-modal span[style*="fef3c7"] { background:#f3f4f6 !important; color:#6b7280 !important; }
+    #vehicle-detail-modal span[style*="dcfce7"] { background:var(--border) !important; color:var(--gray-700) !important; }
+    #vehicle-detail-modal span[style*="dbeafe"] { background:var(--border) !important; color:var(--gray-700) !important; }
+    #vehicle-detail-modal span[style*="fef3c7"] { background:var(--gray-100) !important; color:var(--text-secondary) !important; }

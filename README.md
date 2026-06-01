@@ -26,6 +26,10 @@
 - `assets/js/02-dispatch-core.js` が配車コア（データ＋ロジック）の本体で最大。
 - `assets/js/01-customer-master.js` に取引先 / 協力会社などのマスタ literal を含む。
 - Chart.js / html2canvas / jsPDF は従来どおり CDN から読み込み。
+- **配色はデザイントークン化**: 色は `assets/css/01-base.css` の `:root`（CSS カスタム
+  プロパティ）に集約。配色変更は原則このトークン定義のみ修正すれば全体に反映される。
+  - 現状 CSS は token 化済み。HTML インライン `style` / JS 生成スタイルは未対応（後続）。
+  - JS の `canvas` / Chart.js の色は `var()` 不可のため token 化対象外。
 
 > 注: これは「巨大 1 ファイルを**レビュー可能にする**」ための機械的分割です。
 > ファイル内の「データとロジックの分離」「`assets/logipoke-data-model.js` への接続」は別タスク（下記）。
