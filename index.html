@@ -21088,10 +21088,8 @@ function renderCommLog() {
   const wrap = document.getElementById('comm-wrap-inner');
   if (!wrap) return;
 
-  // サンプルデータをキャッシュ（初回のみ生成、フィルタで使い回す）
-  if (!window.__commLogData) {
-    window.__commLogData = _buildCommLogSamples();
-  }
+  // サンプル＋永続化された連携エントリで初回初期化（フィルタで使い回す）
+  ensureCommLogData();
   const all = window.__commLogData;
 
   // 期間フィルタ
@@ -21230,6 +21228,46 @@ window.__commSetFilter = function(key, value) {
 //  未閲覧の間は連絡状況サブタブに小さなバッジを出す。タブを開いたら消す。
 // ═══════════════════════════════════════════════════════════════
 
+// 連携エントリ（仮確定由来）の永続化キー
+const COMM_LINK_STORAGE_KEY = 'logipoke_comm_dispatch_links_v1';
+
+// localStorage から連携エントリを復元（sentAt は Date へ戻す）
+function loadCommDispatchLinks() {
+  try {
+    const raw = localStorage.getItem(COMM_LINK_STORAGE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.map(e => Object.assign({}, e, {
+      sentAt: (e && e.sentAt) ? new Date(e.sentAt) : new Date(),
+      _fromSendLog: true
+    }));
+  } catch (e) { return []; }
+}
+
+// 連携エントリ（_fromSendLog）だけを localStorage に保存（サンプルは保存しない／最新100件）
+function saveCommDispatchLinks() {
+  try {
+    const links = (window.__commLogData || [])
+      .filter(e => e && e._fromSendLog)
+      .slice(0, 100)
+      .map(e => Object.assign({}, e, {
+        sentAt: (e.sentAt instanceof Date) ? e.sentAt.toISOString() : e.sentAt
+      }));
+    localStorage.setItem(COMM_LINK_STORAGE_KEY, JSON.stringify(links));
+  } catch (e) { /* 保存不可環境では無視 */ }
+}
+
+// 連絡状況データを初期化（サンプル＋永続化された連携エントリをマージ）
+function ensureCommLogData() {
+  if (window.__commLogData) return window.__commLogData;
+  const samples = (typeof _buildCommLogSamples === 'function') ? _buildCommLogSamples() : [];
+  const links = loadCommDispatchLinks();
+  // 連携（実イベント）を前、サンプルを後ろに。表示時に sentAt で再ソートされる
+  window.__commLogData = links.concat(samples);
+  return window.__commLogData;
+}
+
 // 連絡状況サブタブの未閲覧バッジを更新（未読 = _unread:true のエントリ数）
 function updateCommTabBadge() {
   const btn = document.getElementById('dsubtab-comm');
@@ -21255,16 +21293,16 @@ function updateCommTabBadge() {
 // 連絡状況を閲覧済みにする（未読フラグを落としてバッジを消す）
 function markCommLogRead() {
   const data = window.__commLogData || [];
-  data.forEach(e => { if (e && e._unread) e._unread = false; });
+  let changed = false;
+  data.forEach(e => { if (e && e._unread) { e._unread = false; changed = true; } });
   updateCommTabBadge();
+  if (changed) saveCommDispatchLinks();
 }
 
 // 送信ログ1件を連絡状況タブのエントリへ変換して連携する
 function linkSendLogToCommTab(log) {
   if (!log) return;
-  if (!window.__commLogData) {
-    window.__commLogData = (typeof _buildCommLogSamples === 'function') ? _buildCommLogSamples() : [];
-  }
+  ensureCommLogData();
   const scheduled = log.status === 'pending';
   // タイムライン上は連携した瞬間（＝仮確定時）に並べる
   const when = log.sentAt ? new Date(log.sentAt)
@@ -21295,6 +21333,7 @@ function linkSendLogToCommTab(log) {
     _unread: true,
     _fromSendLog: true
   });
+  saveCommDispatchLinks();
   // 連絡状況タブを表示中なら即時反映して既読扱い、それ以外はバッジのみ更新
   if (typeof currentDispatchSubtab !== 'undefined' && currentDispatchSubtab === 'comm') {
     renderCommLog();
@@ -21306,6 +21345,9 @@ function linkSendLogToCommTab(log) {
 window.linkSendLogToCommTab = linkSendLogToCommTab;
 window.updateCommTabBadge = updateCommTabBadge;
 window.markCommLogRead = markCommLogRead;
+
+// 初回ロード時：永続化された未閲覧の連携があればバッジを復元表示する
+try { ensureCommLogData(); updateCommTabBadge(); } catch (e) { /* noop */ }
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -35864,30 +35906,6 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   border-radius: 8px;
 }
 .afb-chip:not(.active) .afb-chip-count { background: #f1f5f9; color: #64748b; }
-.afb-current-user {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  background: #fff;
-  border: 1px solid #cbd5e1;
-  border-radius: 14px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.afb-current-user-avatar {
-  width: 18px; height: 18px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 800;
-  font-family: 'Inter', sans-serif;
-}
 
 /* ════════════════════════════════════════════════════════════════
    Phase 1b：軸セグメント・拠点バッジ・クロス配車インジケータ
@@ -36535,43 +36553,6 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   font-size: 9px;
 }
 
-/* ── 確定送信ログモーダル ── */
-.send-log-list {
-  max-height: 360px;
-  overflow-y: auto;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-}
-.send-log-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border-bottom: 1px solid #f3f4f6;
-  background: #fff;
-  font-size: 11px;
-}
-.send-log-item:last-child { border-bottom: none; }
-.send-log-status {
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 11px;
-}
-.send-log-status.sent { background: #d1fae5; color: #065f46; }
-.send-log-status.pending { background: #dbeafe; color: #1e40af; }
-.send-log-status.failed { background: #fee2e2; color: #991b1b; }
-.send-log-main { flex: 1; min-width: 0; }
-.send-log-time {
-  font-family: 'Inter', sans-serif;
-  font-weight: 600;
-  color: #6b7280;
-  font-size: 10px;
-  flex-shrink: 0;
-}
 </style>
 
 <!-- KPIダッシュボード ドック -->
@@ -36636,23 +36617,6 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
 
 <!-- 担当者選択ポップオーバー -->
 <div class="owner-picker-pop" id="owner-picker-pop" style="display:none;"></div>
-
-<!-- 送信ログモーダル -->
-<div class="modal-overlay" id="send-log-modal">
-  <div class="modal" style="max-width: 600px; width: 95vw; max-height: 86vh; display: flex; flex-direction: column;">
-    <div class="modal-header" style="background: var(--sidebar-bg);">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.65 3.35 2 2 0 0 1 3.62 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 5.5 5.5l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-      <span class="modal-title">指示送信ログ</span>
-      <button class="modal-close" onclick="closeModal('send-log-modal')">✕</button>
-    </div>
-    <div class="modal-body" style="overflow-y: auto; flex: 1;">
-      <div class="send-log-list" id="send-log-list"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('send-log-modal')">閉じる</button>
-    </div>
-  </div>
-</div>
 
 <script>
 // ════════════════════════════════════════════════════════════════
@@ -37627,34 +37591,6 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
       window.linkSendLogToCommTab(sendLogs[0]);
     }
   }
-
-  // 送信ログモーダル
-  window.openSendLogModal = function() {
-    const listEl = document.getElementById('send-log-list');
-    if (sendLogs.length === 0) {
-      listEl.innerHTML = `<div style="padding: 30px; text-align: center; color: #6b7280; font-size: 12px;">送信ログはまだありません</div>`;
-    } else {
-      listEl.innerHTML = sendLogs.map(l => {
-        const icon = l.status === 'sent' ? '✓' : l.status === 'pending' ? '⏰' : '✕';
-        const label = l.status === 'sent' ? '送信済' : l.status === 'pending' ? '予約' : '失敗';
-        const dt = l.status === 'pending' && l.scheduledAt
-          ? new Date(l.scheduledAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-          : (l.sentAt ? new Date(l.sentAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
-        return `<div class="send-log-item">
-          <div class="send-log-status ${l.status}">${icon}</div>
-          <div class="send-log-main">
-            <div style="font-weight:700; color:#111827;">${l.client}</div>
-            <div style="color:#6b7280; margin-top:1px;">${l.driverName} · ${l.time} · 操作：${l.operator}</div>
-          </div>
-          <div class="send-log-time">
-            <div>${label}</div>
-            <div style="margin-top:2px;">${dt}</div>
-          </div>
-        </div>`;
-      }).join('');
-    }
-    document.getElementById('send-log-modal').classList.add('open');
-  };
 
   // ════════════════════════════════════════════════════════════════
   //  KPIダッシュボード
