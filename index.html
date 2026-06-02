@@ -3899,6 +3899,15 @@
   .dnd-card-chip.urgent {
     background:#fef2f2; color:#b91c1c; font-weight:700;
   }
+  /* ━━ 受付経路（録音/画像/音声/AI受付/メール/FAX等）を示すグリーンアイコン ━━ */
+  .dnd-card-source {
+    display:inline-flex; align-items:center; gap:3px;
+    font-size:9px; font-weight:700; line-height:1.4;
+    padding:1px 6px; border-radius:9px;
+    background:#eafaf3; color:#0d7a52; border:1px solid #b6e6d3;
+    flex-shrink:0; white-space:nowrap;
+  }
+  .dnd-card-source svg { width:10px; height:10px; stroke:#1a7a5e; flex-shrink:0; }
   .dnd-card-handle {
     position:absolute; right:6px; top:50%; transform:translateY(-50%);
     color:var(--text-muted); opacity:0.5; pointer-events:none;
@@ -24504,6 +24513,85 @@ function computeDndAiRecommendation(caseObj, dateKey, reserved) {
 window.getDndAiRecommendation = getDndAiRecommendation;
 window.computeDndAiRecommendation = computeDndAiRecommendation;
 
+// ═══════════════════════════════════════════════════════════════
+//  受付経路（どの経由で取り込まれた案件か）の小アイコン
+//  録音 / 音声 / 画像OCR / AI受付(電話) / メール / FAX / 定期 / 手入力
+//  → 配車計画表の案件カードに小さなグリーンのアイコンで表示する。
+// ═══════════════════════════════════════════════════════════════
+const DND_SOURCE_DEFS = {
+  rec:    { label: '録音',   svg: '<path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/>' },
+  audio:  { label: '音声',   svg: '<line x1="4" y1="10" x2="4" y2="14"/><line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="16" y1="5" x2="16" y2="19"/><line x1="20" y1="10" x2="20" y2="14"/>' },
+  image:  { label: '画像',   svg: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>' },
+  ai:     { label: 'AI受付', svg: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>' },
+  mail:   { label: 'メール', svg: '<rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 6 12 13 22 6"/>' },
+  fax:    { label: 'FAX',    svg: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="9" rx="2"/><rect x="7" y="14" width="10" height="6"/>' },
+  teiki:  { label: '定期',   svg: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>' },
+  manual: { label: '手入力', svg: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>' },
+};
+
+// 既存の受付チャネル値（ch: tel/mail/fax/image/teiki/manual）→ 経路キー
+function _chToSource(ch) {
+  switch (ch) {
+    case 'mail':   return 'mail';
+    case 'fax':    return 'fax';
+    case 'image':  return 'image';
+    case 'teiki':  return 'teiki';
+    case 'manual': return 'manual';
+    case 'tel':    return 'voice'; // 音声系（AI受付/録音/音声アップロードはこの値。カードごとに細分化）
+    default:       return null;
+  }
+}
+
+// caseListId/id から、各案件ストアの ch を引く
+function _lookupCaseCh(caseId) {
+  if (!caseId) return null;
+  const stores = [
+    (typeof unprocessedCases !== 'undefined') ? unprocessedCases : null,
+    (typeof processingCases  !== 'undefined') ? processingCases  : null,
+    (typeof processedCases   !== 'undefined') ? processedCases   : null,
+  ];
+  for (const s of stores) {
+    if (!Array.isArray(s)) continue;
+    const f = s.find(x => x && x.id === caseId);
+    if (f && f.ch) return f.ch;
+  }
+  return null;
+}
+
+// dndカード（または processedCase 等）→ 受付経路キー。
+// 実データ（リンク先 or 自身の ch）を優先し、紐付けが無いサンプルは
+// id から決定論的に推定してキャッシュ（デモ表示の安定化）。
+function getDndCardSource(card) {
+  if (!card) return null;
+  const ch = card.ch || _lookupCaseCh(card.caseListId) || _lookupCaseCh(card.id);
+  const mapped = _chToSource(ch);
+  // 明確なチャネル（メール/FAX/画像/定期/手入力）はそのまま採用
+  if (mapped && mapped !== 'voice') return mapped;
+  // 音声系（電話/AI受付）または紐付けの無いサンプルは、カードIDから
+  // 決定論的に経路を振り分ける（再描画でも変わらないようキャッシュ）
+  if (card._sourceGuess) return card._sourceGuess;
+  const pool = (mapped === 'voice')
+    ? ['ai', 'ai', 'rec', 'audio']                     // 電話/AI受付系（AI受付を主に録音・音声も）
+    : ['rec', 'audio', 'image', 'ai', 'mail', 'fax'];  // 紐付けの無いサンプル（全経路から）
+  const key = String(card.id || card.caseListId || '');
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  const g = pool[h % pool.length];
+  try { card._sourceGuess = g; } catch (e) { /* frozen object */ }
+  return g;
+}
+
+// カードに表示する受付経路アイコン（小・グリーン）のHTMLを返す
+function renderDndSourceChip(card) {
+  const src = getDndCardSource(card);
+  const def = src && DND_SOURCE_DEFS[src];
+  if (!def) return '';
+  return '<span class="dnd-card-source" title="受付経路: ' + def.label + '">'
+    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + def.svg + '</svg><span>' + def.label + '</span></span>';
+}
+window.getDndCardSource = getDndCardSource;
+
 function renderDndList() {
   const list = document.getElementById('dnd-list');
   if (!list) return;
@@ -24543,6 +24631,7 @@ function renderDndList() {
           </div>
           <div style="font-size:10px;color:var(--text-secondary);line-height:1.4">${c.goods}</div>
           <div class="dnd-card-meta">
+            ${renderDndSourceChip(c)}
             <span class="dnd-card-chip">✓ 完了 ${dateStr}</span>
             <span class="dnd-card-chip">🚚 ${c.driver}</span>
           </div>
@@ -24743,6 +24832,7 @@ function renderDndList() {
         </div>
         <div style="font-size:10px;color:var(--text-secondary);line-height:1.4">${c.goods}</div>
         <div class="dnd-card-meta">
+          ${renderDndSourceChip(c)}
           <span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>
           ${c.urgent ? `<span class="dnd-card-chip urgent">⚡ ${c.deadline}</span>` : `<span class="dnd-card-chip">${c.deadline}</span>`}
         </div>
