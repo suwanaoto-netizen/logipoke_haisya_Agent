@@ -2756,6 +2756,8 @@
   /* 既存バー（担当者フィルター #assign-filter-bar / 本日のサマリー #dispatch-warning-bar）の表示ON/OFF */
   #page-dispatch.dv-hide-afb #assign-filter-bar { display:none !important; }
   #page-dispatch.dv-hide-summary #dispatch-warning-bar { display:none !important; }
+  /* サマリーバーの操作ボタン群をサブタブ行（表示設定タブと同じ行）の右端へ移設 */
+  .dispatch-subtabs .dwb-actions { margin-left:auto; align-self:center; align-items:center; padding-left:12px; }
   /* 表示設定パネル */
   #dispatch-display { background:var(--bg); }
   .dvwrap { padding:16px 20px; display:flex; flex-direction:column; gap:14px; }
@@ -18218,7 +18220,18 @@ function dvApplyChrome() {
       pg.classList.toggle('dv-hide-afb', DV.showFilterBar === false);
       pg.classList.toggle('dv-hide-summary', DV.showSummaryBar === false);
     }
+    dvRelocateActions();
   } catch (e) {}
+}
+// サマリーバーの操作ボタン群（取り消し/やり直し/選択モード/一括仮確定/ヘルプ）を
+// サブタブ行（表示設定タブと同じ行）の右端へ移設。これによりサマリーバーは
+// 「件数チップのみ」となり、OFF時は件数だけ隠れて操作ボタンは残る。
+function dvRelocateActions() {
+  const subs = document.querySelector('.dispatch-subtabs');
+  const actions = document.querySelector('.dwb-actions');
+  if (!subs || !actions) return false;
+  if (actions.parentElement !== subs) { actions.classList.add('dwb-actions--insubs'); subs.appendChild(actions); }
+  return true;
 }
 
 // ── 表示設定パネルの描画 ──
@@ -18276,14 +18289,24 @@ function renderDisplaySettings() {
           + '<div class="dvcb"><div class="dvmini">前後1週間の日付バー＋統計（割当済・稼働率）。OFFで行ごと非表示にして配車表を広げます。</div></div></div>'
         + '<div class="dvcard"><div class="dvch">🗂 担当者フィルターバー<span class="dvflex"></span>' + dvSwitchHtml(DV.showFilterBar !== false, "dvSetFlag('showFilterBar'," + (DV.showFilterBar === false) + ")") + '</div>'
           + '<div class="dvcb"><div class="dvmini">「担当 / 拠点 / すべて」と担当者別の絞り込みチップ（自分の担当・担当者別・未割当）。OFFで行ごと非表示。</div></div></div>'
-        + '<div class="dvcard"><div class="dvch">⚠ 本日のサマリーバー<span class="dvflex"></span>' + dvSwitchHtml(DV.showSummaryBar !== false, "dvSetFlag('showSummaryBar'," + (DV.showSummaryBar === false) + ")") + '</div>'
-          + '<div class="dvcb"><div class="dvmini">法令違反・未確定・確定済みの件数サマリー（取り消し / やり直し / 一括仮確定ボタンを含む行）。OFFで行ごと非表示。</div></div></div>'
+        + '<div class="dvcard"><div class="dvch">⚠ 本日のサマリー（件数）の表示<span class="dvflex"></span>' + dvSwitchHtml(DV.showSummaryBar !== false, "dvSetFlag('showSummaryBar'," + (DV.showSummaryBar === false) + ")") + '</div>'
+          + '<div class="dvcb"><div class="dvmini">法令違反・未確定・確定済みの件数チップ。OFFで件数行を非表示（取り消し / やり直し / 選択モード / 一括仮確定の操作ボタンはサブタブ行の右端へ常駐し、残ります）。</div></div></div>'
         + '<div class="dvcard dvpreview"><div class="dvch">👁 カードのプレビュー</div><div class="dvcb">' + dvPreviewCardHtml() + '</div></div>'
       + '</div>'
     + '</div></div>';
 }
 // 保存済み設定を初期表示時に盤面の枠へ反映
-document.addEventListener('DOMContentLoaded', function(){ try { dvApplyChrome(); } catch (e) {} });
+document.addEventListener('DOMContentLoaded', function(){
+  try {
+    dvApplyChrome();
+    const pg = document.getElementById('page-dispatch');
+    if (pg && window.MutationObserver) {
+      // サマリーバーは別スクリプトが遅延生成するため、生成された時点で操作ボタンを移設
+      const mo = new MutationObserver(function(){ if (dvRelocateActions()) mo.disconnect(); });
+      mo.observe(pg, { childList: true });
+    }
+  } catch (e) {}
+});
 
 // 時刻 → 0〜24 の割合(%)
 function timeToPercent(timeStr) {
