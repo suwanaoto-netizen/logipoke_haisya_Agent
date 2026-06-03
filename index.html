@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ロジポケ配車Agent - 配車管理</title>
+<!-- 動態管理の航空写真地図用（Leaflet）。読み込めない環境では自動的にSVG地図へフォールバック -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer crossorigin=""></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -3370,6 +3373,24 @@
   .dotai-mega-legend-item { display:flex; align-items:center; gap:6px; }
   .dotai-mega-legend-dot {
     width:8px; height:8px; border-radius:50%;
+  }
+  /* ── 動態管理：Leaflet（国土地理院 航空写真）地図。z-index:1 で独立スタッキングし、
+     既存オーバーレイ(z5: ヘッダー/操作/凡例)が地図の上に出るようにする ── */
+  #dotai-leaflet-map, #dotai-leaflet-slot {
+    position:absolute; inset:0; width:100%; height:100%; z-index:1; background:#dbe7ee;
+  }
+  .dotai-mega-map .leaflet-container { font:inherit; background:#dbe7ee; }
+  .leaflet-div-icon.dotai-l-pin { background:transparent; border:none; }
+  .dotai-l-pin { position:relative; }
+  .dotai-l-pin-dot {
+    display:block; width:12px; height:12px; border-radius:50%;
+    border:2px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,.45);
+  }
+  .dotai-l-pin-dot.moving { animation:pulse 1.5s infinite; }
+  .dotai-l-pin-name {
+    position:absolute; left:50%; top:-15px; transform:translateX(-50%);
+    white-space:nowrap; font-size:9px; font-weight:800; color:#fff;
+    text-shadow:0 1px 2px #000, 0 0 3px rgba(0,0,0,.85); pointer-events:none;
   }
   /* 右サイドパネル：運行リスト */
   .dotai-side {
@@ -20734,6 +20755,8 @@ const _dotaiState = {
   panOrigX: 0, panOrigY: 0,
   focusedId: null
 };
+// ── Leaflet（国土地理院 航空写真）統合用の状態（再描画間で保持） ──
+let _dotaiLMap = null, _dotaiLLayer = null, _dotaiLPos = {}, _dotaiUsingLeaflet = false, _dotaiSavedMapEl = null;
 
 function _dotaiApplyTransform() {
   const g = document.getElementById('dotai-svg-g');
@@ -20742,6 +20765,7 @@ function _dotaiApplyTransform() {
 }
 
 function _dotaiZoom(factor, cx, cy) {
+  if (_dotaiUsingLeaflet && _dotaiLMap) { if (factor > 1) _dotaiLMap.zoomIn(); else _dotaiLMap.zoomOut(); return; }
   const prevZoom = _dotaiState.zoom;
   const newZoom = Math.max(0.4, Math.min(8, prevZoom * factor));
   if (newZoom === prevZoom) return;
@@ -20766,6 +20790,7 @@ function _dotaiZoom(factor, cx, cy) {
 }
 
 function _dotaiResetView() {
+  if (_dotaiUsingLeaflet && _dotaiLMap) { _dotaiLMap.setView([37.4, 137.8], 5); return; }
   _dotaiState.zoom = 1;
   _dotaiState.panX = 0;
   _dotaiState.panY = 0;
@@ -20789,6 +20814,10 @@ function _dotaiFocusOnAssignment(id) {
   document.querySelectorAll('.dotai-side-item').forEach(li => {
     li.classList.toggle('focused', li.getAttribute('data-dotai-id') === id);
   });
+  if (_dotaiUsingLeaflet && _dotaiLMap && _dotaiLPos[id]) {
+    _dotaiLMap.setView(_dotaiLPos[id], Math.max(_dotaiLMap.getZoom(), 11), { animate: true });
+    return;
+  }
   if (!truck) return;
   truck.classList.add('focused');
   // ターゲットのSVG座標を取得
@@ -20832,6 +20861,44 @@ function _dotaiGetNowMin() {
   }
   const d = new Date();
   return d.getHours() * 60 + d.getMinutes();
+}
+
+// ── Leaflet（航空写真タイル）統合 ──
+function _dotaiLeafletReady() {
+  return typeof window.L !== 'undefined' && window.L && typeof window.L.map === 'function';
+}
+function _dotaiSetupLeaflet(mapEl) {
+  _dotaiLMap = L.map(mapEl, { zoomControl: false, attributionControl: true, minZoom: 4, maxZoom: 18 })
+    .setView([37.4, 137.8], 5);
+  L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
+    maxZoom: 18, maxNativeZoom: 18,
+    attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a> シームレス空中写真'
+  }).addTo(_dotaiLMap);
+  try { _dotaiLMap.attributionControl.setPosition('bottomleft'); } catch (e) {}
+  _dotaiLLayer = L.layerGroup().addTo(_dotaiLMap);
+}
+function _dotaiRenderLeafletMarkers(trips) {
+  if (!_dotaiLLayer) return;
+  _dotaiLLayer.clearLayers();
+  _dotaiLPos = {};
+  trips.forEach(function (t) {
+    if (t.sLat == null || t.gLat == null) return;
+    L.polyline([[t.sLat, t.sLng], [t.gLat, t.gLng]], { color: '#64748b', weight: 2, opacity: 0.5, dashArray: '4 5' }).addTo(_dotaiLLayer);
+    L.polyline([[t.sLat, t.sLng], [t.tLat, t.tLng]], { color: t.phaseColor, weight: 3.5, opacity: 0.9 }).addTo(_dotaiLLayer);
+    L.circleMarker([t.sLat, t.sLng], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#64748b', fillOpacity: 1 }).addTo(_dotaiLLayer).bindTooltip('発: ' + t.from);
+    L.circleMarker([t.gLat, t.gLng], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#dc2626', fillOpacity: 1 }).addTo(_dotaiLLayer).bindTooltip('着: ' + t.to);
+    var moving = t.phase === 'running';
+    var name = (t.driver || '').split(' ')[0];
+    var icon = L.divIcon({
+      className: 'dotai-l-pin',
+      html: '<span class="dotai-l-pin-dot' + (moving ? ' moving' : '') + '" style="background:' + t.phaseColor + '"></span><span class="dotai-l-pin-name">' + name + '</span>',
+      iconSize: [14, 14], iconAnchor: [7, 7]
+    });
+    var m = L.marker([t.tLat, t.tLng], { icon: icon }).addTo(_dotaiLLayer);
+    m.bindPopup('<b>' + (t.driver || '') + '</b><br>' + t.phaseLabel + ' ・ ' + t.speed + '<br>📍 ' + t.from + ' → ' + t.to + (t.eta && t.eta !== '—' ? '<br>ETA ' + t.eta : ''));
+    m.on('click', function () { _dotaiFocusOnAssignment(t.id); });
+    _dotaiLPos[t.id] = [t.tLat, t.tLng];
+  });
 }
 
 function renderDotai() {
@@ -20951,6 +21018,9 @@ function renderDotai() {
       remain: remainKm, distKm: Math.round(distKm), eta,
       statusColor: phaseColor,
       sx, sy, gx, gy, tx, ty,
+      sLng: sCoord[0], sLat: sCoord[1], gLng: gCoord[0], gLat: gCoord[1],
+      tLng: sCoord[0] + (gCoord[0] - sCoord[0]) * pct / 100,
+      tLat: sCoord[1] + (gCoord[1] - sCoord[1]) * pct / 100,
       ri
     };
   }).filter(Boolean);
@@ -21033,9 +21103,14 @@ function renderDotai() {
   const movingCount = tripsByPhase.running.length;
   const totalCount = trips.length;
 
+  // Leaflet地図要素は再描画間で保持（パン/ズーム維持）。innerHTML差し替え前に退避。
+  _dotaiSavedMapEl = document.getElementById('dotai-leaflet-map');
+  if (_dotaiSavedMapEl && _dotaiSavedMapEl.parentNode) _dotaiSavedMapEl.parentNode.removeChild(_dotaiSavedMapEl);
+
   wrap.innerHTML = `
     <div class="dotai-mega">
       <div class="dotai-mega-map" id="dotai-mega-map">
+        <div id="dotai-leaflet-slot"></div>
         <svg class="dotai-svg" viewBox="0 0 ${_DOTAI_PROJ.w} ${_DOTAI_PROJ.h}" preserveAspectRatio="xMidYMid meet">
           <g id="dotai-svg-g">
             <path class="dotai-pref" d="${silhouettePath}"/>
@@ -21093,9 +21168,33 @@ function renderDotai() {
     </div>
   `;
 
-  // イベントバインド
-  _dotaiBindEvents();
-  _dotaiResetView();
+  // 地図描画：Leaflet（航空写真）が使えれば実地図、無ければ既存SVGへフォールバック
+  _dotaiUsingLeaflet = _dotaiLeafletReady();
+  if (_dotaiUsingLeaflet) {
+    try {
+      const slot = document.getElementById('dotai-leaflet-slot');
+      let mapEl = _dotaiSavedMapEl;
+      if (!mapEl) { mapEl = document.createElement('div'); mapEl.id = 'dotai-leaflet-map'; }
+      if (slot) slot.replaceWith(mapEl);
+      const svgEl = document.querySelector('.dotai-svg'); if (svgEl) svgEl.style.display = 'none';
+      const scaleEl = document.querySelector('.dotai-mega-scale'); if (scaleEl) scaleEl.style.display = 'none';
+      const mm = document.getElementById('dotai-mega-map'); if (mm) mm.style.cursor = 'default';
+      if (!_dotaiLMap || !_dotaiSavedMapEl) {
+        if (_dotaiLMap) { try { _dotaiLMap.remove(); } catch (e) {} _dotaiLMap = null; }
+        _dotaiSetupLeaflet(mapEl);
+      } else {
+        _dotaiLMap.invalidateSize();
+      }
+      _dotaiRenderLeafletMarkers(onMapTrips);
+    } catch (e) { _dotaiUsingLeaflet = false; }
+  }
+  if (!_dotaiUsingLeaflet) {
+    const slot = document.getElementById('dotai-leaflet-slot'); if (slot) slot.remove();
+    const svgEl = document.querySelector('.dotai-svg'); if (svgEl) svgEl.style.display = '';
+    // イベントバインド
+    _dotaiBindEvents();
+    _dotaiResetView();
+  }
 
   // 1分ごとに自動更新（再描画でトラック位置が時間経過に合わせて動く）
   if (window.__dotaiAutoRefresh) clearInterval(window.__dotaiAutoRefresh);
