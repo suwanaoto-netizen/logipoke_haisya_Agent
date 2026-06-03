@@ -1,0 +1,77 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--accent:#3BB888;--accent-pale:#EAF5F0;--header-bg:#0D4A3A;--text-primary:#1a1a1a;
+  --text-secondary:#6b7280;--text-muted:#9ca3af;--border:#e5e7eb;--bg:#f4f6f8;
+  --orange:#f97316;--green:#16a34a;--red:#dc2626;--blk:#1a7a5e;--warn:#d97706}
+html,body{width:1360px;height:840px;overflow:hidden;background:var(--bg);
+  font-family:'IPAPGothic','IPAGothic','WenQuanYi Zen Hei',sans-serif;color:var(--text-primary);-webkit-font-smoothing:antialiased}
+.num{font-family:'DejaVu Sans',sans-serif;font-feature-settings:'tnum'}
+.app{display:flex;height:840px}
+.rail{width:54px;background:var(--header-bg);display:flex;flex-direction:column;align-items:center;padding-top:10px;gap:4px;flex-shrink:0}
+.rail .logo{width:30px;height:30px;border-radius:7px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px;margin-bottom:8px}
+.rail .ic{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bfe6d6;opacity:.7}
+.rail .ic.on{background:rgba(255,255,255,.14);color:#fff;opacity:1}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.brand{height:38px;background:var(--header-bg);display:flex;align-items:center;padding:0 16px;color:#eaf5f0;gap:10px;flex-shrink:0}
+.brand b{font-size:13px;font-weight:800}.brand .sp{flex:1}
+.brand .u{width:24px;height:24px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700}
+.dh{height:48px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:12px;flex-shrink:0}
+.dh .ttl{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800}
+.dh .ttl .dot{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--blk)}
+.dh .sp{flex:1}
+.tabs{display:flex;gap:6px}
+.tab{font-size:12px;font-weight:700;padding:6px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;color:var(--text-secondary)}
+.tab.on{background:var(--blk);color:#fff}
+.tab .b{font-size:10px;font-weight:800;padding:1px 7px;border-radius:20px}
+.tab.on .b{background:var(--red);color:#fff}.tab .b.g{background:#e5e7eb;color:var(--text-secondary)}
+/* サブタブ */
+.subs{height:38px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:2px;padding:0 14px;flex-shrink:0}
+.sub{font-size:11.5px;font-weight:700;padding:9px 12px;color:var(--text-secondary);border-bottom:2px solid transparent;display:flex;align-items:center;gap:5px}
+.sub.on{color:var(--blk);border-bottom-color:var(--blk)}
+.sub .nw{font-size:8px;font-weight:800;background:var(--accent);color:#fff;border-radius:4px;padding:1px 4px}
+
+.applied-note{display:flex;align-items:center;gap:10px;padding:7px 16px;background:#eafaf3;border-bottom:1px solid #b6e6d3;font-size:11px;font-weight:700;color:#0d7a52;flex-shrink:0}
+.applied-note .tg{font-size:9.5px;font-weight:800;background:#fff;border:1px solid #b6e6d3;border-radius:5px;padding:2px 7px}
+.applied-note .sp{flex:1}
+.applied-note .edit{font-size:10.5px;font-weight:700;color:var(--blk);border:1px solid var(--blk);border-radius:6px;padding:4px 10px}
+.board{flex:1;display:flex;min-height:0;overflow:hidden}
+.lpanel{width:210px;border-right:1px solid var(--border);background:#fff;display:flex;flex-direction:column;flex-shrink:0}
+.lh{padding:9px 11px;border-bottom:1px solid var(--border);font-size:12px;font-weight:800;display:flex;align-items:center;gap:6px}
+.lh .lb{font-size:10px;font-weight:800;background:var(--red);color:#fff;padding:1px 7px;border-radius:20px}
+.llist{flex:1;overflow:hidden;padding:7px 9px;display:flex;flex-direction:column;gap:6px}
+.mcard{border:1.5px solid var(--border);border-radius:8px;padding:7px 9px}
+.mc-client{font-size:11.5px;font-weight:800}
+.mc-ai{display:flex;align-items:center;gap:4px;margin-top:5px;padding:3px 5px;background:linear-gradient(135deg,#ecfdf5,#d1fae5);border:1px solid #a7f3d0;border-radius:5px;font-size:9px}
+.mc-ai .lb{font-weight:800;color:#047857;background:#fff;border:1px solid #6ee7b7;padding:0 4px;border-radius:7px}
+.mc-ai .tg{font-weight:800;color:#065f46;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mc-partner{display:inline-flex;align-items:center;gap:3px;margin-top:6px;padding:3px 8px;font-size:9.5px;font-weight:800;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px}
+.tl{flex:1;display:flex;flex-direction:column;min-width:0;background:#fff;overflow:hidden}
+.rhead{height:38px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 14px;flex-shrink:0}
+.rhead .rt{font-size:12px;font-weight:800}
+.rsp{flex:1}
+.legend{display:flex;gap:13px;font-size:10.5px;color:var(--text-secondary)}
+.legend i{display:inline-block;width:13px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+.tlbody{flex:1;overflow:hidden;padding:6px 0}
+.thead{display:grid;grid-template-columns:140px 1fr;height:22px;border-bottom:1px solid var(--border)}
+.thead .l{font-size:9.5px;font-weight:700;color:var(--text-muted);padding:5px 10px}
+.tk{position:relative}.tk .t{position:absolute;top:3px;transform:translateX(-50%);font-size:9px;font-weight:700;color:var(--text-muted)}
+.row{display:grid;grid-template-columns:140px 1fr;margin-bottom:4px;height:44px}
+.dcell{display:flex;align-items:center;padding:0 10px;background:#fafbfc;border:1px solid var(--border);border-right:none;border-radius:8px 0 0 8px}
+.dn{font-size:11.5px;font-weight:800}
+.track{position:relative;border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;background-color:#fbfcfd;
+  background-image:repeating-linear-gradient(90deg,transparent,transparent calc(100%/24 - 1px),#eef0f3 calc(100%/24 - 1px),#eef0f3 calc(100%/24)),
+   repeating-linear-gradient(90deg,transparent,transparent calc(100%/8 - 1px),#d1d5db calc(100%/8 - 1px),#d1d5db calc(100%/8))}
+.blk{position:absolute;top:4px;bottom:4px;border-radius:4px;display:flex;align-items:center;padding:0 8px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.blk .bt{font-size:10px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk.plan{background:#bfe0d2}.blk.plan .bt{color:#0f5740}
+.blk.conf{background:var(--blk)}
+.blk.warn{box-shadow:inset 0 0 0 2px var(--warn),0 1px 2px rgba(0,0,0,.15)}
+</style></head><body><div class="app"><aside class="rail"><div class="logo">ロ</div><div class="ic ">🏠</div><div class="ic ">📋</div><div class="ic on">🚚</div><div class="ic ">📞</div><div class="ic ">📊</div><div class="ic ">⚙</div></aside><div class="main"><div class="brand"><b>ロジポケ配車Agent</b><span class="sp"></span><span style="font-size:11px;opacity:.85">2026/06/03</span><span class="u">配</span></div><div class="dh"><div class="ttl"><span class="dot"></span>配車計画表</div><span class="sp"></span>
+  <div class="tabs"><div class="tab on">▦ 計画中 <span class="b">6</span></div><div class="tab">✓ 請求確定済み <span class="b g">3</span></div></div></div><div class="subs">
+  <div class="sub on">≡ 配車割当</div><div class="sub ">▦ 運行スケジュール</div><div class="sub ">◎ 動態管理</div><div class="sub ">💬 連絡状況</div><div class="sub ">🎛 表示設定<span class="nw">NEW</span></div></div><div class="applied-note">🎛 最小構成を適用中<span class="tg">日付バー 非表示</span><span class="tg">担当/拠点 切替バー 非表示</span><span class="tg">ドライバー：名前のみ</span><span class="tg">カード：取引先＋AI＋依頼のみ</span><span class="sp"></span><span class="edit">表示設定を変更 →</span></div><div class="board"><div class="lpanel"><div class="lh">未割当 <span class="lb">12</span></div>
+    <div class="llist"><div class="mcard"><div class="mc-client">株式会社○○商事</div><div class="mc-ai"><span style="font-size:10px">🤖</span><span class="lb">AI</span><span class="tg">山田 一郎 09:20〜</span></div><span class="mc-partner">🤝 協力会社へ依頼</span></div><div class="mcard"><div class="mc-client">△△食品株式会社</div><div class="mc-ai"><span style="font-size:10px">🤖</span><span class="lb">AI</span><span class="tg">鈴木 次郎 10:00〜</span></div><span class="mc-partner">🤝 協力会社へ依頼</span></div><div class="mcard"><div class="mc-client">株式会社□□製作所</div><span class="mc-partner">🤝 協力会社へ依頼</span></div><div class="mcard"><div class="mc-client">関東物流センター</div><div class="mc-ai"><span style="font-size:10px">🤖</span><span class="lb">AI</span><span class="tg">佐藤 四郎 13:30〜</span></div><span class="mc-partner">🤝 協力会社へ依頼</span></div><div class="mcard"><div class="mc-client">エコフレッシュ食品</div><div class="mc-ai"><span style="font-size:10px">🤖</span><span class="lb">AI</span><span class="tg">伊藤 六郎 15:10〜</span></div><span class="mc-partner">🤝 協力会社へ依頼</span></div><div class="mcard"><div class="mc-client">明和産業株式会社</div><span class="mc-partner">🤝 協力会社へ依頼</span></div><div class="mcard"><div class="mc-client">日東精工</div><div class="mc-ai"><span style="font-size:10px">🤖</span><span class="lb">AI</span><span class="tg">渡辺 七郎 09:00〜</span></div><span class="mc-partner">🤝 協力会社へ依頼</span></div><div class="mcard"><div class="mc-client">中央運送株式会社</div><div class="mc-ai"><span style="font-size:10px">🤖</span><span class="lb">AI</span><span class="tg">高橋 五郎 06:30〜</span></div><span class="mc-partner">🤝 協力会社へ依頼</span></div></div>
+  </div><div class="tl">
+    <div class="rhead"><div class="rt">🚚 トラック・ドライバー</div><div class="rsp"></div>
+      <div class="legend"><span><i style="background:var(--blk)"></i>確定</span><span><i style="background:#bfe0d2"></i>計画</span><span><i style="background:var(--blk);box-shadow:inset 0 0 0 2px var(--warn)"></i>警告</span></div></div>
+    <div class="tlbody"><div class="thead"><div class="l">ドライバー</div><div class="tk"><span class="t num" style="left:0%">0</span><span class="t num" style="left:12.5%">3</span><span class="t num" style="left:25%">6</span><span class="t num" style="left:37.5%">9</span><span class="t num" style="left:50%">12</span><span class="t num" style="left:62.5%">15</span><span class="t num" style="left:75%">18</span><span class="t num" style="left:87.5%">21</span><span class="t num" style="left:100%">24</span></div></div><div class="row"><div class="dcell"><span class="dn">山田 一郎</span></div><div class="track"><div class="blk conf " style="left:38.875%;width:12.5%"><span class="bt">○○商事</span></div><div class="blk plan " style="left:58.333333333333336%;width:14.583333333333334%"><span class="bt">関東物流</span></div></div></div><div class="row"><div class="dcell"><span class="dn">鈴木 次郎</span></div><div class="track"><div class="blk conf " style="left:33.33333333333333%;width:18.75%"><span class="bt">△△食品</span></div><div class="blk plan " style="left:62.5%;width:12.5%"><span class="bt">エコフレッシュ</span></div></div></div><div class="row"><div class="dcell"><span class="dn">田中 三郎</span></div><div class="track"><div class="blk conf " style="left:29.166666666666668%;width:33.33333333333333%"><span class="bt">□□製作所</span></div></div></div><div class="row"><div class="dcell"><span class="dn">佐藤 四郎</span></div><div class="track"><div class="blk plan " style="left:41.66666666666667%;width:12.5%"><span class="bt">明和産業</span></div><div class="blk plan warn" style="left:60.416666666666664%;width:10.416666666666668%"><span class="bt">富士物産 ⚠</span></div></div></div><div class="row"><div class="dcell"><span class="dn">高橋 五郎</span></div><div class="track"><div class="blk conf " style="left:25%;width:20.833333333333336%"><span class="bt">中央運送</span></div></div></div><div class="row"><div class="dcell"><span class="dn">伊藤 六郎</span></div><div class="track"><div class="blk conf " style="left:37.5%;width:10.416666666666668%"><span class="bt">日東精工</span></div><div class="blk plan " style="left:54.166666666666664%;width:14.583333333333334%"><span class="bt">ABC機器</span></div></div></div><div class="row"><div class="dcell"><span class="dn">渡辺 七郎</span></div><div class="track"></div></div><div class="row"><div class="dcell"><span class="dn">中村 八郎</span></div><div class="track"><div class="blk conf " style="left:35.41666666666667%;width:14.583333333333334%"><span class="bt">XYZ部品</span></div><div class="blk plan " style="left:56.25%;width:20.833333333333336%"><span class="bt">東和ロジ</span></div></div></div><div class="row"><div class="dcell"><span class="dn">小林 九郎</span></div><div class="track"><div class="blk conf " style="left:31.25%;width:10.416666666666668%"><span class="bt">日新運輸</span></div></div></div></div>
+  </div></div></div></div></body></html>
