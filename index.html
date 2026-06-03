@@ -18158,6 +18158,7 @@ function switchDispatchSubtab(sub) {
   else if (sub === 'dotai') renderDotai();
   else if (sub === 'comm') { renderCommLog(); if (typeof markCommLogRead === 'function') markCommLogRead(); }
   else if (sub === 'display') { if (typeof renderDisplaySettings === 'function') renderDisplaySettings(); }
+  if (typeof dvSyncActions === 'function') dvSyncActions(sub);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -18226,11 +18227,17 @@ function dvApplyChrome() {
 // サマリーバーの操作ボタン群（取り消し/やり直し/選択モード/一括仮確定/ヘルプ）を
 // サブタブ行（表示設定タブと同じ行）の右端へ移設。これによりサマリーバーは
 // 「件数チップのみ」となり、OFF時は件数だけ隠れて操作ボタンは残る。
+// 操作ボタン群は「配車割当(D&D)」タブのときだけ表示する
+function dvSyncActions(sub) {
+  const actions = document.querySelector('.dwb-actions');
+  if (actions) actions.style.display = (sub === 'dnd') ? '' : 'none';
+}
 function dvRelocateActions() {
   const subs = document.querySelector('.dispatch-subtabs');
   const actions = document.querySelector('.dwb-actions');
   if (!subs || !actions) return false;
   if (actions.parentElement !== subs) { actions.classList.add('dwb-actions--insubs'); subs.appendChild(actions); }
+  dvSyncActions(typeof currentDispatchSubtab !== 'undefined' ? currentDispatchSubtab : 'dnd');
   return true;
 }
 
