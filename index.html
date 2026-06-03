@@ -2742,6 +2742,56 @@
   .dispatch-subtab:hover:not(.active) { color:var(--text-primary); }
   .dispatch-subtab.active { color:#1a7a5e; border-bottom-color:#1a7a5e; }
 
+  /* ━━━━━ 表示設定（カスタマイズ）：情報量トグル ━━━━━ */
+  /* ドライバー行：名前のみ時の行高圧縮 */
+  #dnd-timeline.dv-rows-compact .dnd-track { height:40px; }
+  #dnd-timeline.dv-rows-compact .dnd-driver-cell { min-height:40px; }
+  #dnd-timeline.dv-rows-compact .dnd-driver-line1 { padding-right:0; }
+  /* 案件カード：情報が少ない時に協力会社依頼ボタンを縮小 */
+  .dnd-card.dv-min { display:flex; flex-direction:column; align-items:stretch; }
+  .dnd-card-partner-btn.dnd-card-partner-btn--sm {
+    width:auto; align-self:flex-start; margin-top:6px; padding:3px 9px; font-size:9.5px;
+  }
+  .dnd-card-partner-btn.dnd-card-partner-btn--sm svg { width:9px; height:9px; }
+  /* 「すべて / 担当 / 拠点」切替バー */
+  .dnd-group-bar { display:flex; align-items:center; gap:6px; padding:6px 14px;
+    border-bottom:1px solid var(--border); background:#fafbfc; flex-shrink:0; }
+  .dnd-group-bar-label { font-size:10px; font-weight:700; color:var(--text-muted); margin-right:2px; }
+  .dnd-group-seg { font-size:11px; font-weight:700; padding:4px 12px; border-radius:6px;
+    border:1px solid var(--border); background:#fff; color:var(--text-secondary); cursor:pointer; transition:all .12s; }
+  .dnd-group-seg:hover { border-color:var(--accent); }
+  .dnd-group-seg.on { background:#1a7a5e; color:#fff; border-color:#1a7a5e; }
+  .dnd-group-sep { display:block; font-size:10px; font-weight:800; color:#0d7a52;
+    background:#eafaf3; border:1px solid #b6e6d3; border-radius:6px; padding:3px 10px; margin:8px 4px 4px; }
+  /* 表示設定パネル */
+  #dispatch-display { background:var(--bg); }
+  .dvwrap { padding:16px 20px; display:flex; flex-direction:column; gap:14px; }
+  .dvhead { display:flex; align-items:flex-start; gap:14px; }
+  .dvh { font-size:16px; font-weight:800; }
+  .dvs { font-size:11.5px; color:var(--text-secondary); margin-top:2px; }
+  .dvpresets { margin-left:auto; display:flex; gap:4px; background:#eef2f0; border:1px solid #e2e8e4; border-radius:9px; padding:3px; }
+  .dvpreset { font-size:11.5px; font-weight:700; padding:6px 13px; border-radius:7px; border:none; background:transparent; color:var(--text-secondary); cursor:pointer; }
+  .dvpreset.on { background:#fff; color:#1a7a5e; box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  .dvcols { display:grid; grid-template-columns:1fr 1fr 320px; gap:14px; align-items:start; }
+  .dvcard { background:#fff; border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .dvcolside { display:flex; flex-direction:column; gap:14px; }
+  .dvch { display:flex; align-items:center; gap:8px; padding:11px 15px; border-bottom:1px solid var(--border); font-size:13px; font-weight:800; }
+  .dvflex { flex:1; }
+  .dvcb { padding:4px 15px 11px; }
+  .dvrow { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid #f5f6f7; cursor:pointer; }
+  .dvrow:last-child { border-bottom:none; }
+  .dvrow:hover .dvsw:not(.lock) { box-shadow:0 0 0 3px rgba(59,184,136,.15); }
+  .dvrow-l { flex:1; font-size:12px; font-weight:600; }
+  .dvmust { font-size:9px; font-weight:800; color:#047857; background:#d1fae5; border:1px solid #6ee7b7; border-radius:5px; padding:1px 6px; }
+  .dvsw { width:36px; height:20px; border-radius:20px; background:#cbd5e1; position:relative; flex-shrink:0; transition:background .15s; cursor:pointer; }
+  .dvsw.on { background:var(--accent); }
+  .dvsw.lock { background:#86c9ad; }
+  .dvsw::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.2); transition:left .15s; }
+  .dvsw.on::after, .dvsw.lock::after { left:18px; }
+  .dvnote, .dvmini { font-size:10.5px; color:var(--text-secondary); line-height:1.5; }
+  .dvnote { background:#f8fafc; border:1px dashed var(--border); border-radius:7px; padding:7px 9px; margin-top:8px; }
+  .dvpreview { background:linear-gradient(160deg,#f0fbf6,#fff); border-color:#b6e6d3; }
+
   /* ━━━━━ 運行スケジュール（50台一画面ビュー） ━━━━━ */
   .schedule-wrap {
     flex:1; overflow:hidden; padding:8px 12px 6px;
@@ -7943,6 +7993,11 @@
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           連絡状況
         </button>
+        <button class="dispatch-subtab" id="dsubtab-display" onclick="switchDispatchSubtab('display')" title="配車計画表の情報量をカスタマイズ">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+          表示設定
+          <span style="font-size:8px;font-weight:800;background:var(--accent);color:#fff;border-radius:4px;padding:1px 4px;margin-left:2px">NEW</span>
+        </button>
       </div>
 
       <!-- ━━ D&D配車ビュー ━━ -->
@@ -8044,6 +8099,7 @@
                 <div class="dnd-stat">稼働率 <span class="dnd-stat-val" id="dnd-stat-rate">0%</span></div>
               </div>
             </div>
+            <div class="dnd-group-bar" id="dnd-group-bar" style="display:none"></div>
             <div class="dnd-timeline" id="dnd-timeline"></div>
           </div>
         </div>
@@ -8148,6 +8204,9 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         <span id="dnd-edit-toast-text">変更を保存しました</span>
       </div>
+
+      <!-- 表示設定（カスタマイズ）：配車計画表の情報量を絞る -->
+      <div id="dispatch-display" style="display:none;flex:1;overflow:auto;flex-direction:column"></div>
 
       <!-- 運行スケジュール（本日・50台一画面ビュー） -->
       <div id="dispatch-schedule" style="display:none;flex-direction:column;flex:1;overflow:hidden">
@@ -18098,11 +18157,166 @@ function switchDispatchSubtab(sub) {
   document.getElementById('dispatch-dotai').style.display    = sub === 'dotai'    ? 'flex' : 'none';
   const commEl = document.getElementById('dispatch-comm');
   if (commEl) commEl.style.display = sub === 'comm' ? 'flex' : 'none';
-  if (sub === 'dnd') renderDnd();
+  const dispEl = document.getElementById('dispatch-display');
+  if (dispEl) dispEl.style.display = sub === 'display' ? 'flex' : 'none';
+  if (sub === 'dnd') { renderDnd(); if (typeof dvApplyChrome === 'function') dvApplyChrome(); }
   else if (sub === 'schedule') renderSchedule();
   else if (sub === 'dotai') renderDotai();
   else if (sub === 'comm') { renderCommLog(); if (typeof markCommLogRead === 'function') markCommLogRead(); }
+  else if (sub === 'display') { if (typeof renderDisplaySettings === 'function') renderDisplaySettings(); }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  配車計画表 表示設定（カスタマイズ）— 情報量トグル
+//  「表示設定」サブタブから、案件カード／ドライバーカード／日付バー／
+//  切替バーの表示項目を絞り、メインの配車操作領域を広げる。
+//  設定は localStorage（logipoke_dispatch_view_v1）に永続化。
+// ═══════════════════════════════════════════════════════════════
+const DISPATCH_VIEW_KEY = 'logipoke_dispatch_view_v1';
+function dvDefaults() {
+  return {
+    preset: 'standard',
+    card:   { status:true, route:true, goods:true, time:true, deadline:true, urgent:true, source:true, edit:true },
+    driver: { vehicle:true, capacity:true, status:true, kaizen:true },
+    showDateBar: true,
+    showGroupBar: false,
+    groupMode: 'all',   // all | driver | base
+  };
+}
+const DV_PRESETS = {
+  minimal:  { card:{status:false,route:false,goods:false,time:false,deadline:false,urgent:false,source:false,edit:false}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showGroupBar:false },
+  standard: { card:{status:true,route:true,goods:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showGroupBar:false },
+  full:     { card:{status:true,route:true,goods:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showGroupBar:true  },
+};
+function dvLoad() {
+  try {
+    const raw = localStorage.getItem(DISPATCH_VIEW_KEY);
+    if (raw) {
+      const o = JSON.parse(raw); const d = dvDefaults();
+      return { ...d, ...o, card:{ ...d.card, ...(o.card||{}) }, driver:{ ...d.driver, ...(o.driver||{}) } };
+    }
+  } catch (e) {}
+  return dvDefaults();
+}
+let DV = dvLoad();
+function dvSave() { try { localStorage.setItem(DISPATCH_VIEW_KEY, JSON.stringify(DV)); } catch (e) {} }
+// テンプレートからの安全参照（DV未定義でも既定=表示 にフォールバック）
+function dvc(k) { return (typeof DV === 'undefined') || !DV.card   || DV.card[k]   !== false; }
+function dvd(k) { return (typeof DV === 'undefined') || !DV.driver || DV.driver[k] !== false; }
+
+function dvApplyPreset(p) {
+  const d = dvDefaults(); const pr = DV_PRESETS[p] || DV_PRESETS.standard;
+  DV = { ...d, preset:p, card:{...pr.card}, driver:{...pr.driver}, showDateBar:pr.showDateBar, showGroupBar:pr.showGroupBar, groupMode:DV.groupMode||'all' };
+  dvSave(); renderDisplaySettings();
+}
+function dvSetCard(k, v)   { DV.card[k]   = v; DV.preset='custom'; dvSave(); renderDisplaySettings(); }
+function dvSetDriver(k, v) { DV.driver[k] = v; DV.preset='custom'; dvSave(); renderDisplaySettings(); }
+function dvSetFlag(k, v)   { DV[k] = v;        DV.preset='custom'; dvSave(); renderDisplaySettings(); }
+function dvSetGroupMode(m) { DV.groupMode = m; dvSave(); if (typeof renderDnd === 'function') renderDnd(); dvApplyChrome(); }
+
+// 盤面の「枠」へ反映（日付バー/統計の表示、行高圧縮、切替バー描画）。テンプレ非依存部分。
+function dvApplyChrome() {
+  try {
+    const strip = document.getElementById('dnd-date-strip');
+    if (strip) strip.style.display = DV.showDateBar ? '' : 'none';
+    document.querySelectorAll('#dispatch-dnd .dnd-right-stats').forEach(function(e){ e.style.display = DV.showDateBar ? '' : 'none'; });
+    const tl = document.getElementById('dnd-timeline');
+    if (tl) tl.classList.toggle('dv-rows-compact', !dvd('vehicle') && !dvd('capacity') && !dvd('status'));
+    dvRenderGroupBar();
+  } catch (e) {}
+}
+function dvRenderGroupBar() {
+  const bar = document.getElementById('dnd-group-bar'); if (!bar) return;
+  bar.style.display = DV.showGroupBar ? 'flex' : 'none';
+  if (!DV.showGroupBar) { bar.innerHTML = ''; return; }
+  const modes = [['all','すべて'], ['driver','担当別'], ['base','拠点別']];
+  bar.innerHTML = '<span class="dnd-group-bar-label">表示単位</span>' +
+    modes.map(function(m){ return '<button class="dnd-group-seg ' + (DV.groupMode===m[0]?'on':'') + '" onclick="dvSetGroupMode(\'' + m[0] + '\')">' + m[1] + '</button>'; }).join('');
+}
+// 行のグルーピング：拠点別は拠点名で区切り、担当別は氏名順、すべては既存順
+function dndGroupKeyOf(d) {
+  try {
+    const drv = (typeof getDriverById === 'function') ? getDriverById(d._driverId) : null;
+    const bid = drv && drv.baseId;
+    if (!bid) return d.partner ? '協力会社' : '拠点未設定';
+    const b = (typeof getBaseById === 'function') ? getBaseById(bid) : null;
+    return b ? b.name : bid;
+  } catch (e) { return '拠点未設定'; }
+}
+function dndApplyGroupOrder(listIn) {
+  const list = listIn.slice();
+  if (typeof DV === 'undefined') return list;
+  if (DV.groupMode === 'driver') { list.sort(function(a,b){ return String(a.driver).localeCompare(String(b.driver),'ja'); }); return list; }
+  if (DV.groupMode === 'base') {
+    const order = (typeof bases !== 'undefined' ? bases.map(function(b){ return b.name; }) : []).concat(['協力会社','拠点未設定']);
+    const rank = function(g){ const i = order.indexOf(g); return i < 0 ? 999 : i; };
+    list.sort(function(a,b){ return rank(dndGroupKeyOf(a)) - rank(dndGroupKeyOf(b)); });
+    return list;
+  }
+  return list;
+}
+
+// ── 表示設定パネルの描画 ──
+function dvSwitchHtml(on, onclick) { return '<span class="dvsw ' + (on?'on':'') + '" onclick="event.stopPropagation();' + onclick + '"></span>'; }
+function dvRowHtml(label, on, onclick, must) {
+  return '<div class="dvrow" ' + (must ? '' : 'onclick="' + onclick + '"') + '>'
+    + '<span class="dvrow-l">' + label + '</span>'
+    + (must ? '<span class="dvmust">必須</span>' : '')
+    + '<span class="dvsw ' + (must ? 'lock' : (on ? 'on' : '')) + '"></span></div>';
+}
+function dvPreviewCardHtml() {
+  const c = { client:'株式会社○○商事', from:'埼玉県川口市', to:'神奈川県横浜市', goods:'パレット / 800kg / 常温', preferredStart:'09:00', durationH:3, deadline:'05/25 AM指定', urgent:true };
+  const minimal = !dvc('route') && !dvc('goods') && !dvc('time') && !dvc('deadline');
+  const meta = (dvc('source') || dvc('time') || dvc('deadline') || (c.urgent && dvc('urgent'))) ? ('<div class="dnd-card-meta">'
+      + (dvc('source') ? '<span class="dnd-card-source">🎙 AI受付</span>' : '')
+      + (dvc('time') ? '<span class="dnd-card-chip time">⏱ ' + c.preferredStart + '〜 / ' + c.durationH + 'h</span>' : '')
+      + (dvc('deadline') ? (c.urgent && dvc('urgent') ? '<span class="dnd-card-chip urgent">⚡ ' + c.deadline + '</span>' : '<span class="dnd-card-chip">' + c.deadline + '</span>') : (c.urgent && dvc('urgent') ? '<span class="dnd-card-chip urgent">⚡ 緊急</span>' : ''))
+      + '</div>') : '';
+  return '<div class="dnd-card ' + (minimal ? 'dv-min' : '') + '" style="cursor:default">'
+    + '<div class="dnd-card-head"><div class="dnd-card-client">' + c.client + '</div>'
+    + (dvc('status') ? '<div class="dnd-card-status unprocessed">未処理</div>' : '') + '</div>'
+    + (dvc('route') ? '<div class="dnd-card-route"><span style="color:var(--text-muted)">📍</span><span>' + c.from + ' → ' + c.to + '</span></div>' : '')
+    + (dvc('goods') ? '<div class="dnd-card-goods" style="font-size:10px;color:var(--text-secondary);line-height:1.4">' + c.goods + '</div>' : '')
+    + meta
+    + '<div class="dnd-card-airec"><span class="dnd-card-airec-ico">🤖</span><span class="dnd-card-airec-label">AI推奨</span><span class="dnd-card-airec-target">山田 一郎</span><span class="dnd-card-airec-time">09:20〜12:20</span></div>'
+    + '<button class="dnd-card-partner-btn' + (minimal ? ' dnd-card-partner-btn--sm' : '') + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>協力会社へ依頼</button>'
+    + '</div>';
+}
+function renderDisplaySettings() {
+  const host = document.getElementById('dispatch-display'); if (!host) return;
+  const c = DV.card, d = DV.driver;
+  const cardRows = [
+    ['取引先名', null, true], ['AI推薦（おすすめ配車）', null, true], ['協力会社へ依頼ボタン', null, true],
+    ['ステータスバッジ', 'status'], ['発着ルート（発地→着地）', 'route'], ['荷物情報（種別/重量/温度）', 'goods'],
+    ['時刻・所要時間', 'time'], ['納期', 'deadline'], ['緊急マーク', 'urgent'],
+    ['受付経路アイコン（AI受付など）', 'source'], ['編集ボタン', 'edit'],
+  ].map(function(r){ const l=r[0], k=r[1], must=r[2]; return dvRowHtml(l, must?true:c[k], must?'':("dvSetCard('"+k+"',"+(!c[k])+")"), must); }).join('');
+  const driverRows = [
+    ['ドライバー名', null, true], ['車両番号・車種', 'vehicle'], ['最大積載量', 'capacity'],
+    ['稼働状態（空き / 配車あり）', 'status'], ['改善基準告示バッジ', 'kaizen'],
+  ].map(function(r){ const l=r[0], k=r[1], must=r[2]; return dvRowHtml(l, must?true:d[k], must?'':("dvSetDriver('"+k+"',"+(!d[k])+")"), must); }).join('');
+  const presets = [['minimal','最小構成'], ['standard','標準'], ['full','全部表示']]
+    .map(function(p){ return '<button class="dvpreset ' + (DV.preset===p[0]?'on':'') + '" onclick="dvApplyPreset(\'' + p[0] + '\')">' + p[1] + '</button>'; }).join('')
+    + (DV.preset === 'custom' ? '<button class="dvpreset on" style="cursor:default">カスタム</button>' : '');
+  host.innerHTML = '<div class="dvwrap">'
+    + '<div class="dvhead"><div><div class="dvh">🎛 表示設定（カスタマイズ）</div><div class="dvs">配車計画表の情報量を絞って、メインの配車操作をしやすくします（変更は自動保存）</div></div>'
+      + '<div class="dvpresets">' + presets + '</div></div>'
+    + '<div class="dvcols">'
+      + '<div class="dvcard"><div class="dvch">📋 未割当案件カードの表示項目</div><div class="dvcb">' + cardRows
+        + '<div class="dvnote">💡 表示項目が少ないカードでは「協力会社へ依頼」ボタンを自動で小さくします。</div></div></div>'
+      + '<div class="dvcard"><div class="dvch">🚚 車両・ドライバーカードの表示項目</div><div class="dvcb">' + driverRows
+        + '<div class="dvnote">↕ ドライバー名のみにすると行が低くなり、1画面の表示台数が増えます。</div></div></div>'
+      + '<div class="dvcolside">'
+        + '<div class="dvcard"><div class="dvch">📅 日付選択バーの表示<span class="dvflex"></span>' + dvSwitchHtml(DV.showDateBar, "dvSetFlag('showDateBar'," + (!DV.showDateBar) + ")") + '</div>'
+          + '<div class="dvcb"><div class="dvmini">前後1週間の日付バー＋統計（割当済・稼働率）。OFFで行ごと非表示にして配車表を広げます。</div></div></div>'
+        + '<div class="dvcard"><div class="dvch">🗂 「すべて / 担当 / 拠点」切替バー<span class="dvflex"></span>' + dvSwitchHtml(DV.showGroupBar, "dvSetFlag('showGroupBar'," + (!DV.showGroupBar) + ")") + '</div>'
+          + '<div class="dvcb"><div class="dvmini">OFFで行ごと非表示。ONのとき配車表の上部で表示単位（拠点別など）を切り替えられます。</div></div></div>'
+        + '<div class="dvcard dvpreview"><div class="dvch">👁 カードのプレビュー</div><div class="dvcb">' + dvPreviewCardHtml() + '</div></div>'
+      + '</div>'
+    + '</div></div>';
+}
+// 保存済み設定を初期表示時に盤面の枠へ反映
+document.addEventListener('DOMContentLoaded', function(){ try { dvApplyChrome(); } catch (e) {} });
 
 // 時刻 → 0〜24 の割合(%)
 function timeToPercent(timeStr) {
@@ -24771,7 +24985,7 @@ function renderDndList() {
     }
     // 協力会社へ依頼ボタン（処理済みでは非表示・割当済みでは非表示）
     const partnerBtn = (!processed && !assigned) ? `
-        <button class="dnd-card-partner-btn"
+        <button class="dnd-card-partner-btn${(!dvc('route') && !dvc('goods') && !dvc('time') && !dvc('deadline')) ? ' dnd-card-partner-btn--sm' : ''}"
           onclick="event.stopPropagation();openDndPartnerModal('${c.id}')"
           onmousedown="event.stopPropagation()"
           ondragstart="event.preventDefault();event.stopPropagation()"
@@ -24804,7 +25018,7 @@ function renderDndList() {
     }
 
     return `
-      <div class="dnd-card ${assigned ? 'assigned' : ''} ${processed ? 'is-processed' : ''}"
+      <div class="dnd-card ${assigned ? 'assigned' : ''} ${processed ? 'is-processed' : ''} ${(!dvc('route') && !dvc('goods') && !dvc('time') && !dvc('deadline')) ? 'dv-min' : ''}"
            data-case-id="${c.id}"
            draggable="${(assigned || processed) ? 'false' : 'true'}"
            ${(assigned || processed) ? `onclick="dndJumpToAssignment('${c.id}')" style="cursor:pointer"` : `onmousedown="dndCardMouseDown(event,'${c.id}')"
@@ -24812,8 +25026,8 @@ function renderDndList() {
            ondragend="dndCardDragEnd(event)"`}>
         <div class="dnd-card-head">
           <div class="dnd-card-client" title="${c.client}">${c.client}</div>
-          <div class="dnd-card-status ${statusClass}">${statusLabel}</div>
-          ${(assigned || processed) ? '' : `<button class="dnd-card-edit-btn"
+          ${dvc('status') ? `<div class="dnd-card-status ${statusClass}">${statusLabel}</div>` : ''}
+          ${(assigned || processed || !dvc('edit')) ? '' : `<button class="dnd-card-edit-btn"
             onclick="event.stopPropagation();openDndEditModal('${c.id}')"
             onmousedown="event.stopPropagation()"
             ondragstart="event.preventDefault();event.stopPropagation()"
@@ -24826,16 +25040,16 @@ function renderDndList() {
             編集
           </button>`}
         </div>
-        <div class="dnd-card-route">
+        ${dvc('route') ? `<div class="dnd-card-route">
           <span style="color:var(--text-muted)">📍</span>
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.from} → ${c.to}</span>
-        </div>
-        <div style="font-size:10px;color:var(--text-secondary);line-height:1.4">${c.goods}</div>
-        <div class="dnd-card-meta">
-          ${renderDndSourceChip(c)}
-          <span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>
-          ${c.urgent ? `<span class="dnd-card-chip urgent">⚡ ${c.deadline}</span>` : `<span class="dnd-card-chip">${c.deadline}</span>`}
-        </div>
+        </div>` : ''}
+        ${dvc('goods') ? `<div class="dnd-card-goods" style="font-size:10px;color:var(--text-secondary);line-height:1.4">${c.goods}</div>` : ''}
+        ${(dvc('source') || dvc('time') || dvc('deadline') || (c.urgent && dvc('urgent'))) ? `<div class="dnd-card-meta">
+          ${dvc('source') ? renderDndSourceChip(c) : ''}
+          ${dvc('time') ? `<span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>` : ''}
+          ${dvc('deadline') ? (c.urgent && dvc('urgent') ? `<span class="dnd-card-chip urgent">⚡ ${c.deadline}</span>` : `<span class="dnd-card-chip">${c.deadline}</span>`) : (c.urgent && dvc('urgent') ? `<span class="dnd-card-chip urgent">⚡ 緊急</span>` : '')}
+        </div>` : ''}
         ${recInfo}
         ${assignedInfo}
         ${partnerBtn}
@@ -25409,7 +25623,9 @@ function renderDndTimeline() {
   const nowPct = ((now.getHours() + now.getMinutes()/60)/24)*100;
   const nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
 
-  const rowsHtml = dndDrivers.map(d => {
+  const _dvList = (typeof dndApplyGroupOrder === 'function') ? dndApplyGroupOrder(dndDrivers) : dndDrivers;
+  let _dvPrevGroup = null;
+  const rowsHtml = _dvList.map(d => {
     // 参照する割当：確定済みタブなら専用ストア、それ以外は通常のdndAssignments
     let assigned;
     if (isConfirmedTab) {
@@ -25570,18 +25786,24 @@ function renderDndTimeline() {
          </svg>
        </span>`;
 
-    return `<div class="dnd-row">
+    let _dvSep = '';
+    if (typeof DV !== 'undefined' && DV.groupMode === 'base' && typeof dndGroupKeyOf === 'function') {
+      const _g = dndGroupKeyOf(d);
+      if (_g !== _dvPrevGroup) { _dvPrevGroup = _g; _dvSep = `<div class="dnd-group-sep">📍 ${_g}</div>`; }
+    }
+    const _dvLine2 = (dvd('status') || dvd('vehicle') || dvd('capacity')) ? `<div class="dnd-driver-line2">
+          ${dvd('status') ? `<span class="dnd-driver-status ${statusCls}">${statusTxt}</span>` : ''}
+          ${dvd('vehicle') ? `<span class="dnd-driver-vehicle">${d.vehicle.replace(/\s*車両/, '').replace(/^V?(\d+)/, '$1')}</span>` : ''}
+          ${dvd('capacity') ? `<span class="dnd-driver-capacity">${d.type}/${(d.maxLoad/1000).toFixed(0)}t</span>` : ''}
+        </div>` : '';
+    return _dvSep + `<div class="dnd-row">
       <div class="dnd-driver-cell" ${rowDragAttrs}>
         <div class="dnd-driver-line1">
           ${handleIconHtml}
           <span class="dnd-driver-name">${d.driver}</span>
         </div>
-        <div class="dnd-driver-line2">
-          <span class="dnd-driver-status ${statusCls}">${statusTxt}</span>
-          <span class="dnd-driver-vehicle">${d.vehicle.replace(/\s*車両/, '').replace(/^V?(\d+)/, '$1')}</span>
-          <span class="dnd-driver-capacity">${d.type}/${(d.maxLoad/1000).toFixed(0)}t</span>
-        </div>
-        ${kaizenBadgeHtml}
+        ${_dvLine2}
+        ${dvd('kaizen') ? kaizenBadgeHtml : ''}
       </div>
       <div class="dnd-track"
            data-driver-id="${d.id}"
