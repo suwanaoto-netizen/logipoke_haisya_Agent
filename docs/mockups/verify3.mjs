@@ -1,0 +1,18 @@
+import { chromium } from 'playwright';
+const D = '/home/user/logipoke_haisya_Agent/docs/mockups/';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1440, height: 880 }, deviceScaleFactor: 2 });
+await page.goto('file:///home/user/logipoke_haisya_Agent/index.html', { waitUntil: 'load' });
+await page.waitForTimeout(900);
+const nav = async (fn) => { await page.evaluate(fn); await page.waitForTimeout(500); };
+await nav(() => { try { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); document.getElementById('page-dispatch').classList.add('active'); } catch (e) {} switchDispatchSubtab('dnd'); });
+await page.screenshot({ path: D + 'feat-0-board-standard.png' });
+await nav(() => switchDispatchSubtab('display'));
+await page.screenshot({ path: D + 'feat-1-settings.png' });
+await nav(() => { dvApplyPreset('minimal'); switchDispatchSubtab('dnd'); });
+await page.screenshot({ path: D + 'feat-2-board-minimal.png' });
+await nav(() => { dvApplyPreset('full'); dvSetGroupMode('base'); switchDispatchSubtab('dnd'); });
+await page.screenshot({ path: D + 'feat-3-board-basegroup.png' });
+await page.evaluate(() => { try { localStorage.removeItem('logipoke_dispatch_view_v1'); } catch (e) {} });
+await browser.close();
+console.log('DONE');

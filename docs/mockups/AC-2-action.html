@@ -1,0 +1,106 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--accent:#3BB888;--accent-pale:#EAF5F0;--header-bg:#0D4A3A;--text-primary:#1a1a1a;
+  --text-secondary:#6b7280;--text-muted:#9ca3af;--border:#e5e7eb;--bg:#f4f6f8;
+  --orange:#f97316;--green:#16a34a;--red:#dc2626;--blk:#1a7a5e;--warn:#d97706}
+html,body{width:1360px;height:840px;overflow:hidden;background:var(--bg);
+  font-family:'IPAPGothic','IPAGothic','WenQuanYi Zen Hei',sans-serif;color:var(--text-primary);-webkit-font-smoothing:antialiased}
+.num{font-family:'DejaVu Sans',sans-serif;font-feature-settings:'tnum'}
+.app{display:flex;height:840px}
+.rail{width:54px;background:var(--header-bg);display:flex;flex-direction:column;align-items:center;padding-top:10px;gap:4px;flex-shrink:0}
+.rail .logo{width:30px;height:30px;border-radius:7px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px;margin-bottom:8px}
+.rail .ic{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bfe6d6;opacity:.7}
+.rail .ic.on{background:rgba(255,255,255,.14);color:#fff;opacity:1}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.brand{height:38px;background:var(--header-bg);display:flex;align-items:center;padding:0 16px;color:#eaf5f0;gap:10px;flex-shrink:0}
+.brand b{font-size:13px;font-weight:800}
+.brand .sp{flex:1}
+.brand .u{width:24px;height:24px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700}
+.dh{height:50px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:14px;flex-shrink:0}
+.dh .ttl{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800}
+.dh .ttl .dot{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--blk)}
+.dh .sp{flex:1}
+/* モード切替（セグメント） */
+.modeseg{display:flex;background:#eef2f0;border-radius:10px;padding:3px;gap:2px;border:1px solid #e2e8e4}
+.modeseg .m{font-size:12.5px;font-weight:700;padding:7px 16px;border-radius:8px;color:var(--text-secondary);display:flex;align-items:center;gap:7px}
+.modeseg .m.on{background:#fff;color:var(--blk);box-shadow:0 1px 4px rgba(0,0,0,.13)}
+.modeseg .m .b{font-size:10px;font-weight:800;background:var(--red);color:#fff;border-radius:20px;padding:1px 7px}
+.modeseg .m.on .b{background:var(--red)}
+.btn{font-size:11px;font-weight:700;padding:6px 11px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px}
+/* 常時表示の要対応ストリップ */
+.reqstrip{display:flex;align-items:center;gap:10px;padding:8px 16px;background:#fff7ed;border-bottom:1px solid #fed7aa;font-size:11.5px;color:#9a3412;font-weight:700;flex-shrink:0}
+.reqstrip .rc{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid #fed7aa;border-radius:13px;padding:3px 10px;font-size:11px}
+.reqstrip .rc .dt{width:7px;height:7px;border-radius:50%}
+.reqstrip .sp{flex:1}
+.reqstrip .go{font-size:11px;font-weight:800;color:#fff;background:var(--orange);border-radius:7px;padding:5px 12px}
+.board{flex:1;display:flex;min-height:0;overflow:hidden}
+/* ガント */
+.tl{flex:1;display:flex;flex-direction:column;min-width:0;background:#fff;overflow:hidden}
+.rhead{height:42px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 14px;flex-shrink:0}
+.rhead .rt{font-size:12px;font-weight:800;display:flex;align-items:center;gap:6px}
+.rsp{flex:1}
+.legend{display:flex;align-items:center;gap:14px;font-size:10.5px;color:var(--text-secondary)}
+.legend i{display:inline-block;width:13px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+.datemini{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:800;color:var(--text-secondary)}
+.datemini .nb{width:18px;height:20px;border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center}
+.tlbody{flex:1;overflow:hidden;padding:6px 0}
+.thead{display:grid;grid-template-columns:150px 1fr;height:22px;border-bottom:1px solid var(--border)}
+.thead .l{font-size:9.5px;font-weight:700;color:var(--text-muted);padding:5px 10px}
+.tk{position:relative}
+.tk .t{position:absolute;top:3px;transform:translateX(-50%);font-size:9px;font-weight:700;color:var(--text-muted)}
+.row{display:grid;grid-template-columns:150px 1fr;margin-bottom:4px;height:52px}
+.dcell{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:4px 8px;background:#fafbfc;border:1px solid var(--border);border-right:none;border-radius:8px 0 0 8px}
+.dn2{font-size:11px;font-weight:800;display:flex;align-items:center;gap:5px}
+.dn2 .sd{width:6px;height:6px;border-radius:50%}
+.dn2 .sd.busy{background:var(--orange)}.dn2 .sd.available{background:var(--green)}
+.track{position:relative;height:52px;border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;background-color:#fbfcfd;
+  background-image:repeating-linear-gradient(90deg,transparent,transparent calc(100%/24 - 1px),#eef0f3 calc(100%/24 - 1px),#eef0f3 calc(100%/24)),
+   repeating-linear-gradient(90deg,transparent,transparent calc(100%/8 - 1px),#d1d5db calc(100%/8 - 1px),#d1d5db calc(100%/8))}
+.blk{position:absolute;top:4px;bottom:4px;border-radius:4px;display:flex;align-items:center;padding:0 8px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.blk .bt{font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.cwrap{flex:1;overflow:hidden;padding:16px 22px;display:flex;flex-direction:column;gap:14px;background:var(--bg)}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}
+.kpi{background:#fff;border:1px solid var(--border);border-radius:12px;padding:13px 17px;position:relative;overflow:hidden}
+.kpi .kl{font-size:11px;font-weight:700;color:var(--text-secondary)}
+.kpi .kv{font-size:28px;font-weight:800;margin-top:3px}
+.kpi .ks{font-size:10px;color:var(--text-muted);margin-top:2px}
+.kpi.red{background:#fef2f2;border-color:#fecaca}.kpi.red .kv{color:var(--red)}
+.kpi.amber{background:#fffbeb;border-color:#fde68a}.kpi.amber .kv{color:#b45309}
+.kpi.green .kv{color:var(--blk)}
+.kpi .bar{position:absolute;left:0;top:0;bottom:0;width:5px}
+.kpi.red .bar{background:var(--red)}.kpi.amber .bar{background:#f59e0b}.kpi.green .bar{background:var(--accent)}
+.panel{background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.ptitle{display:flex;align-items:center;gap:8px;padding:11px 18px;border-bottom:1px solid var(--border);font-size:13px;font-weight:800}
+.ptitle .cnt{font-size:11px;font-weight:800;background:var(--red);color:#fff;border-radius:20px;padding:1px 9px}
+.erow{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #f1f3f5}
+.erow .sev{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.sev.r{background:var(--red)}.sev.o{background:var(--warn)}.sev.y{background:#eab308}
+.erow .badge{font-size:9.5px;font-weight:800;padding:2px 8px;border-radius:6px;flex-shrink:0;width:118px;text-align:center}
+.badge.r{background:#fee2e2;color:#b91c1c}.badge.o{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}.badge.y{background:#fef9c3;color:#854d0e}
+.erow .body{flex:1;min-width:0}
+.erow .b1{font-size:12.5px;font-weight:700}
+.erow .b2{font-size:10.5px;color:var(--text-secondary);margin-top:1px}
+.erow .act{font-size:11px;font-weight:700;padding:6px 13px;border-radius:7px;background:var(--blk);color:#fff;flex-shrink:0}
+.erow .act.ghost{background:#fff;color:var(--blk);border:1px solid var(--blk)}
+.collapsed{display:flex;align-items:center;gap:10px;padding:13px 18px;background:#f5fdf9;border:1px dashed #bbf7d0;border-radius:12px;font-size:12px;font-weight:700;color:#065f46}
+.collapsed .ar{margin-left:auto;color:var(--blk);font-size:11px;font-weight:800}
+</style></head><body><div class="app"><aside class="rail"><div class="logo">ロ</div><div class="ic ">🏠</div><div class="ic ">📋</div><div class="ic on">🚚</div><div class="ic ">📞</div><div class="ic ">📊</div><div class="ic ">⚙</div></aside><div class="main"><div class="brand"><b>ロジポケ配車Agent</b><span class="sp"></span><span style="font-size:11px;opacity:.85">2026/06/03</span><span class="u">配</span></div><div class="dh"><div class="ttl"><span class="dot"></span>配車計画表</div><span class="sp"></span><div class="modeseg">
+  <div class="m ">🗺 俯瞰</div>
+  <div class="m on">🔔 要対応 <span class="b">8</span></div>
+</div></div><div class="board"><div class="cwrap">
+    <div class="kpis">
+      <div class="kpi red"><div class="bar"></div><div class="kl">未割当案件</div><div class="kv num">6</div><div class="ks">うち緊急 2件</div></div>
+      <div class="kpi amber"><div class="bar"></div><div class="kl">確定待ち</div><div class="kv num">5</div><div class="ks">計画のまま未確定</div></div>
+      <div class="kpi amber"><div class="bar"></div><div class="kl">改善基準 警告</div><div class="kv num">1</div><div class="ks">連続運転オーバー</div></div>
+      <div class="kpi green"><div class="bar"></div><div class="kl">稼働率</div><div class="kv num">82%</div><div class="ks">稼働 8台 / 確定 42件</div></div>
+    </div>
+    <div class="panel"><div class="ptitle">🔔 対応が必要な案件 <span class="cnt">8</span></div><div class="erow"><span class="sev r"></span><span class="badge r">未割当・緊急</span>
+    <div class="body"><div class="b1">株式会社○○商事 　川口 → 横浜</div><div class="b2">09:00 必着 ／ パレット 800kg・常温</div></div><span class="act ">配車する ›</span></div><div class="erow"><span class="sev r"></span><span class="badge r">未割当・緊急</span>
+    <div class="body"><div class="b1">△△食品株式会社 　船橋 → 大田</div><div class="b2">10:00 必着 ／ ケース 500kg・冷蔵</div></div><span class="act ">配車する ›</span></div><div class="erow"><span class="sev o"></span><span class="badge o">改善基準告示</span>
+    <div class="body"><div class="b1">佐藤 四郎（3t）　富士物産 14:30–17:00</div><div class="b2">連続運転 4時間20分 ／ 休憩不足の見込み</div></div><span class="act ghost">休憩を挿入 ›</span></div><div class="erow"><span class="sev y"></span><span class="badge y">確定待ち</span>
+    <div class="body"><div class="b1">関東物流センター 　山田 一郎（仮）14:00</div><div class="b2">計画のまま未確定 ／ 締切まで 3時間</div></div><span class="act ghost">ガントで確定 ›</span></div><div class="erow"><span class="sev y"></span><span class="badge y">確定待ち</span>
+    <div class="body"><div class="b1">東和ロジ 　中村 八郎（仮）13:30</div><div class="b2">計画のまま未確定 ／ 締切まで 5時間</div></div><span class="act ghost">ガントで確定 ›</span></div>
+      <div class="erow" style="border-bottom:none;justify-content:center;color:var(--text-secondary);font-size:11px;font-weight:700">未割当 残り4件を表示 ▾</div></div>
+    <div class="collapsed">✓ 確定済み 42件・稼働中 8台 は問題なし（折りたたみ中）<span class="ar">俯瞰モードで開く →</span></div>
+  </div></div></div></div></body></html>

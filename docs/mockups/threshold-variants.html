@@ -1,0 +1,113 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--accent:#3BB888;--accent-pale:#EAF5F0;--header-bg:#0D4A3A;--text-primary:#1a1a1a;
+  --text-secondary:#6b7280;--text-muted:#9ca3af;--border:#e5e7eb;--bg:#f4f6f8;
+  --orange:#f97316;--green:#16a34a;--red:#dc2626;--blk:#1a7a5e;--warn:#d97706}
+html,body{width:1340px;height:660px;overflow:hidden;background:var(--bg);
+  font-family:'IPAPGothic','IPAGothic','WenQuanYi Zen Hei',sans-serif;color:var(--text-primary);-webkit-font-smoothing:antialiased}
+.num{font-family:'DejaVu Sans',sans-serif;font-feature-settings:'tnum'}
+.app{display:flex;height:660px}
+.rail{width:54px;background:var(--header-bg);display:flex;flex-direction:column;align-items:center;padding-top:10px;gap:4px;flex-shrink:0}
+.rail .logo{width:30px;height:30px;border-radius:7px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px;margin-bottom:8px}
+.rail .ic{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bfe6d6;opacity:.7}
+.rail .ic.on{background:rgba(255,255,255,.14);color:#fff;opacity:1}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.brand{height:38px;background:var(--header-bg);display:flex;align-items:center;padding:0 16px;color:#eaf5f0;gap:10px;flex-shrink:0}
+.brand b{font-size:13px;font-weight:800}
+.brand .sp{flex:1}
+.brand .u{width:24px;height:24px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700}
+.dh{height:50px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:14px;flex-shrink:0}
+.dh .ttl{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800}
+.dh .ttl .dot{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--blk)}
+.dh .sp{flex:1}
+/* モード切替（セグメント） */
+.modeseg{display:flex;background:#eef2f0;border-radius:10px;padding:3px;gap:2px;border:1px solid #e2e8e4}
+.modeseg .m{font-size:12.5px;font-weight:700;padding:7px 16px;border-radius:8px;color:var(--text-secondary);display:flex;align-items:center;gap:7px}
+.modeseg .m.on{background:#fff;color:var(--blk);box-shadow:0 1px 4px rgba(0,0,0,.13)}
+.modeseg .m .b{font-size:10px;font-weight:800;background:var(--red);color:#fff;border-radius:20px;padding:1px 7px}
+.modeseg .m.on .b{background:var(--red)}
+.btn{font-size:11px;font-weight:700;padding:6px 11px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px}
+/* 常時表示の要対応ストリップ */
+.reqstrip{display:flex;align-items:center;gap:10px;padding:8px 16px;background:#fff7ed;border-bottom:1px solid #fed7aa;font-size:11.5px;color:#9a3412;font-weight:700;flex-shrink:0}
+.reqstrip .rc{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid #fed7aa;border-radius:13px;padding:3px 10px;font-size:11px}
+.reqstrip .rc .dt{width:7px;height:7px;border-radius:50%}
+.reqstrip .sp{flex:1}
+.reqstrip .go{font-size:11px;font-weight:800;color:#fff;background:var(--orange);border-radius:7px;padding:5px 12px}
+.board{flex:1;display:flex;min-height:0;overflow:hidden}
+/* ガント */
+.tl{flex:1;display:flex;flex-direction:column;min-width:0;background:#fff;overflow:hidden}
+.rhead{height:42px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 14px;flex-shrink:0}
+.rhead .rt{font-size:12px;font-weight:800;display:flex;align-items:center;gap:6px}
+.rsp{flex:1}
+.legend{display:flex;align-items:center;gap:14px;font-size:10.5px;color:var(--text-secondary)}
+.legend i{display:inline-block;width:13px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+.datemini{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:800;color:var(--text-secondary)}
+.datemini .nb{width:18px;height:20px;border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center}
+.tlbody{flex:1;overflow:hidden;padding:6px 0}
+.thead{display:grid;grid-template-columns:150px 1fr;height:22px;border-bottom:1px solid var(--border)}
+.thead .l{font-size:9.5px;font-weight:700;color:var(--text-muted);padding:5px 10px}
+.tk{position:relative}
+.tk .t{position:absolute;top:3px;transform:translateX(-50%);font-size:9px;font-weight:700;color:var(--text-muted)}
+.row{display:grid;grid-template-columns:150px 1fr;margin-bottom:4px;height:52px}
+.dcell{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:4px 8px;background:#fafbfc;border:1px solid var(--border);border-right:none;border-radius:8px 0 0 8px}
+.dn2{font-size:11px;font-weight:800;display:flex;align-items:center;gap:5px}
+.dn2 .sd{width:6px;height:6px;border-radius:50%}
+.dn2 .sd.busy{background:var(--orange)}.dn2 .sd.available{background:var(--green)}
+.track{position:relative;height:52px;border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;background-color:#fbfcfd;
+  background-image:repeating-linear-gradient(90deg,transparent,transparent calc(100%/24 - 1px),#eef0f3 calc(100%/24 - 1px),#eef0f3 calc(100%/24)),
+   repeating-linear-gradient(90deg,transparent,transparent calc(100%/8 - 1px),#d1d5db calc(100%/8 - 1px),#d1d5db calc(100%/8))}
+.blk{position:absolute;top:4px;bottom:4px;border-radius:4px;display:flex;align-items:center;padding:0 8px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.blk .bt{font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.chead{height:46px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:10px}
+.chead b{font-size:15px;font-weight:800}.chead span{font-size:11px;color:var(--text-secondary)}
+.tbody{flex:1;padding:16px 20px;display:flex;gap:16px;overflow:hidden}
+.col{flex:1;background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.col.std{border:2px solid var(--accent);box-shadow:0 4px 14px rgba(59,184,136,.15)}
+.colh{padding:12px 15px;border-bottom:1px solid var(--border)}
+.colh .pn{font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:8px}
+.colh .pn .rec{font-size:9.5px;font-weight:800;color:#fff;background:var(--accent);border-radius:5px;padding:2px 7px}
+.colh .pd{font-size:10.5px;color:var(--text-secondary);margin-top:3px}
+.cnt{display:flex;align-items:baseline;gap:6px;margin-top:9px}
+.cnt b{font-size:30px;font-weight:800}.cnt.red b{color:var(--red)}.cnt.amber b{color:#b45309}.cnt.green b{color:var(--blk)}
+.cnt span{font-size:11px;color:var(--text-secondary)}
+.thset{padding:10px 15px;background:#fafbfc;border-bottom:1px solid var(--border)}
+.thset .tt{font-size:10px;font-weight:800;color:var(--text-muted);margin-bottom:6px;letter-spacing:.03em}
+.throw{display:flex;align-items:center;justify-content:space-between;font-size:10.5px;padding:3px 0}
+.throw .k{color:var(--text-secondary)}
+.throw .v{font-weight:800;font-family:'DejaVu Sans',sans-serif;background:#eef2f0;border-radius:5px;padding:2px 8px}
+.throw .v.off{background:#f3f4f6;color:var(--text-muted)}
+.elist{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:5px;overflow:hidden}
+.eitem{display:flex;align-items:center;gap:8px;font-size:11px;padding:6px 9px;border-radius:7px;background:#fff;border:1px solid #f1f3f5}
+.eitem .sev{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sev.r{background:var(--red)}.sev.o{background:var(--warn)}.sev.y{background:#eab308}
+.eitem .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.eitem .tg{font-size:9px;font-weight:800;padding:1px 6px;border-radius:5px;flex-shrink:0}
+.tg.r{background:#fee2e2;color:#b91c1c}.tg.o{background:#fef3c7;color:#92400e}.tg.y{background:#fef9c3;color:#854d0e}
+.more{font-size:10.5px;color:var(--text-muted);text-align:center;padding:4px;font-weight:700}
+</style></head><body><div class="app"><div class="main" style="height:100%"><div class="chead"><b>しきい値の調整版</b><span>— 同じ配車データでも「何を“要対応”とみなすか」の設定で、案Cに出てくる件数と中身が変わる</span></div><div class="tbody">
+    <div class="col "><div class="colh">
+    <div class="pn">厳しめ</div><div class="pd">広めに拾う・見逃さない運用</div>
+    <div class="cnt red"><b class="num">14</b><span>件が「要対応」</span></div></div>
+    <div class="thset"><div class="tt">表示条件（しきい値）</div>
+    <div class="throw"><span class="k">確定待ち：締切まで</span><span class="v">24時間</span></div>
+    <div class="throw"><span class="k">連続運転 警告</span><span class="v">3h30m</span></div>
+    <div class="throw"><span class="k">過密 警告：稼働率</span><span class="v ">≥90%</span></div>
+    <div class="throw"><span class="k">未割当の表示</span><span class="v">全件</span></div></div><div class="elist"><div class="eitem"><span class="sev r"></span><span class="nm">○○商事 09:00必着</span><span class="tg r">緊急</span></div><div class="eitem"><span class="sev r"></span><span class="nm">△△食品 10:00必着</span><span class="tg r">緊急</span></div><div class="eitem"><span class="sev r"></span><span class="nm">エコフレッシュ 15:00</span><span class="tg r">未割当</span></div><div class="eitem"><span class="sev r"></span><span class="nm">日東精工 09:00</span><span class="tg r">未割当</span></div><div class="eitem"><span class="sev o"></span><span class="nm">佐藤四郎 連続3h40m</span><span class="tg o">改善基準</span></div><div class="eitem"><span class="sev o"></span><span class="nm">中村八郎 連続3h30m</span><span class="tg o">改善基準</span></div><div class="eitem"><span class="sev y"></span><span class="nm">関東物流 締切18h</span><span class="tg y">確定待ち</span></div><div class="eitem"><span class="sev y"></span><span class="nm">ABC機器 締切20h</span><span class="tg y">確定待ち</span></div><div class="eitem"><span class="sev y"></span><span class="nm">高橋五郎 稼働91%</span><span class="tg y">過密</span></div><div class="more">ほか 5 件 ▾</div></div></div>
+    <div class="col std"><div class="colh">
+    <div class="pn">標準<span class="rec">推奨</span></div><div class="pd">バランス重視（既定）</div>
+    <div class="cnt amber"><b class="num">8</b><span>件が「要対応」</span></div></div>
+    <div class="thset"><div class="tt">表示条件（しきい値）</div>
+    <div class="throw"><span class="k">確定待ち：締切まで</span><span class="v">12時間</span></div>
+    <div class="throw"><span class="k">連続運転 警告</span><span class="v">4h00m</span></div>
+    <div class="throw"><span class="k">過密 警告：稼働率</span><span class="v ">≥98%</span></div>
+    <div class="throw"><span class="k">未割当の表示</span><span class="v">全件</span></div></div><div class="elist"><div class="eitem"><span class="sev r"></span><span class="nm">○○商事 09:00必着</span><span class="tg r">緊急</span></div><div class="eitem"><span class="sev r"></span><span class="nm">△△食品 10:00必着</span><span class="tg r">緊急</span></div><div class="eitem"><span class="sev o"></span><span class="nm">佐藤四郎 連続4h20m</span><span class="tg o">改善基準</span></div><div class="eitem"><span class="sev y"></span><span class="nm">関東物流 締切3h</span><span class="tg y">確定待ち</span></div><div class="eitem"><span class="sev y"></span><span class="nm">東和ロジ 締切5h</span><span class="tg y">確定待ち</span></div><div class="more">ほか 3 件 ▾</div></div></div>
+    <div class="col "><div class="colh">
+    <div class="pn">緩め</div><div class="pd">本当に急ぎだけ・通知を絞る</div>
+    <div class="cnt green"><b class="num">3</b><span>件が「要対応」</span></div></div>
+    <div class="thset"><div class="tt">表示条件（しきい値）</div>
+    <div class="throw"><span class="k">確定待ち：締切まで</span><span class="v">4時間</span></div>
+    <div class="throw"><span class="k">連続運転 警告</span><span class="v">4h30m(法令)</span></div>
+    <div class="throw"><span class="k">過密 警告：稼働率</span><span class="v off">—</span></div>
+    <div class="throw"><span class="k">未割当の表示</span><span class="v">緊急のみ</span></div></div><div class="elist"><div class="eitem"><span class="sev r"></span><span class="nm">○○商事 09:00必着</span><span class="tg r">緊急</span></div><div class="eitem"><span class="sev r"></span><span class="nm">△△食品 10:00必着</span><span class="tg r">緊急</span></div><div class="eitem"><span class="sev o"></span><span class="nm">佐藤四郎 連続4h30m超</span><span class="tg o">法令違反</span></div></div></div>
+  </div></div></div></body></html>
