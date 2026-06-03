@@ -151,6 +151,26 @@
     flex: 1;
     overflow: hidden;
   }
+  /* ── サイドバー開閉トグル ── */
+  .sidebar-toggle {
+    width: 34px; height: 34px; flex-shrink: 0; padding: 0; margin-right: 2px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.08); border: none; border-radius: 8px;
+    color: #fff; cursor: pointer; transition: background 0.15s;
+  }
+  .sidebar-toggle:hover { background: rgba(255,255,255,0.18); }
+  .sidebar-toggle svg { width: 18px; height: 18px; }
+  /* サイドバー折りたたみ時 */
+  .sidebar { transition: width 0.18s ease; }
+  .app-body.sidebar-collapsed .sidebar { width: 60px; }
+  .app-body.sidebar-collapsed .sidebar .nav-label,
+  .app-body.sidebar-collapsed .sidebar .nav-badge,
+  .app-body.sidebar-collapsed .sidebar .agent-tag,
+  .app-body.sidebar-collapsed .sidebar .nav-toggle-arrow,
+  .app-body.sidebar-collapsed .sidebar .sidebar-section-label,
+  .app-body.sidebar-collapsed .sidebar .nav-sub-group { display: none; }
+  .app-body.sidebar-collapsed .sidebar .nav-item { justify-content: center; padding: 11px 0; gap: 0; }
+  .app-body.sidebar-collapsed .sidebar .nav-icon svg { width: 19px; height: 19px; }
 
   /* ── サイドバー ── */
   .sidebar {
@@ -7205,6 +7225,9 @@
 
 <!-- グローバルヘッダー -->
 <div class="global-header">
+  <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="サイドバーの開閉" aria-label="サイドバーの開閉">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
   <div class="logo-wrap">
     <div class="logo-icon">
       <svg viewBox="0 0 24 24" fill="none" stroke="#0D4A3A" stroke-width="2" stroke-linecap="round">
@@ -12473,6 +12496,36 @@ function toggleCasesNav(e) {
   if (pg) pg.classList.add('active');
   navItem.classList.add('active');
 }
+
+// ── サイドバー開閉（ボタンひとつで折りたたみ）──
+function _syncSidebarTitles(collapsed) {
+  document.querySelectorAll('.sidebar .nav-item').forEach(function (it) {
+    var lbl = it.querySelector('.nav-label');
+    if (collapsed) {
+      if (!it.hasAttribute('data-orig-title')) it.setAttribute('data-orig-title', it.getAttribute('title') || '');
+      if (lbl) it.setAttribute('title', lbl.textContent.trim());
+    } else if (it.hasAttribute('data-orig-title')) {
+      var orig = it.getAttribute('data-orig-title');
+      if (orig) it.setAttribute('title', orig); else it.removeAttribute('title');
+      it.removeAttribute('data-orig-title');
+    }
+  });
+}
+function toggleSidebar() {
+  var body = document.querySelector('.app-body');
+  if (!body) return;
+  var collapsed = body.classList.toggle('sidebar-collapsed');
+  try { localStorage.setItem('logipoke_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+  _syncSidebarTitles(collapsed);
+}
+document.addEventListener('DOMContentLoaded', function () {
+  try {
+    if (localStorage.getItem('logipoke_sidebar_collapsed') === '1') {
+      var body = document.querySelector('.app-body');
+      if (body) { body.classList.add('sidebar-collapsed'); _syncSidebarTitles(true); }
+    }
+  } catch (e) {}
+});
 
 // サブページ切替（定期案件登録など）
 function showSubPage(name, e) {
