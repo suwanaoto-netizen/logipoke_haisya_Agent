@@ -2753,16 +2753,11 @@
     width:auto; align-self:flex-start; margin-top:6px; padding:3px 9px; font-size:9.5px;
   }
   .dnd-card-partner-btn.dnd-card-partner-btn--sm svg { width:9px; height:9px; }
-  /* 「すべて / 担当 / 拠点」切替バー */
-  .dnd-group-bar { display:flex; align-items:center; gap:6px; padding:6px 14px;
-    border-bottom:1px solid var(--border); background:#fafbfc; flex-shrink:0; }
-  .dnd-group-bar-label { font-size:10px; font-weight:700; color:var(--text-muted); margin-right:2px; }
-  .dnd-group-seg { font-size:11px; font-weight:700; padding:4px 12px; border-radius:6px;
-    border:1px solid var(--border); background:#fff; color:var(--text-secondary); cursor:pointer; transition:all .12s; }
-  .dnd-group-seg:hover { border-color:var(--accent); }
-  .dnd-group-seg.on { background:#1a7a5e; color:#fff; border-color:#1a7a5e; }
-  .dnd-group-sep { display:block; font-size:10px; font-weight:800; color:#0d7a52;
-    background:#eafaf3; border:1px solid #b6e6d3; border-radius:6px; padding:3px 10px; margin:8px 4px 4px; }
+  /* 既存バー（担当者フィルター #assign-filter-bar / 本日のサマリー #dispatch-warning-bar）の表示ON/OFF */
+  #page-dispatch.dv-hide-afb #assign-filter-bar { display:none !important; }
+  #page-dispatch.dv-hide-summary #dispatch-warning-bar { display:none !important; }
+  /* サマリーバーの操作ボタン群をサブタブ行（表示設定タブと同じ行）の右端へ移設 */
+  .dispatch-subtabs .dwb-actions { margin-left:auto; align-self:center; align-items:center; padding-left:12px; }
   /* 表示設定パネル */
   #dispatch-display { background:var(--bg); }
   .dvwrap { padding:16px 20px; display:flex; flex-direction:column; gap:14px; }
@@ -8099,7 +8094,6 @@
                 <div class="dnd-stat">稼働率 <span class="dnd-stat-val" id="dnd-stat-rate">0%</span></div>
               </div>
             </div>
-            <div class="dnd-group-bar" id="dnd-group-bar" style="display:none"></div>
             <div class="dnd-timeline" id="dnd-timeline"></div>
           </div>
         </div>
@@ -18164,6 +18158,7 @@ function switchDispatchSubtab(sub) {
   else if (sub === 'dotai') renderDotai();
   else if (sub === 'comm') { renderCommLog(); if (typeof markCommLogRead === 'function') markCommLogRead(); }
   else if (sub === 'display') { if (typeof renderDisplaySettings === 'function') renderDisplaySettings(); }
+  if (typeof dvSyncActions === 'function') dvSyncActions(sub);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -18179,14 +18174,14 @@ function dvDefaults() {
     card:   { status:true, route:true, goods:true, time:true, deadline:true, urgent:true, source:true, edit:true },
     driver: { vehicle:true, capacity:true, status:true, kaizen:true },
     showDateBar: true,
-    showGroupBar: false,
-    groupMode: 'all',   // all | driver | base
+    showFilterBar: true,   // #assign-filter-bar（担当/拠点/すべて＋担当者チップ）
+    showSummaryBar: true,  // #dispatch-warning-bar（本日のサマリー）
   };
 }
 const DV_PRESETS = {
-  minimal:  { card:{status:false,route:false,goods:false,time:false,deadline:false,urgent:false,source:false,edit:false}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showGroupBar:false },
-  standard: { card:{status:true,route:true,goods:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showGroupBar:false },
-  full:     { card:{status:true,route:true,goods:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showGroupBar:true  },
+  minimal:  { card:{status:false,route:false,goods:false,time:false,deadline:false,urgent:false,source:false,edit:false}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showFilterBar:false, showSummaryBar:false },
+  standard: { card:{status:true,route:true,goods:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
+  full:     { card:{status:true,route:true,goods:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
 };
 function dvLoad() {
   try {
@@ -18206,15 +18201,14 @@ function dvd(k) { return (typeof DV === 'undefined') || !DV.driver || DV.driver[
 
 function dvApplyPreset(p) {
   const d = dvDefaults(); const pr = DV_PRESETS[p] || DV_PRESETS.standard;
-  DV = { ...d, preset:p, card:{...pr.card}, driver:{...pr.driver}, showDateBar:pr.showDateBar, showGroupBar:pr.showGroupBar, groupMode:DV.groupMode||'all' };
+  DV = { ...d, preset:p, card:{...pr.card}, driver:{...pr.driver}, showDateBar:pr.showDateBar, showFilterBar:pr.showFilterBar, showSummaryBar:pr.showSummaryBar };
   dvSave(); renderDisplaySettings();
 }
 function dvSetCard(k, v)   { DV.card[k]   = v; DV.preset='custom'; dvSave(); renderDisplaySettings(); }
 function dvSetDriver(k, v) { DV.driver[k] = v; DV.preset='custom'; dvSave(); renderDisplaySettings(); }
 function dvSetFlag(k, v)   { DV[k] = v;        DV.preset='custom'; dvSave(); renderDisplaySettings(); }
-function dvSetGroupMode(m) { DV.groupMode = m; dvSave(); if (typeof renderDnd === 'function') renderDnd(); dvApplyChrome(); }
-
-// 盤面の「枠」へ反映（日付バー/統計の表示、行高圧縮、切替バー描画）。テンプレ非依存部分。
+// 盤面の「枠」へ反映（日付バー/統計・既存バー＝担当者フィルター/本日のサマリー の表示、行高圧縮）。
+// 既存バーは別スクリプトが遅延生成・再生成するため、安定祖先 #page-dispatch のクラスで CSS 制御する。
 function dvApplyChrome() {
   try {
     const strip = document.getElementById('dnd-date-strip');
@@ -18222,38 +18216,29 @@ function dvApplyChrome() {
     document.querySelectorAll('#dispatch-dnd .dnd-right-stats').forEach(function(e){ e.style.display = DV.showDateBar ? '' : 'none'; });
     const tl = document.getElementById('dnd-timeline');
     if (tl) tl.classList.toggle('dv-rows-compact', !dvd('vehicle') && !dvd('capacity') && !dvd('status'));
-    dvRenderGroupBar();
+    const pg = document.getElementById('page-dispatch');
+    if (pg) {
+      pg.classList.toggle('dv-hide-afb', DV.showFilterBar === false);
+      pg.classList.toggle('dv-hide-summary', DV.showSummaryBar === false);
+    }
+    dvRelocateActions();
   } catch (e) {}
 }
-function dvRenderGroupBar() {
-  const bar = document.getElementById('dnd-group-bar'); if (!bar) return;
-  bar.style.display = DV.showGroupBar ? 'flex' : 'none';
-  if (!DV.showGroupBar) { bar.innerHTML = ''; return; }
-  const modes = [['all','すべて'], ['driver','担当別'], ['base','拠点別']];
-  bar.innerHTML = '<span class="dnd-group-bar-label">表示単位</span>' +
-    modes.map(function(m){ return '<button class="dnd-group-seg ' + (DV.groupMode===m[0]?'on':'') + '" onclick="dvSetGroupMode(\'' + m[0] + '\')">' + m[1] + '</button>'; }).join('');
+// サマリーバーの操作ボタン群（取り消し/やり直し/選択モード/一括仮確定/ヘルプ）を
+// サブタブ行（表示設定タブと同じ行）の右端へ移設。これによりサマリーバーは
+// 「件数チップのみ」となり、OFF時は件数だけ隠れて操作ボタンは残る。
+// 操作ボタン群は「配車割当(D&D)」タブのときだけ表示する
+function dvSyncActions(sub) {
+  const actions = document.querySelector('.dwb-actions');
+  if (actions) actions.style.display = (sub === 'dnd') ? '' : 'none';
 }
-// 行のグルーピング：拠点別は拠点名で区切り、担当別は氏名順、すべては既存順
-function dndGroupKeyOf(d) {
-  try {
-    const drv = (typeof getDriverById === 'function') ? getDriverById(d._driverId) : null;
-    const bid = drv && drv.baseId;
-    if (!bid) return d.partner ? '協力会社' : '拠点未設定';
-    const b = (typeof getBaseById === 'function') ? getBaseById(bid) : null;
-    return b ? b.name : bid;
-  } catch (e) { return '拠点未設定'; }
-}
-function dndApplyGroupOrder(listIn) {
-  const list = listIn.slice();
-  if (typeof DV === 'undefined') return list;
-  if (DV.groupMode === 'driver') { list.sort(function(a,b){ return String(a.driver).localeCompare(String(b.driver),'ja'); }); return list; }
-  if (DV.groupMode === 'base') {
-    const order = (typeof bases !== 'undefined' ? bases.map(function(b){ return b.name; }) : []).concat(['協力会社','拠点未設定']);
-    const rank = function(g){ const i = order.indexOf(g); return i < 0 ? 999 : i; };
-    list.sort(function(a,b){ return rank(dndGroupKeyOf(a)) - rank(dndGroupKeyOf(b)); });
-    return list;
-  }
-  return list;
+function dvRelocateActions() {
+  const subs = document.querySelector('.dispatch-subtabs');
+  const actions = document.querySelector('.dwb-actions');
+  if (!subs || !actions) return false;
+  if (actions.parentElement !== subs) { actions.classList.add('dwb-actions--insubs'); subs.appendChild(actions); }
+  dvSyncActions(typeof currentDispatchSubtab !== 'undefined' ? currentDispatchSubtab : 'dnd');
+  return true;
 }
 
 // ── 表示設定パネルの描画 ──
@@ -18309,14 +18294,26 @@ function renderDisplaySettings() {
       + '<div class="dvcolside">'
         + '<div class="dvcard"><div class="dvch">📅 日付選択バーの表示<span class="dvflex"></span>' + dvSwitchHtml(DV.showDateBar, "dvSetFlag('showDateBar'," + (!DV.showDateBar) + ")") + '</div>'
           + '<div class="dvcb"><div class="dvmini">前後1週間の日付バー＋統計（割当済・稼働率）。OFFで行ごと非表示にして配車表を広げます。</div></div></div>'
-        + '<div class="dvcard"><div class="dvch">🗂 「すべて / 担当 / 拠点」切替バー<span class="dvflex"></span>' + dvSwitchHtml(DV.showGroupBar, "dvSetFlag('showGroupBar'," + (!DV.showGroupBar) + ")") + '</div>'
-          + '<div class="dvcb"><div class="dvmini">OFFで行ごと非表示。ONのとき配車表の上部で表示単位（拠点別など）を切り替えられます。</div></div></div>'
+        + '<div class="dvcard"><div class="dvch">🗂 担当者フィルターバー<span class="dvflex"></span>' + dvSwitchHtml(DV.showFilterBar !== false, "dvSetFlag('showFilterBar'," + (DV.showFilterBar === false) + ")") + '</div>'
+          + '<div class="dvcb"><div class="dvmini">「担当 / 拠点 / すべて」と担当者別の絞り込みチップ（自分の担当・担当者別・未割当）。OFFで行ごと非表示。</div></div></div>'
+        + '<div class="dvcard"><div class="dvch">⚠ 本日のサマリー（件数）の表示<span class="dvflex"></span>' + dvSwitchHtml(DV.showSummaryBar !== false, "dvSetFlag('showSummaryBar'," + (DV.showSummaryBar === false) + ")") + '</div>'
+          + '<div class="dvcb"><div class="dvmini">法令違反・未確定・確定済みの件数チップ。OFFで件数行を非表示（取り消し / やり直し / 選択モード / 一括仮確定の操作ボタンはサブタブ行の右端へ常駐し、残ります）。</div></div></div>'
         + '<div class="dvcard dvpreview"><div class="dvch">👁 カードのプレビュー</div><div class="dvcb">' + dvPreviewCardHtml() + '</div></div>'
       + '</div>'
     + '</div></div>';
 }
 // 保存済み設定を初期表示時に盤面の枠へ反映
-document.addEventListener('DOMContentLoaded', function(){ try { dvApplyChrome(); } catch (e) {} });
+document.addEventListener('DOMContentLoaded', function(){
+  try {
+    dvApplyChrome();
+    const pg = document.getElementById('page-dispatch');
+    if (pg && window.MutationObserver) {
+      // サマリーバーは別スクリプトが遅延生成するため、生成された時点で操作ボタンを移設
+      const mo = new MutationObserver(function(){ if (dvRelocateActions()) mo.disconnect(); });
+      mo.observe(pg, { childList: true });
+    }
+  } catch (e) {}
+});
 
 // 時刻 → 0〜24 の割合(%)
 function timeToPercent(timeStr) {
@@ -25623,9 +25620,7 @@ function renderDndTimeline() {
   const nowPct = ((now.getHours() + now.getMinutes()/60)/24)*100;
   const nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
 
-  const _dvList = (typeof dndApplyGroupOrder === 'function') ? dndApplyGroupOrder(dndDrivers) : dndDrivers;
-  let _dvPrevGroup = null;
-  const rowsHtml = _dvList.map(d => {
+  const rowsHtml = dndDrivers.map(d => {
     // 参照する割当：確定済みタブなら専用ストア、それ以外は通常のdndAssignments
     let assigned;
     if (isConfirmedTab) {
@@ -25786,17 +25781,12 @@ function renderDndTimeline() {
          </svg>
        </span>`;
 
-    let _dvSep = '';
-    if (typeof DV !== 'undefined' && DV.groupMode === 'base' && typeof dndGroupKeyOf === 'function') {
-      const _g = dndGroupKeyOf(d);
-      if (_g !== _dvPrevGroup) { _dvPrevGroup = _g; _dvSep = `<div class="dnd-group-sep">📍 ${_g}</div>`; }
-    }
     const _dvLine2 = (dvd('status') || dvd('vehicle') || dvd('capacity')) ? `<div class="dnd-driver-line2">
           ${dvd('status') ? `<span class="dnd-driver-status ${statusCls}">${statusTxt}</span>` : ''}
           ${dvd('vehicle') ? `<span class="dnd-driver-vehicle">${d.vehicle.replace(/\s*車両/, '').replace(/^V?(\d+)/, '$1')}</span>` : ''}
           ${dvd('capacity') ? `<span class="dnd-driver-capacity">${d.type}/${(d.maxLoad/1000).toFixed(0)}t</span>` : ''}
         </div>` : '';
-    return _dvSep + `<div class="dnd-row">
+    return `<div class="dnd-row">
       <div class="dnd-driver-cell" ${rowDragAttrs}>
         <div class="dnd-driver-line1">
           ${handleIconHtml}
