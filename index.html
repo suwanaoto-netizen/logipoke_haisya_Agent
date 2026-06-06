@@ -10,6 +10,20 @@
 <!-- 理想7層データモデル（SSoT）。ローカル同梱なのでオフラインでも読み込める。
      本体マスタの一部（拠点 bases）はこの window.LogipokeDB から derive する（C1: 縦串） -->
 <script src="assets/logipoke-data-model.js"></script>
+<script>
+/* SSoT由来 derive 共通ヘルパー: derive結果が seed と lossless(JSON一致)なら採用、違えば seed にフォールバック。
+   本体は常に正しいデータ（最悪 seed）を使い、lossless 性は migration/verify_model.mjs が判定する。 */
+function _ssotDerive(seed, build){
+  try {
+    if (typeof LogipokeDB !== 'undefined' && LogipokeDB.createDB) {
+      var d = build(LogipokeDB);
+      if (d && JSON.stringify(d) === JSON.stringify(seed)) return d;
+      if (d) console.warn('[logipoke] SSoT derive not lossless; using seed');
+    }
+  } catch (e) { console.warn('[logipoke] SSoT derive failed; using seed', e); }
+  return seed;
+}
+</script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -9203,7 +9217,7 @@
     // ══ 顧客管理データ ══
 
     // 取引先（案件一覧と連動）
-    const clientMasterData = [
+    const _clientMasterSeed = [
       { id:'CL-001', defaultFormatId:'FMT-001', name:'株式会社○○商事', area:'埼玉県川口市', contact:'山田 花子', tel:'048-111-2222', email:'y.hanako@marumarushouji.co.jp', type:'定期', cases:['20240524001','20240524101','20240524001','20240523090','20240522080','20240521070'] },
       { id:'CL-002', defaultFormatId:'FMT-002', name:'△△食品株式会社', area:'千葉県船橋市', contact:'鈴木 一郎', tel:'047-333-4444', email:'suzuki@sansankm.co.jp', type:'定期', cases:['20240524002','20240524100','20240522055','20240520040'] },
       { defaultFormatId:'FMT-001', id:'CL-003', name:'株式会社□□製作所', area:'茨城県つくば市', contact:'佐藤 二郎', tel:'029-555-6666', email:'sato@kakukakus.co.jp', type:'スポット', cases:['20240524003','20240518020'] },
@@ -9220,9 +9234,11 @@
       { defaultFormatId:'FMT-001', id:'CL-014', name:'東京精工株式会社', area:'東京都大田区', contact:'木村 十三', tel:'03-1111-2222', email:'kimura@tokyoseiko.co.jp', type:'特殊', cases:['20240518035','20240511001'] },
       { defaultFormatId:'FMT-001', id:'CL-015', name:'全国食品流通株式会社', area:'埼玉県さいたま市', contact:'清水 十四', tel:'048-3333-4444', email:'shimizu@zenkoku-shokuhin.co.jp', type:'定期', cases:['20240517030','20240516020','20240515010','20240514005'] },
     ];
+    // (a) 取引先マスタを SSoT(LogipokeDB) から derive（不一致時は seed にフォールバック）
+    const clientMasterData = _ssotDerive(_clientMasterSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { clients: _clientMasterSeed }); return DB.toClientMaster(db); });
 
     // 協力会社
-    const partnerMasterData = [
+    const _partnerMasterSeed = [
       { id:'PT-001', name:'北関東物流株式会社', area:'埼玉県熊谷市', contact:'安藤 清志', tel:'048-222-3333', email:'ando@kitatrans.co.jp', vehicleTypes:['4tウィング','2tトラック'], cases:['20240524100','20240521110'] },
       { id:'PT-002', name:'東海急送株式会社', area:'静岡県浜松市', contact:'伊勢 誠一', tel:'053-444-5555', email:'ise@tokakyuso.co.jp', vehicleTypes:['10tトラック','4tウィング'], cases:['20240519055','20240515010'] },
       { id:'PT-003', name:'九州ネット輸送株式会社', area:'福岡県北九州市', contact:'岡部 雄介', tel:'093-666-7777', email:'okabe@kyunet.co.jp', vehicleTypes:['4tウィング','冷蔵車'], cases:['20240524105'] },
@@ -9230,6 +9246,8 @@
       { id:'PT-005', name:'北海道運輸株式会社', area:'北海道札幌市', contact:'本間 浩二', tel:'011-000-1111', email:'honma@hokkaido-unyu.co.jp', vehicleTypes:['10tトラック','冷蔵車'], cases:['20240521095'] },
       { id:'PT-006', name:'関西エクスプレス株式会社', area:'大阪府堺市', contact:'丸山 隆司', tel:'072-222-3333', email:'maruyama@kansai-ex.co.jp', vehicleTypes:['4tウィング','チャーター'], cases:['20240513002'] },
     ];
+    // (a) 協力会社マスタを SSoT から derive（不一致時は seed にフォールバック）
+    const partnerMasterData = _ssotDerive(_partnerMasterSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { partners: _partnerMasterSeed }); return DB.toPartnerMaster(db); });
 
     // 全案件一覧（未処理+処理中+処理済み+過去案件）
     const allCasesMasterData = [
@@ -12995,7 +13013,7 @@ function saveTeikiCase() {
 }
 
 // ── サンプル定期案件データ ──
-var TEIKI_SAMPLES = [
+var _teikiSeed = [
   {
     name: '東京〜大阪 定期便',
     pattern: 'trunk',
@@ -13066,6 +13084,8 @@ var TEIKI_SAMPLES = [
     }
   }
 ];
+// (a) 定期便サンプルを SSoT から derive（不一致時は seed にフォールバック）
+var TEIKI_SAMPLES = _ssotDerive(_teikiSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { recurringRoutes: _teikiSeed }); return DB.toTeikiSamples(db); });
 
 // 定期案件編集
 function editTeiki(idx) {
@@ -18657,19 +18677,41 @@ function resolveVehicleRef(ref) {
   return null;
 }
 window.resolveVehicleRef = resolveVehicleRef;
-// 車両マスタ（独立レジストリ）→ 正規 vehicles への明示クロスリンク（DOM構築後に1回・非破壊の追記）
+// 車両マスタ（独立レジストリ）→ 正規 vehicles への明示クロスリンク（非破壊の追記）
+function _logipokeLinkOne(vm) {
+  if (!vm) return;
+  var canon = resolveVehicleRef(vm.id);
+  vm._canonicalVehicleId = canon ? canon.id : null;     // 例 '1245' → 'V1245'（無ければ null＝正規フリート外）
+  vm.legacyIds = ['車両' + vm.id, String(vm.id), vm.plate].filter(Boolean);
+  if (canon) {
+    if (!vm._driverId) vm._driverId = canon._driverId || null;
+    if (Array.isArray(canon.legacyIds) && canon.legacyIds.indexOf(String(vm.id)) < 0) canon.legacyIds.push(String(vm.id));
+  }
+}
 function _logipokeLinkVehicleMaster() {
   if (typeof window.vehicleMasterData === 'undefined' || !Array.isArray(window.vehicleMasterData)) return;
-  window.vehicleMasterData.forEach(function (vm) {
-    var canon = resolveVehicleRef(vm.id);
-    vm._canonicalVehicleId = canon ? canon.id : null;   // 例 '1245' → 'V1245'（無ければ null＝正規フリート外）
-    vm.legacyIds = ['車両' + vm.id, String(vm.id), vm.plate].filter(Boolean);
-    if (canon) {
-      if (!vm._driverId) vm._driverId = canon._driverId || null;
-      if (Array.isArray(canon.legacyIds) && canon.legacyIds.indexOf(String(vm.id)) < 0) canon.legacyIds.push(String(vm.id));
-    }
-  });
+  window.vehicleMasterData.forEach(_logipokeLinkOne);
 }
+// (c) 車両マスタ編集の単一窓口。追加/更新/削除/担当変更を集約し、編集の度にクロスリンクを維持する。
+function vehicleMasterUpsert(rec, idx) {
+  if (typeof window.vehicleMasterData === 'undefined' || !Array.isArray(window.vehicleMasterData)) window.vehicleMasterData = [];
+  if (typeof idx === 'number' && idx >= 0 && idx < window.vehicleMasterData.length) window.vehicleMasterData[idx] = rec;
+  else window.vehicleMasterData.push(rec);
+  _logipokeLinkOne(rec);
+  return rec;
+}
+function vehicleMasterRemove(idx) {
+  if (typeof window.vehicleMasterData !== 'undefined' && idx >= 0 && idx < window.vehicleMasterData.length) return window.vehicleMasterData.splice(idx, 1)[0] || null;
+  return null;
+}
+function vehicleMasterSetDriver(idx, name) {
+  if (typeof window.vehicleMasterData !== 'undefined' && window.vehicleMasterData[idx]) {
+    window.vehicleMasterData[idx].driverName = name; _logipokeLinkOne(window.vehicleMasterData[idx]);
+  }
+}
+window.vehicleMasterUpsert = vehicleMasterUpsert;
+window.vehicleMasterRemove = vehicleMasterRemove;
+window.vehicleMasterSetDriver = vehicleMasterSetDriver;
 document.addEventListener('DOMContentLoaded', function () { try { _logipokeLinkVehicleMaster(); } catch (e) { console.warn('[logipoke] vehicleMaster link failed', e); } });
 
 // ═══════════════════════════════════════════════════════════════
@@ -32912,10 +32954,10 @@ function saveVehicleItem() {
       costLogs: costEntries.length ? costEntries : (existing.costLogs || []),
     };
     if (vehicleEditIdx !== null && vehicleEditType === 'vehicle') {
-      window.vehicleMasterData[vehicleEditIdx] = obj;
+      vehicleMasterUpsert(obj, vehicleEditIdx);
       showToast('車両情報を更新しました', 'success');
     } else {
-      window.vehicleMasterData.push(obj);
+      vehicleMasterUpsert(obj);
       showToast('車両を追加しました', 'success');
     }
   } else {
@@ -32941,7 +32983,7 @@ function saveVehicleItem() {
       showToast('ドライバーを追加しました', 'success');
     }
     const vidx = window.vehicleMasterData.findIndex(v => v.id === obj.vehicleId);
-    if (vidx >= 0) window.vehicleMasterData[vidx].driverName = name;
+    if (vidx >= 0) vehicleMasterSetDriver(vidx, name);
   }
   syncVehicleDataToProcessing();
   closeVehicleModal();
@@ -32952,7 +32994,7 @@ function saveVehicleItem() {
 function deleteVehicleItem(type, idx) {
   if (!confirm('本当に削除しますか？')) return;
   if (type === 'vehicle') {
-    window.vehicleMasterData.splice(idx, 1);
+    vehicleMasterRemove(idx);
     showToast('車両を削除しました', 'success');
   } else {
     window.driverMasterData.splice(idx, 1);
@@ -33098,8 +33140,7 @@ function confirmCsvImport() {
         note:  row.note  || row['備考'] || '',
         driverName: row.driverName || row['担当ドライバー'] || '',
       };
-      if (existing >= 0) window.vehicleMasterData[existing] = obj;
-      else window.vehicleMasterData.push(obj);
+      vehicleMasterUpsert(obj, existing >= 0 ? existing : null);
     });
     showToast(`車両データを ${csvPendingData.length} 件インポートしました`, 'success');
   } else {
@@ -37557,12 +37598,14 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   //  ユーザー / 担当分担モデル
   // ════════════════════════════════════════════════════════════════
   // プロトタイプなので、メンバーリストとして固定で持つ（実運用ではテナント側マスタ）
-  const TEAM_MEMBERS = [
+  const _teamSeed = [
     { id: 'me',  name: '配車 太郎',   color: '#1a7a5e', initial: '太' },
     { id: 'u2',  name: '田中 花子',   color: '#dc2626', initial: '田' },
     { id: 'u3',  name: '佐々木 健',   color: '#7c3aed', initial: '佐' },
     { id: 'u4',  name: '吉田 美咲',   color: '#0891b2', initial: '吉' },
   ];
+  // (a) 社内ユーザー(担当)を SSoT から derive（不一致時は seed にフォールバック）
+  const TEAM_MEMBERS = _ssotDerive(_teamSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { users: _teamSeed }); return DB.toTeamMembers(db); });
   const CURRENT_USER_ID = 'me';
 
   // ドライバー担当割当（プロトタイプ初期値：50台を4人のチームに分散）
@@ -42467,15 +42510,26 @@ function _runPartnerStep(index) {
       var raw = localStorage.getItem(INTAKE_QUEUE_KEY);
       queue = raw ? JSON.parse(raw) : [];
     } catch(e){ queue = []; }
-    if (!Array.isArray(queue) || queue.length === 0) return 0;
-
     var ingested = 0;
-    queue.forEach(function(item){
-      if (ingestIntakeItem(item)) ingested++;
-    });
+    if (Array.isArray(queue) && queue.length) {
+      queue.forEach(function(item){ if (ingestIntakeItem(item)) ingested++; });
+      // 処理済みなので旧キューを空にする
+      try { localStorage.removeItem(INTAKE_QUEUE_KEY); } catch(e){}
+    }
 
-    // 処理済みなのでキューを空にする
-    try { localStorage.removeItem(INTAKE_QUEUE_KEY); } catch(e){}
+    // SSoT(正規化) 受付ストアからも取り込む（logipoke_db_receptions_v1 へ置換した本流）
+    if (window.LogipokeDB && LogipokeDB.loadReceptions) {
+      try {
+        var receptions = LogipokeDB.loadReceptions();
+        if (receptions && receptions.length) {
+          receptions.forEach(function(r){
+            var it = (r && r._legacyIntake) ? r._legacyIntake : LogipokeDB.receptionToLegacyIntake(r);
+            if (ingestIntakeItem(it)) ingested++;
+          });
+          LogipokeDB.clearReceptions();
+        }
+      } catch(e){ console.warn('[logipoke] reception store drain failed', e); }
+    }
 
     if (ingested > 0) {
       if (typeof renderUnprocessedList === 'function') {
@@ -42561,7 +42615,7 @@ function _runPartnerStep(index) {
 
   // 他タブ（AI電話受付）からの書込み通知
   window.addEventListener('storage', function(ev){
-    if (ev.key === INTAKE_QUEUE_KEY && ev.newValue) {
+    if (ev.newValue && (ev.key === INTAKE_QUEUE_KEY || ev.key === 'logipoke_db_receptions_v1')) {
       drainIntakeQueue();
     }
   });

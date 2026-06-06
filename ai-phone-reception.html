@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ロジポケ配車Agent - AI電話受付</title>
+<!-- 受付を正規化キー(logipoke_db_receptions_v1)へ書き込むための SSoT モデル -->
+<script src="assets/logipoke-data-model.js"></script>
 <script>/* 埋め込み(?embed=1)時は自前のグローバルヘッダ/サイドバーを隠し、コンテンツだけ表示する */
 if (location.search.indexOf('embed=1') !== -1) document.documentElement.classList.add('embed');</script>
 <style>
@@ -1904,14 +1906,25 @@ function pushIntakeToBackend() {
       time: pad(now.getHours()) + ':' + pad(now.getMinutes())
     };
 
-    // 既存キューに追加
-    const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
-    const queue = raw ? JSON.parse(raw) : [];
-    queue.push(intake);
-    localStorage.setItem(INTAKE_QUEUE_KEY, JSON.stringify(queue));
-
-    // 同タブ内に index.html の SPA が無いことを通知（同オリジン他タブには storage イベントが飛ぶ）
-    console.log('[AI電話受付] 案件をキューにプッシュしました:', intake.id);
+    window.__logipokeLastIntakeId = newId;
+    // 正規化キー(logipoke_db_receptions_v1)へ Reception として書き込む。
+    // 取込側のロスレス用に原 intake を _legacyIntake として同梱。モデル未読込時のみ旧キューへフォールバック。
+    if (window.LogipokeDB && LogipokeDB.createReception && LogipokeDB.pushReception) {
+      const r = LogipokeDB.createReception(null, {
+        id: intake.id, client: intake.client, from: intake.from, to: intake.to,
+        goods: intake.goods, deadline: intake.deadline, conditions: intake.conditions,
+        channel: intake.ch === 'mail' ? 'mail' : 'ai_phone', receivedAt: intake.receivedAt
+      });
+      r._legacyIntake = intake;
+      LogipokeDB.pushReception(r); // → logipoke_db_receptions_v1（同オリジン他タブへ storage イベント）
+      console.log('[AI電話受付] Reception を SSoT(receptions_v1) にプッシュ:', intake.id);
+    } else {
+      const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
+      const queue = raw ? JSON.parse(raw) : [];
+      queue.push(intake);
+      localStorage.setItem(INTAKE_QUEUE_KEY, JSON.stringify(queue));
+      console.log('[AI電話受付] (fallback) 旧キューにプッシュ:', intake.id);
+    }
   } catch (e) {
     console.warn('[AI電話受付] 案件キューへの書込に失敗しました:', e);
   }
@@ -2000,12 +2013,14 @@ function showCallContinuesBanner() {
    完了トースト
    ============================================================ */
 function showCompleteToast() {
-  // 直近にプッシュしたキューから最新案件IDを取得
-  let latestId = '';
+  // 直近にプッシュした案件ID（SSoT書込時に保持）。無ければ旧キューから取得。
+  let latestId = window.__logipokeLastIntakeId || '';
   try {
-    const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
-    const queue = raw ? JSON.parse(raw) : [];
-    if (queue.length > 0) latestId = queue[queue.length - 1].id;
+    if (!latestId) {
+      const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
+      const queue = raw ? JSON.parse(raw) : [];
+      if (queue.length > 0) latestId = queue[queue.length - 1].id;
+    }
   } catch(e){}
 
   const toast = document.createElement('div');
@@ -2052,12 +2067,14 @@ function prependDemoLog() {
   const hh = String(now.getHours()).padStart(2,'0');
   const mm = String(now.getMinutes()).padStart(2,'0');
 
-  // キューから最新IDを取得
-  let latestId = 'C-2821';
+  // 最新ID（SSoT書込時に保持）。無ければ旧キュー→既定。
+  let latestId = window.__logipokeLastIntakeId || 'C-2821';
   try {
-    const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
-    const queue = raw ? JSON.parse(raw) : [];
-    if (queue.length > 0) latestId = queue[queue.length - 1].id;
+    if (!window.__logipokeLastIntakeId) {
+      const raw = localStorage.getItem(INTAKE_QUEUE_KEY);
+      const queue = raw ? JSON.parse(raw) : [];
+      if (queue.length > 0) latestId = queue[queue.length - 1].id;
+    }
   } catch(e){}
 
   const newRow = document.createElement('div');
