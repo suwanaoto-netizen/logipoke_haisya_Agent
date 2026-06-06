@@ -192,6 +192,36 @@ function _ssotDerive(seed, build){
   .app-body.sidebar-collapsed .sidebar .nav-item-sub { justify-content: center; padding: 9px 0; gap: 0; }
   .app-body.sidebar-collapsed .sidebar .nav-item-sub span { display: none; }
 
+  /* 折りたたみ時：アイコンにホバーで名称を表示するツールチップ
+     （サイドバーの overflow に切り取られないよう body 直下に固定配置で描画） */
+  .sidebar-hovertip {
+    position: fixed;
+    transform: translateY(-50%);
+    background: var(--sidebar-bg, #0D4A3A);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    padding: 6px 10px;
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+    z-index: 2000;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.12s ease;
+  }
+  .sidebar-hovertip.show { opacity: 1; visibility: visible; }
+  .sidebar-hovertip::before {
+    content: '';
+    position: absolute;
+    left: -5px; top: 50%;
+    transform: translateY(-50%);
+    border: 5px solid transparent;
+    border-right-color: var(--sidebar-bg, #0D4A3A);
+    border-left: 0;
+  }
+
   /* ── サイドバー ── */
   .sidebar {
     width: 200px;
@@ -12543,11 +12573,12 @@ function toggleCasesNav(e) {
 
 // ── サイドバー開閉（ボタンひとつで折りたたみ）──
 function _syncSidebarTitles(collapsed) {
+  // 折りたたみ時はカスタムツールチップで名称を表示するため、ネイティブ title は退避して消す
+  // （二重ツールチップ防止）。展開時は元の title を復元する。
   document.querySelectorAll('.sidebar .nav-item').forEach(function (it) {
-    var lbl = it.querySelector('.nav-label');
     if (collapsed) {
       if (!it.hasAttribute('data-orig-title')) it.setAttribute('data-orig-title', it.getAttribute('title') || '');
-      if (lbl) it.setAttribute('title', lbl.textContent.trim());
+      it.removeAttribute('title');
     } else if (it.hasAttribute('data-orig-title')) {
       var orig = it.getAttribute('data-orig-title');
       if (orig) it.setAttribute('title', orig); else it.removeAttribute('title');
@@ -12555,20 +12586,60 @@ function _syncSidebarTitles(collapsed) {
     }
   });
 }
+
+// ── 折りたたみ時のホバー名称ツールチップ ──
+var _sbTipEl = null;
+function _ensureSidebarTip() {
+  if (_sbTipEl) return _sbTipEl;
+  _sbTipEl = document.createElement('div');
+  _sbTipEl.className = 'sidebar-hovertip';
+  document.body.appendChild(_sbTipEl);
+  return _sbTipEl;
+}
+function _sidebarTipShow(itemEl) {
+  var body = document.querySelector('.app-body');
+  if (!body || !body.classList.contains('sidebar-collapsed')) return;
+  var label = '';
+  var lbl = itemEl.querySelector('.nav-label');
+  if (lbl) label = lbl.textContent.trim();
+  else { var sp = itemEl.querySelector('span:not(.nav-sub-connector)'); if (sp) label = sp.textContent.trim(); }
+  if (!label) return;
+  var tip = _ensureSidebarTip();
+  tip.textContent = label;
+  var r = itemEl.getBoundingClientRect();
+  tip.style.top = (r.top + r.height / 2) + 'px';
+  tip.style.left = (r.right + 8) + 'px';
+  tip.classList.add('show');
+}
+function _sidebarTipHide() { if (_sbTipEl) _sbTipEl.classList.remove('show'); }
+function _bindSidebarTips() {
+  document.querySelectorAll('.sidebar .nav-item, .sidebar .nav-item-sub').forEach(function (it) {
+    if (it.__sbTipBound) return;
+    it.__sbTipBound = true;
+    it.addEventListener('mouseenter', function () { _sidebarTipShow(it); });
+    it.addEventListener('mouseleave', _sidebarTipHide);
+  });
+}
+
 function toggleSidebar() {
   var body = document.querySelector('.app-body');
   if (!body) return;
   var collapsed = body.classList.toggle('sidebar-collapsed');
   try { localStorage.setItem('logipoke_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
   _syncSidebarTitles(collapsed);
+  _sidebarTipHide();
 }
 document.addEventListener('DOMContentLoaded', function () {
   try {
-    if (localStorage.getItem('logipoke_sidebar_collapsed') === '1') {
+    // デフォルトは折りたたみ状態。ユーザーが明示的に展開（'0'）した場合のみ展開を維持。
+    var pref = localStorage.getItem('logipoke_sidebar_collapsed');
+    var collapsed = (pref === null) ? true : (pref === '1');
+    if (collapsed) {
       var body = document.querySelector('.app-body');
       if (body) { body.classList.add('sidebar-collapsed'); _syncSidebarTitles(true); }
     }
   } catch (e) {}
+  _bindSidebarTips();
 });
 
 // サブページ切替（定期案件登録など）
