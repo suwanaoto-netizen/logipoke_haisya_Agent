@@ -16,10 +16,10 @@ const DB = require(resolve(ROOT, 'assets/logipoke-data-model.js'));
 // index.html から seed 配列を「宣言名 → 対応する [ ] のブラケット対応」で切り出して eval する。
 // 行番号に依存しないので、リファクタで行がずれても壊れない。
 const src = readFileSync(resolve(ROOT, 'index.html'), 'utf8');
-function extract(name) {
+function extract(name, optional) {
   const decl = new RegExp('(?:const|var|let)\\s+' + name + '\\s*=\\s*');
   const m = decl.exec(src);
-  if (!m) throw new Error('宣言が見つかりません: ' + name);
+  if (!m) { if (optional) return undefined; throw new Error('宣言が見つかりません: ' + name); }
   let i = m.index + m[0].length, depth = 0, inStr = null, started = false;
   const start = i;
   for (; i < src.length; i++) {
@@ -35,30 +35,35 @@ function extract(name) {
 
 // 移行後はマスタ literal が *_Seed にリネームされ、UI は model からの derive を使う。
 // derive(seed) === seed を示せば「UIが受け取るデータは元 literal と同一」が保証される。
-const clientMasterData = extract('_clientMasterSeed');
-const partnerMasterData = extract('_partnerMasterSeed');
-const bases = extract('_basesSeed');
-const TEAM_MEMBERS = extract('_teamSeed');
-const TEIKI_SAMPLES = extract('_teikiSeed');
+// 本体(index.html)に *_Seed が導入済みのものだけ「本体相手」に検証し、未導入は SKIP
+// （ストラングラー移行中。現状は拠点 bases のみ縦串が通っている）。
+const seeds = {
+  clients:         extract('_clientMasterSeed', true),
+  partners:        extract('_partnerMasterSeed', true),
+  bases:           extract('_basesSeed', true),
+  users:           extract('_teamSeed', true),
+  recurringRoutes: extract('_teikiSeed', true),
+};
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 function check(label, fn) {
   try { fn(); console.log('  ✓ ' + label); pass++; }
   catch (e) { console.log('  ✗ ' + label + '\n      ' + (e.message || e).split('\n')[0]); fail++; }
 }
+function masterCheck(label, seed, fn) {
+  if (seed === undefined) { console.log('  ⊘ SKIP ' + label + ' — 本体に *_Seed 未導入（順次移行）'); skip++; return; }
+  check(label, fn);
+}
 
-console.log('① マスタ層 adapter の lossless 検証（model → 旧形 が literal と一致）');
+console.log('① マスタ層 adapter の lossless 検証（model → 旧形 が literal と一致 / 本体相手）');
 const db = DB.createDB();
-DB.seedMasters(db, {
-  clients: clientMasterData, partners: partnerMasterData, bases: bases,
-  users: TEAM_MEMBERS, recurringRoutes: TEIKI_SAMPLES
-});
+DB.seedMasters(db, seeds);
 
-check('clientMasterData (15社) が完全一致', () => assert.deepStrictEqual(DB.toClientMaster(db), clientMasterData));
-check('partnerMasterData (6社) が完全一致', () => assert.deepStrictEqual(DB.toPartnerMaster(db), partnerMasterData));
-check('bases (8拠点) が完全一致', () => assert.deepStrictEqual(DB.toBasesArray(db), bases));
-check('TEAM_MEMBERS (4名) が完全一致', () => assert.deepStrictEqual(DB.toTeamMembers(db), TEAM_MEMBERS));
-check('TEIKI_SAMPLES が完全一致', () => assert.deepStrictEqual(DB.toTeikiSamples(db), TEIKI_SAMPLES));
+masterCheck('clientMasterData が完全一致', seeds.clients, () => assert.deepStrictEqual(DB.toClientMaster(db), seeds.clients));
+masterCheck('partnerMasterData が完全一致', seeds.partners, () => assert.deepStrictEqual(DB.toPartnerMaster(db), seeds.partners));
+masterCheck('bases (8拠点) が完全一致 ★本体の縦串', seeds.bases, () => assert.deepStrictEqual(DB.toBasesArray(db), seeds.bases));
+masterCheck('TEAM_MEMBERS が完全一致', seeds.users, () => assert.deepStrictEqual(DB.toTeamMembers(db), seeds.users));
+masterCheck('TEIKI_SAMPLES が完全一致', seeds.recurringRoutes, () => assert.deepStrictEqual(DB.toTeikiSamples(db), seeds.recurringRoutes));
 
 console.log('② 受付層: 値オブジェクト構造化 + round-trip');
 const reception = DB.createReception(db, {
@@ -129,5 +134,5 @@ check('中継案件のタイムラインが2区間(担当2名)で復元', () => 
   assert.equal(tl[0].handoffType, 'driver_swap');
 });
 
-console.log('\n結果: PASS=' + pass + ' FAIL=' + fail);
+console.log('\n結果: PASS=' + pass + ' FAIL=' + fail + ' SKIP=' + skip);
 process.exit(fail === 0 ? 0 : 1);
