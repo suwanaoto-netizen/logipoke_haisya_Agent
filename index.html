@@ -8197,6 +8197,11 @@ function _ssotDerive(seed, build){
                 <label class="dnd-edit-label" for="dnd-edit-client">取引先 <span class="req">*</span></label>
                 <input type="text" id="dnd-edit-client" class="dnd-edit-input" placeholder="例：株式会社○○商事">
               </div>
+              <div class="dnd-edit-field full">
+                <label class="dnd-edit-label" for="dnd-edit-client-tel">荷主の電話番号</label>
+                <input type="tel" id="dnd-edit-client-tel" class="dnd-edit-input" placeholder="例：03-1234-5678">
+                <div class="dnd-edit-hint">未割当カード・ホバーモーダルに表示されます（取引先マスタに登録があれば自動補完）</div>
+              </div>
               <div class="dnd-edit-field">
                 <label class="dnd-edit-label" for="dnd-edit-from">発地 <span class="req">*</span></label>
                 <input type="text" id="dnd-edit-from" class="dnd-edit-input" placeholder="例：埼玉県川口市">
@@ -18325,10 +18330,20 @@ function getClientTel(clientName) {
   }
   return dndDeriveTel(clientName, '03');
 }
-// ドライバー電話：マスタに tel があれば優先、無ければ ID から携帯番号を決定論的に生成。
+// ドライバー電話：編集可能なドライバーマスタ（driverMasterData）を最優先で参照し、
+// 編集フォームでの変更が配車計画表のモーダルに即連動するようにする。
+// 見つからなければ dndDrivers の tel、最後に ID から携帯番号を決定論的に生成。
 function getDriverTel(driver) {
-  if (driver && driver.tel) return driver.tel;
-  return dndDeriveTel(driver ? (driver._driverId || driver.id || driver.driver) : '', '090');
+  if (!driver) return dndDeriveTel('', '090');
+  const dm = (typeof window !== 'undefined' && Array.isArray(window.driverMasterData))
+    ? window.driverMasterData
+    : ((typeof driverMasterData !== 'undefined' && Array.isArray(driverMasterData)) ? driverMasterData : null);
+  if (dm && driver.driver) {
+    const m = dm.find(x => x.name === driver.driver);
+    if (m && m.tel) return m.tel;
+  }
+  if (driver.tel) return driver.tel;
+  return dndDeriveTel(driver._driverId || driver.id || driver.driver || '', '090');
 }
 
 function dvApplyPreset(p) {
@@ -25630,6 +25645,8 @@ function openDndEditModal(caseId) {
 
   // フィールド初期化
   document.getElementById('dnd-edit-client').value   = c.client   || '';
+  const telEl = document.getElementById('dnd-edit-client-tel');
+  if (telEl) telEl.value = c.clientTel || (typeof getClientTel === 'function' ? getClientTel(c.client) : '');
   document.getElementById('dnd-edit-from').value     = c.from     || '';
   document.getElementById('dnd-edit-to').value       = c.to       || '';
   document.getElementById('dnd-edit-goods').value    = c.goods    || '';
@@ -25703,6 +25720,8 @@ function saveDndEditModal() {
 
   // 値取得
   const newClient   = (document.getElementById('dnd-edit-client').value || '').trim();
+  const _telEl      = document.getElementById('dnd-edit-client-tel');
+  const newClientTel = _telEl ? (_telEl.value || '').trim() : '';
   const newFrom     = (document.getElementById('dnd-edit-from').value || '').trim();
   const newTo       = (document.getElementById('dnd-edit-to').value || '').trim();
   const newGoods    = (document.getElementById('dnd-edit-goods').value || '').trim();
@@ -25719,6 +25738,8 @@ function saveDndEditModal() {
 
   // D&D側を更新
   c.client = newClient;
+  // 取引先名が変わった場合、電話番号が空 or 旧取引先のマスタ番号のままなら新取引先で補完
+  c.clientTel = newClientTel || (typeof getClientTel === 'function' ? getClientTel(newClient) : '');
   c.from   = newFrom;
   c.to     = newTo;
   c.goods  = newGoods;
