@@ -3992,6 +3992,11 @@ function _ssotDerive(seed, build){
     font-size:10px; color:var(--text-secondary); line-height:1.45;
     display:flex; align-items:center; gap:4px; margin-bottom:3px;
   }
+  .dnd-card-phone {
+    font-size:10px; color:var(--text-secondary); line-height:1.45;
+    display:flex; align-items:center; gap:4px; margin-top:2px;
+  }
+  .dnd-card-phone span:last-child { font-variant-numeric:tabular-nums; letter-spacing:.2px; }
   .dnd-card-meta {
     display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;
   }
@@ -18271,7 +18276,7 @@ const DISPATCH_VIEW_KEY = 'logipoke_dispatch_view_v1';
 function dvDefaults() {
   return {
     preset: 'standard',
-    card:   { status:true, route:true, goods:true, time:true, deadline:true, urgent:true, source:true, edit:true },
+    card:   { status:true, route:true, goods:true, phone:true, time:true, deadline:true, urgent:true, source:true, edit:true },
     driver: { vehicle:true, capacity:true, status:true, kaizen:true },
     showDateBar: true,
     showFilterBar: true,   // #assign-filter-bar（担当/拠点/すべて＋担当者チップ）
@@ -18279,9 +18284,9 @@ function dvDefaults() {
   };
 }
 const DV_PRESETS = {
-  minimal:  { card:{status:false,route:false,goods:false,time:false,deadline:false,urgent:false,source:false,edit:false}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showFilterBar:false, showSummaryBar:false },
-  standard: { card:{status:true,route:true,goods:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
-  full:     { card:{status:true,route:true,goods:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
+  minimal:  { card:{status:false,route:false,goods:false,phone:false,time:false,deadline:false,urgent:false,source:false,edit:false}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showFilterBar:false, showSummaryBar:false },
+  standard: { card:{status:true,route:true,goods:true,phone:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
+  full:     { card:{status:true,route:true,goods:true,phone:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
 };
 function dvLoad() {
   try {
@@ -18298,6 +18303,32 @@ function dvSave() { try { localStorage.setItem(DISPATCH_VIEW_KEY, JSON.stringify
 // テンプレートからの安全参照（DV未定義でも既定=表示 にフォールバック）
 function dvc(k) { return (typeof DV === 'undefined') || !DV.card   || DV.card[k]   !== false; }
 function dvd(k) { return (typeof DV === 'undefined') || !DV.driver || DV.driver[k] !== false; }
+
+// ── 電話番号ヘルパー（配車計画表カード／ツールチップ共通）──
+// シード文字列から決定論的なダミー番号を生成（プロトタイプ用。マスタに番号が無い場合のフォールバック）。
+function dndDeriveTel(seed, prefix) {
+  let h = 0; const s = String(seed || '');
+  for (let i = 0; i < s.length; i++) h = (h * 131 + s.charCodeAt(i)) >>> 0;
+  // 短い/類似シードでも分散するよう、2つの異なる派生で局番・加入者番号を作る
+  const x = (h ^ 0x9e3779b9) >>> 0;
+  const y = Math.imul(h ^ 0x85ebca6b, 0x27d4eb2f) >>> 0;
+  const a = String(1000 + (x % 9000));
+  const b = String(1000 + (y % 9000));
+  return (prefix || '03') + '-' + a + '-' + b;
+}
+// 荷主（取引先）電話：取引先マスタ（clientMasterData）から名前一致で引き、無ければ決定論的に生成。
+function getClientTel(clientName) {
+  if (clientName && typeof clientMasterData !== 'undefined' && Array.isArray(clientMasterData)) {
+    const m = clientMasterData.find(x => x.name === clientName);
+    if (m && m.tel) return m.tel;
+  }
+  return dndDeriveTel(clientName, '03');
+}
+// ドライバー電話：マスタに tel があれば優先、無ければ ID から携帯番号を決定論的に生成。
+function getDriverTel(driver) {
+  if (driver && driver.tel) return driver.tel;
+  return dndDeriveTel(driver ? (driver._driverId || driver.id || driver.driver) : '', '090');
+}
 
 function dvApplyPreset(p) {
   const d = dvDefaults(); const pr = DV_PRESETS[p] || DV_PRESETS.standard;
@@ -18362,6 +18393,7 @@ function dvPreviewCardHtml() {
     + (dvc('status') ? '<div class="dnd-card-status unprocessed">未処理</div>' : '') + '</div>'
     + (dvc('route') ? '<div class="dnd-card-route"><span style="color:var(--text-muted)">📍</span><span>' + c.from + ' → ' + c.to + '</span></div>' : '')
     + (dvc('goods') ? '<div class="dnd-card-goods" style="font-size:10px;color:var(--text-secondary);line-height:1.4">' + c.goods + '</div>' : '')
+    + (dvc('phone') ? '<div class="dnd-card-phone"><span style="color:var(--text-muted)">📞</span><span>' + getClientTel(c.client) + '</span></div>' : '')
     + meta
     + '<div class="dnd-card-airec"><span class="dnd-card-airec-ico">🤖</span><span class="dnd-card-airec-label">AI推奨</span><span class="dnd-card-airec-target">山田 一郎</span><span class="dnd-card-airec-time">09:20〜12:20</span></div>'
     + '<button class="dnd-card-partner-btn' + (minimal ? ' dnd-card-partner-btn--sm' : '') + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>協力会社へ依頼</button>'
@@ -18373,6 +18405,7 @@ function renderDisplaySettings() {
   const cardRows = [
     ['取引先名', null, true], ['AI推薦（おすすめ配車）', null, true], ['協力会社へ依頼ボタン', null, true],
     ['ステータスバッジ', 'status'], ['発着ルート（発地→着地）', 'route'], ['荷物情報（種別/重量/温度）', 'goods'],
+    ['荷主の電話番号', 'phone'],
     ['時刻・所要時間', 'time'], ['納期', 'deadline'], ['緊急マーク', 'urgent'],
     ['受付経路アイコン（AI受付など）', 'source'], ['編集ボタン', 'edit'],
   ].map(function(r){ const l=r[0], k=r[1], must=r[2]; return dvRowHtml(l, must?true:c[k], must?'':("dvSetCard('"+k+"',"+(!c[k])+")"), must); }).join('');
@@ -25406,6 +25439,7 @@ function renderDndList() {
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.from} → ${c.to}</span>
         </div>` : ''}
         ${dvc('goods') ? `<div class="dnd-card-goods" style="font-size:10px;color:var(--text-secondary);line-height:1.4">${c.goods}</div>` : ''}
+        ${dvc('phone') ? `<div class="dnd-card-phone"><span style="color:var(--text-muted)">📞</span><span>${getClientTel(c.client)}</span></div>` : ''}
         ${(dvc('source') || dvc('time') || dvc('deadline') || (c.urgent && dvc('urgent'))) ? `<div class="dnd-card-meta">
           ${dvc('source') ? renderDndSourceChip(c) : ''}
           ${dvc('time') ? `<span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>` : ''}
@@ -26338,6 +26372,14 @@ function dndBlockTipBuildHtml(driverId, blockIdx) {
         <span class="dnd-block-tip-icon">📅</span>
         <span class="dnd-block-tip-text">完了日：<b>${dateStr}</b></span>
       </div>
+      <div class="dnd-block-tip-row">
+        <span class="dnd-block-tip-icon">📞</span>
+        <span class="dnd-block-tip-text">荷主 <b>${getClientTel(detail.client)}</b></span>
+      </div>
+      <div class="dnd-block-tip-row">
+        <span class="dnd-block-tip-icon">📱</span>
+        <span class="dnd-block-tip-text">ドライバー <b>${getDriverTel(driver)}</b></span>
+      </div>
       <div class="dnd-block-tip-meta">
         ${driverLine ? `<span class="dnd-block-tip-meta-item">🚚 <b>${driverLine}</b></span>` : ''}
         <span class="dnd-block-tip-meta-item">案件 <b>${detail.id}</b></span>
@@ -26492,6 +26534,14 @@ function dndBlockTipBuildHtml(driverId, blockIdx) {
     <div class="dnd-block-tip-row">
       <span class="dnd-block-tip-icon">⏰</span>
       <span class="dnd-block-tip-text">納期：<b>${deadline}</b></span>
+    </div>
+    <div class="dnd-block-tip-row">
+      <span class="dnd-block-tip-icon">📞</span>
+      <span class="dnd-block-tip-text">荷主 <b>${getClientTel(client)}</b></span>
+    </div>
+    <div class="dnd-block-tip-row">
+      <span class="dnd-block-tip-icon">📱</span>
+      <span class="dnd-block-tip-text">ドライバー <b>${getDriverTel(driver)}</b></span>
     </div>
     ${kaizenHtml}
     <div class="dnd-block-tip-meta">
