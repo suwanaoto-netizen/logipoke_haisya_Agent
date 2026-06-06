@@ -42489,15 +42489,26 @@ function _runPartnerStep(index) {
       var raw = localStorage.getItem(INTAKE_QUEUE_KEY);
       queue = raw ? JSON.parse(raw) : [];
     } catch(e){ queue = []; }
-    if (!Array.isArray(queue) || queue.length === 0) return 0;
-
     var ingested = 0;
-    queue.forEach(function(item){
-      if (ingestIntakeItem(item)) ingested++;
-    });
+    if (Array.isArray(queue) && queue.length) {
+      queue.forEach(function(item){ if (ingestIntakeItem(item)) ingested++; });
+      // 処理済みなので旧キューを空にする
+      try { localStorage.removeItem(INTAKE_QUEUE_KEY); } catch(e){}
+    }
 
-    // 処理済みなのでキューを空にする
-    try { localStorage.removeItem(INTAKE_QUEUE_KEY); } catch(e){}
+    // SSoT(正規化) 受付ストアからも取り込む（logipoke_db_receptions_v1 へ置換した本流）
+    if (window.LogipokeDB && LogipokeDB.loadReceptions) {
+      try {
+        var receptions = LogipokeDB.loadReceptions();
+        if (receptions && receptions.length) {
+          receptions.forEach(function(r){
+            var it = (r && r._legacyIntake) ? r._legacyIntake : LogipokeDB.receptionToLegacyIntake(r);
+            if (ingestIntakeItem(it)) ingested++;
+          });
+          LogipokeDB.clearReceptions();
+        }
+      } catch(e){ console.warn('[logipoke] reception store drain failed', e); }
+    }
 
     if (ingested > 0) {
       if (typeof renderUnprocessedList === 'function') {
@@ -42583,7 +42594,7 @@ function _runPartnerStep(index) {
 
   // 他タブ（AI電話受付）からの書込み通知
   window.addEventListener('storage', function(ev){
-    if (ev.key === INTAKE_QUEUE_KEY && ev.newValue) {
+    if (ev.newValue && (ev.key === INTAKE_QUEUE_KEY || ev.key === 'logipoke_db_receptions_v1')) {
       drainIntakeQueue();
     }
   });
