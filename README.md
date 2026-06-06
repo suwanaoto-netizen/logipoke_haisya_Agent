@@ -27,15 +27,29 @@
 
 ### 移行状況（プロトタイプ本体）
 
-現行 UI を壊さない「ストラングラー方式」で段階移行しています。
+「ストラングラー方式」で段階移行を進めています。**設計資産（理想モデル / DDL / 検証）** と、
+**プロトタイプ本体（`index.html`）への接続状況** を分けて記載します（両者は別物で、本体は長く
+SSoT 未接続のままでした）。
 
-- ✅ **① マスタ層**: 取引先 / 協力会社 / 拠点 / 社内ユーザー / 定期便 を正規化ストア(SSoT)から
-  derive するよう変更（旧 literal と完全一致を `verify_model.mjs` で検証済み = lossless）。
-- ✅ **② 受付層**: AI 電話受付を `Reception(+AiExtraction)` として正規化し、住所 / 荷 / 期限を
-  値オブジェクト（Location / Cargo / TimeWindow）へ構造化。`localStorage` の生キュー
-  （旧 `logipoke_ai_intake_queue`）を正規化キー（`logipoke_db_receptions_v1`）へ置換。
-- 🔜 ドライバー / 車両 / 案件 / 運行（scheduleData・dnd・assignments）の各画面は、
-  同じモデルへ順次移行予定（運行層は `Trip>Leg>Stop+Assignment` に集約）。
+#### 設計資産（`assets/logipoke-data-model.js` + `db/schema.sql` + `migration/`）
+- ✅ 7層モデルの in-browser 実装（`window.LogipokeDB`）と PostgreSQL DDL を整備。
+- ✅ マスタ層 / 受付層 / 中継運行の **lossless 往復**を `verify_model.mjs`（Node）で検証済み
+  （`toClientMaster` / `toBasesArray` 等の adapter が旧 literal と完全一致、受付の値構造化
+  Location / Cargo / TimeWindow と round-trip）。
+
+#### プロトタイプ本体（`index.html`）への接続状況
+- ✅ **拠点 `bases`**: 本体が `window.LogipokeDB` を読み込み、`seedMasters → toBasesArray` で
+  **derive** するよう変更（"縦串" 第1号）。読み込み失敗時は seed にフォールバックするため、
+  オフライン / 厳格 CSP でも壊れません。
+- ✅ **車両 / ドライバーの ID 互換**: `vehicles[]` に `legacyIds[]`（`V1245` / `1245` / `車両1245`
+  / 紐づくドライバー `D-id`）を付与し、**あらゆる旧IDを 1 台へ解決する単一窓口
+  `resolveVehicleRef()`** を追加。`vehicleMasterData` には正規車両への `_canonicalVehicleId`
+  クロスリンクを後付け（非破壊）。
+- 🔜 **本体ではまだ未接続（順次対応）**: 他マスタ（取引先 / 協力会社 / ユーザー / 定期便）、
+  受付（本体は今も旧 `logipoke_ai_intake_queue` を使用。`logipoke_db_receptions_v1` への切替は未）、
+  案件（`unprocessed` / `processing` / `processed` の4分割）、運行（`scheduleData` / `dndDrivers`
+  / `assignments`）は本体側が literal のまま。`vehicleMasterData` は固有データを持つ独立レジストリ
+  のため、物理統合はデータ判断を要します（次段階）。運行層は `Trip>Leg>Stop+Assignment` へ集約予定。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

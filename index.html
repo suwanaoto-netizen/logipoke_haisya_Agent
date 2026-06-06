@@ -7,6 +7,9 @@
 <!-- 動態管理の航空写真地図用（Leaflet）。読み込めない環境では自動的にSVG地図へフォールバック -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer crossorigin=""></script>
+<!-- 理想7層データモデル（SSoT）。ローカル同梱なのでオフラインでも読み込める。
+     本体マスタの一部（拠点 bases）はこの window.LogipokeDB から derive する（C1: 縦串） -->
+<script src="assets/logipoke-data-model.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -18413,7 +18416,8 @@ function durationToPercent(startStr, endStr) {
 // 既存の個別案件 vehicles[].base は「川口市」等の市区町村名で入っているため、
 // マイグレーション時に aliases を介して baseId に変換する
 // ─────────────────────────────────────────────────────────────
-const bases = [
+// 拠点マスタの seed（旧 literal）。SSoT(LogipokeDB) への投入元として保持。
+const _basesSeed = [
   { id:'B001', name:'川口拠点',  region:'関東', aliases:['川口市','川口','埼玉県川口市'] },
   { id:'B002', name:'戸田拠点',  region:'関東', aliases:['戸田市','戸田','埼玉県戸田市'] },
   { id:'B003', name:'川崎拠点',  region:'関東', aliases:['川崎市','川崎','神奈川県川崎市'] },
@@ -18423,6 +18427,22 @@ const bases = [
   { id:'B007', name:'横浜拠点',  region:'関東', aliases:['横浜市','横浜','神奈川県横浜市'] },
   { id:'B008', name:'大田拠点',  region:'関東', aliases:['大田区','大田','東京都大田区'] },
 ];
+// C1（縦串）: 拠点を SSoT(LogipokeDB) から derive する。読み込めない/失敗時は seed にフォールバック（壊さない）。
+const bases = (function () {
+  try {
+    if (typeof LogipokeDB !== 'undefined' && LogipokeDB.createDB && LogipokeDB.seedMasters && LogipokeDB.toBasesArray) {
+      const _db = LogipokeDB.createDB();
+      LogipokeDB.seedMasters(_db, { bases: _basesSeed });
+      const derived = LogipokeDB.toBasesArray(_db);
+      if (Array.isArray(derived) && derived.length === _basesSeed.length) {
+        window.__logipokeBasesViaSSoT = true;
+        return derived;
+      }
+    }
+  } catch (e) { console.warn('[logipoke] bases derive failed; using seed', e); }
+  window.__logipokeBasesViaSSoT = false;
+  return _basesSeed;
+})();
 const _baseById = Object.fromEntries(bases.map(b => [b.id, b]));
 function getBaseById(id) { return _baseById[id] || null; }
 
@@ -18603,6 +18623,54 @@ function _legacyDriverIdToNew(legacyId) {
   const idx = vehicles.findIndex(v => v.id === legacyId);
   return idx >= 0 ? drivers[idx].id : null;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  C2（ID体系の一本化・足場）: 車両/ドライバーの旧ID互換 + 参照解決の単一窓口
+//  既存の複数表現（'V1245' / '1245' / '車両1245' / 紐づくドライバー 'D###' / ドライバー名）を
+//  1台の正規 vehicles エントリに解決する。「どのIDがどれか」の曖昧さ＝不整合の元を解消。
+//  ※ vehicleMasterData は固有データ(plate/maker/燃費・コスト等)を持つ独立レジストリのため
+//    物理統合はせず、_canonicalVehicleId で正規車両へ橋渡しする（追記のみ・非破壊）。
+// ═══════════════════════════════════════════════════════════════
+vehicles.forEach(function (v, i) {
+  var num = String(v.id).replace(/^V/, '');     // 'V1245' → '1245'
+  var drv = drivers[i] || null;                 // vehicles[i] ↔ drivers[i]
+  v.legacyIds = ['V' + num, num, '車両' + num];
+  if (drv && v.legacyIds.indexOf(drv.id) < 0) v.legacyIds.push(drv.id);
+  if (!v._driverId) v._driverId = drv ? drv.id : null;
+});
+var _vehicleByLegacy = {};
+vehicles.forEach(function (v) {
+  (v.legacyIds || []).forEach(function (k) { if (k != null && _vehicleByLegacy[String(k)] === undefined) _vehicleByLegacy[String(k)] = v; });
+});
+// 旧ID（あらゆる形）→ 正規 vehicles エントリ の単一解決窓口
+function resolveVehicleRef(ref) {
+  if (ref == null) return null;
+  ref = String(ref).trim();
+  if (_vehicleById[ref]) return _vehicleById[ref];               // 正規 'V####'
+  if (_vehicleByLegacy[ref]) return _vehicleByLegacy[ref];       // 'V####'/'####'/'車両####'/'D###'
+  var byPlate = vehicles.find(function (v) { return v.plate === ref; });
+  if (byPlate) return byPlate;
+  var d = _driverById[ref];                                      // 'D###'
+  if (d) { var i = drivers.indexOf(d); if (i >= 0 && vehicles[i]) return vehicles[i]; }
+  var byName = drivers.find(function (x) { return x.name === ref; });  // ドライバー名
+  if (byName) { var j = drivers.indexOf(byName); if (j >= 0 && vehicles[j]) return vehicles[j]; }
+  return null;
+}
+window.resolveVehicleRef = resolveVehicleRef;
+// 車両マスタ（独立レジストリ）→ 正規 vehicles への明示クロスリンク（DOM構築後に1回・非破壊の追記）
+function _logipokeLinkVehicleMaster() {
+  if (typeof window.vehicleMasterData === 'undefined' || !Array.isArray(window.vehicleMasterData)) return;
+  window.vehicleMasterData.forEach(function (vm) {
+    var canon = resolveVehicleRef(vm.id);
+    vm._canonicalVehicleId = canon ? canon.id : null;   // 例 '1245' → 'V1245'（無ければ null＝正規フリート外）
+    vm.legacyIds = ['車両' + vm.id, String(vm.id), vm.plate].filter(Boolean);
+    if (canon) {
+      if (!vm._driverId) vm._driverId = canon._driverId || null;
+      if (Array.isArray(canon.legacyIds) && canon.legacyIds.indexOf(String(vm.id)) < 0) canon.legacyIds.push(String(vm.id));
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', function () { try { _logipokeLinkVehicleMaster(); } catch (e) { console.warn('[logipoke] vehicleMaster link failed', e); } });
 
 // ═══════════════════════════════════════════════════════════════
 //  Assignment レイヤー（Phase 1a 追加）
