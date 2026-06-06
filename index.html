@@ -18715,6 +18715,105 @@ window.vehicleMasterSetDriver = vehicleMasterSetDriver;
 document.addEventListener('DOMContentLoaded', function () { try { _logipokeLinkVehicleMaster(); } catch (e) { console.warn('[logipoke] vehicleMaster link failed', e); } });
 
 // ═══════════════════════════════════════════════════════════════
+//  追加リファクタ（いずれも非破壊・ストラングラー方式）
+//   #1 案件: 4ストアを横断する正準解決窓口  resolveCase()
+//   #2 運行層: dndAssignments を SSoT(Trip>Leg>Assignment) へ投影  buildOperationSSoT()
+//   #3 ドライバーマスタ編集の単一窓口  driverMasterUpsert/Remove
+// ═══════════════════════════════════════════════════════════════
+// #1 案件: 未割当/未処理/処理中/処理済みの4ストアを横断し id→{phase,record} に一意解決する。
+//    物理単一化（1配列化）は影響範囲が広いため段階化し、まず「どのフェーズのどのレコードか」を一本化。
+function _caseStores() {
+  return [
+    ['unassigned',  (typeof dndUnassignedCases !== 'undefined') ? dndUnassignedCases : null],
+    ['unprocessed', (typeof unprocessedCases !== 'undefined') ? unprocessedCases : null],
+    ['processing',  (typeof processingCases !== 'undefined') ? processingCases : null],
+    ['processed',   (typeof processedCases !== 'undefined') ? processedCases : null]
+  ];
+}
+function resolveCase(id) {
+  if (id == null) return null;
+  id = String(id);
+  var stores = _caseStores();
+  for (var i = 0; i < stores.length; i++) {
+    var arr = stores[i][1]; if (!Array.isArray(arr)) continue;
+    for (var j = 0; j < arr.length; j++) {
+      var c = arr[j];
+      if (c && (String(c.id) === id || String(c.caseListId) === id)) return { phase: stores[i][0], store: stores[i][0], record: c };
+    }
+  }
+  return null;
+}
+function caseIndexAll() {
+  var idx = {};
+  _caseStores().forEach(function (s) { if (Array.isArray(s[1])) s[1].forEach(function (c) { if (c && c.id != null && idx[c.id] === undefined) idx[c.id] = { phase: s[0], record: c }; }); });
+  return idx;
+}
+window.resolveCase = resolveCase;
+window.caseIndexAll = caseIndexAll;
+
+// #2 運行層: 現在の配車割当(dndAssignments) を SSoT の Trip>Leg>Assignment に投影する（読み取り専用ブリッジ）。
+//    既存描画は dndAssignments のまま（非破壊）。SSoT が live データを表現でき deriveCaseTimeline で
+//    タイムライン復元できることを確立する＝将来この投影を描画の単一情報源へ切替えるための土台。
+function buildOperationSSoT(dateKey) {
+  if (typeof LogipokeDB === 'undefined' || !LogipokeDB.createDB) return null;
+  if (!dateKey) dateKey = (typeof dndGetCurrentDateKey === 'function') ? dndGetCurrentDateKey() : null;
+  var db = LogipokeDB.createDB();
+  if (typeof drivers !== 'undefined') drivers.forEach(function (d) { db.drivers.set(d.id, { id: d.id, name: d.name }); });
+  if (typeof vehicles !== 'undefined') vehicles.forEach(function (v) { db.vehicles.set(v.id, { id: v.id, plate: v.plate }); });
+  if (typeof dndAssignments === 'undefined' || !dateKey) return db;
+  var byCase = {};
+  Object.keys(dndAssignments).forEach(function (driverId) {
+    var byDate = dndAssignments[driverId]; if (!byDate) return;
+    (byDate[dateKey] || []).forEach(function (b) {
+      if (!b || b.caseId == null) return;
+      (byCase[b.caseId] = byCase[b.caseId] || []).push({ driverId: driverId, block: b });
+    });
+  });
+  Object.keys(byCase).forEach(function (caseId) {
+    var items = byCase[caseId].sort(function (a, b) { return String(a.block.start || '').localeCompare(String(b.block.start || '')); });
+    var trip = LogipokeDB.createTrip(db, { shape: items.length > 1 ? 'relay' : 'single', tab: 'planning' });
+    items.forEach(function (it, i) {
+      var dnd = (typeof dndDrivers !== 'undefined') ? dndDrivers.find(function (x) { return x.id === it.driverId; }) : null;
+      var leg = LogipokeDB.addLeg(db, {
+        tripId: trip.id, sequenceNo: i + 1,
+        driverId: dnd ? (dnd._driverId || dnd.id) : it.driverId,
+        vehicleId: dnd ? (dnd._vehicleId || dnd.id) : null,
+        role: items.length > 1 ? 'relay' : 'pickup_delivery',
+        startAt: dateKey + 'T' + (it.block.start || '00:00') + ':00',
+        endAt: dateKey + 'T' + (it.block.end || '00:00') + ':00',
+        handoffType: (items.length > 1 && i < items.length - 1) ? 'driver_swap' : null
+      });
+      LogipokeDB.assign(db, { orderId: String(caseId), legId: leg.id });
+    });
+  });
+  return db;
+}
+window.buildOperationSSoT = buildOperationSSoT;
+window.deriveCaseTimelineLive = function (caseId, dateKey) { var db = buildOperationSSoT(dateKey); return db ? LogipokeDB.deriveCaseTimeline(db, String(caseId)) : []; };
+
+// #3 ドライバーマスタ編集の単一窓口（追加/更新=マージ/削除）。編集の度に正規車両へのリンクを維持。
+function _logipokeLinkDriverOne(dm) {
+  if (!dm) return;
+  var canon = (typeof resolveVehicleRef === 'function') ? resolveVehicleRef(dm.vehicleId) : null;
+  dm._canonicalVehicleId = canon ? canon.id : null;
+}
+function driverMasterUpsert(rec, idx) {
+  if (typeof window.driverMasterData === 'undefined' || !Array.isArray(window.driverMasterData)) window.driverMasterData = [];
+  var out;
+  if (typeof idx === 'number' && idx >= 0 && idx < window.driverMasterData.length) { out = Object.assign({}, window.driverMasterData[idx], rec); window.driverMasterData[idx] = out; }
+  else { out = rec; window.driverMasterData.push(rec); }
+  _logipokeLinkDriverOne(out);
+  return out;
+}
+function driverMasterRemove(idx) {
+  if (typeof window.driverMasterData !== 'undefined' && idx >= 0 && idx < window.driverMasterData.length) return window.driverMasterData.splice(idx, 1)[0] || null;
+  return null;
+}
+window.driverMasterUpsert = driverMasterUpsert;
+window.driverMasterRemove = driverMasterRemove;
+document.addEventListener('DOMContentLoaded', function () { try { if (Array.isArray(window.driverMasterData)) window.driverMasterData.forEach(_logipokeLinkDriverOne); } catch (e) {} });
+
+// ═══════════════════════════════════════════════════════════════
 //  Assignment レイヤー（Phase 1a 追加）
 //  日次のドライバー×車両の組み合わせを表現する3層目のテーブル
 //
@@ -32976,10 +33075,10 @@ function saveVehicleItem() {
       note: document.getElementById('vf-dnote').value.trim(),
     };
     if (vehicleEditIdx !== null && vehicleEditType === 'driver') {
-      window.driverMasterData[vehicleEditIdx] = { ...window.driverMasterData[vehicleEditIdx], ...obj };
+      driverMasterUpsert(obj, vehicleEditIdx);
       showToast('ドライバー情報を更新しました', 'success');
     } else {
-      window.driverMasterData.push(obj);
+      driverMasterUpsert(obj);
       showToast('ドライバーを追加しました', 'success');
     }
     const vidx = window.vehicleMasterData.findIndex(v => v.id === obj.vehicleId);
@@ -32997,7 +33096,7 @@ function deleteVehicleItem(type, idx) {
     vehicleMasterRemove(idx);
     showToast('車両を削除しました', 'success');
   } else {
-    window.driverMasterData.splice(idx, 1);
+    driverMasterRemove(idx);
     showToast('ドライバーを削除しました', 'success');
   }
   syncVehicleDataToProcessing();
@@ -33160,8 +33259,7 @@ function confirmCsvImport() {
         base:    row.base    || row['拠点'] || '',
         note:    row.note    || row['備考'] || '',
       };
-      if (existing >= 0) window.driverMasterData[existing] = { ...window.driverMasterData[existing], ...obj };
-      else window.driverMasterData.push(obj);
+      driverMasterUpsert(obj, existing >= 0 ? existing : null);
     });
     showToast(`ドライバーデータを ${csvPendingData.length} 件インポートしました`, 'success');
   }
