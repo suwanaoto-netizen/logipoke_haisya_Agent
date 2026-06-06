@@ -18677,19 +18677,41 @@ function resolveVehicleRef(ref) {
   return null;
 }
 window.resolveVehicleRef = resolveVehicleRef;
-// 車両マスタ（独立レジストリ）→ 正規 vehicles への明示クロスリンク（DOM構築後に1回・非破壊の追記）
+// 車両マスタ（独立レジストリ）→ 正規 vehicles への明示クロスリンク（非破壊の追記）
+function _logipokeLinkOne(vm) {
+  if (!vm) return;
+  var canon = resolveVehicleRef(vm.id);
+  vm._canonicalVehicleId = canon ? canon.id : null;     // 例 '1245' → 'V1245'（無ければ null＝正規フリート外）
+  vm.legacyIds = ['車両' + vm.id, String(vm.id), vm.plate].filter(Boolean);
+  if (canon) {
+    if (!vm._driverId) vm._driverId = canon._driverId || null;
+    if (Array.isArray(canon.legacyIds) && canon.legacyIds.indexOf(String(vm.id)) < 0) canon.legacyIds.push(String(vm.id));
+  }
+}
 function _logipokeLinkVehicleMaster() {
   if (typeof window.vehicleMasterData === 'undefined' || !Array.isArray(window.vehicleMasterData)) return;
-  window.vehicleMasterData.forEach(function (vm) {
-    var canon = resolveVehicleRef(vm.id);
-    vm._canonicalVehicleId = canon ? canon.id : null;   // 例 '1245' → 'V1245'（無ければ null＝正規フリート外）
-    vm.legacyIds = ['車両' + vm.id, String(vm.id), vm.plate].filter(Boolean);
-    if (canon) {
-      if (!vm._driverId) vm._driverId = canon._driverId || null;
-      if (Array.isArray(canon.legacyIds) && canon.legacyIds.indexOf(String(vm.id)) < 0) canon.legacyIds.push(String(vm.id));
-    }
-  });
+  window.vehicleMasterData.forEach(_logipokeLinkOne);
 }
+// (c) 車両マスタ編集の単一窓口。追加/更新/削除/担当変更を集約し、編集の度にクロスリンクを維持する。
+function vehicleMasterUpsert(rec, idx) {
+  if (typeof window.vehicleMasterData === 'undefined' || !Array.isArray(window.vehicleMasterData)) window.vehicleMasterData = [];
+  if (typeof idx === 'number' && idx >= 0 && idx < window.vehicleMasterData.length) window.vehicleMasterData[idx] = rec;
+  else window.vehicleMasterData.push(rec);
+  _logipokeLinkOne(rec);
+  return rec;
+}
+function vehicleMasterRemove(idx) {
+  if (typeof window.vehicleMasterData !== 'undefined' && idx >= 0 && idx < window.vehicleMasterData.length) return window.vehicleMasterData.splice(idx, 1)[0] || null;
+  return null;
+}
+function vehicleMasterSetDriver(idx, name) {
+  if (typeof window.vehicleMasterData !== 'undefined' && window.vehicleMasterData[idx]) {
+    window.vehicleMasterData[idx].driverName = name; _logipokeLinkOne(window.vehicleMasterData[idx]);
+  }
+}
+window.vehicleMasterUpsert = vehicleMasterUpsert;
+window.vehicleMasterRemove = vehicleMasterRemove;
+window.vehicleMasterSetDriver = vehicleMasterSetDriver;
 document.addEventListener('DOMContentLoaded', function () { try { _logipokeLinkVehicleMaster(); } catch (e) { console.warn('[logipoke] vehicleMaster link failed', e); } });
 
 // ═══════════════════════════════════════════════════════════════
@@ -32932,10 +32954,10 @@ function saveVehicleItem() {
       costLogs: costEntries.length ? costEntries : (existing.costLogs || []),
     };
     if (vehicleEditIdx !== null && vehicleEditType === 'vehicle') {
-      window.vehicleMasterData[vehicleEditIdx] = obj;
+      vehicleMasterUpsert(obj, vehicleEditIdx);
       showToast('車両情報を更新しました', 'success');
     } else {
-      window.vehicleMasterData.push(obj);
+      vehicleMasterUpsert(obj);
       showToast('車両を追加しました', 'success');
     }
   } else {
@@ -32961,7 +32983,7 @@ function saveVehicleItem() {
       showToast('ドライバーを追加しました', 'success');
     }
     const vidx = window.vehicleMasterData.findIndex(v => v.id === obj.vehicleId);
-    if (vidx >= 0) window.vehicleMasterData[vidx].driverName = name;
+    if (vidx >= 0) vehicleMasterSetDriver(vidx, name);
   }
   syncVehicleDataToProcessing();
   closeVehicleModal();
@@ -32972,7 +32994,7 @@ function saveVehicleItem() {
 function deleteVehicleItem(type, idx) {
   if (!confirm('本当に削除しますか？')) return;
   if (type === 'vehicle') {
-    window.vehicleMasterData.splice(idx, 1);
+    vehicleMasterRemove(idx);
     showToast('車両を削除しました', 'success');
   } else {
     window.driverMasterData.splice(idx, 1);
@@ -33118,8 +33140,7 @@ function confirmCsvImport() {
         note:  row.note  || row['備考'] || '',
         driverName: row.driverName || row['担当ドライバー'] || '',
       };
-      if (existing >= 0) window.vehicleMasterData[existing] = obj;
-      else window.vehicleMasterData.push(obj);
+      vehicleMasterUpsert(obj, existing >= 0 ? existing : null);
     });
     showToast(`車両データを ${csvPendingData.length} 件インポートしました`, 'success');
   } else {
