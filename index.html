@@ -39003,14 +39003,24 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   // ════════════════════════════════════════════════════════════════
   //  KPIダッシュボード
   // ════════════════════════════════════════════════════════════════
-  // 案件のおおよその売上を推定（プロトタイプ用簡易ロジック）
+  // 案件のおおよその売上を推定。
+  // 仮確定した案件は登録された金額（運賃）を基に反映する。金額が無い場合のみ時間×単価で概算。
   function estimateRevenue(block) {
     if (!block) return 0;
-    // 時間×単価ベース。durationあるなら使う、なければstart/endから計算
+    // 1) ブロック自身に金額があれば最優先
+    if (block.amount != null && !isNaN(Number(block.amount))) return Math.round(Number(block.amount));
+    // 2) 案件本体（配車計画表）の金額を参照
+    if (block.caseId && Array.isArray(window.dndUnassignedCases)) {
+      const c = window.dndUnassignedCases.find(x => x.id === block.caseId);
+      if (c) {
+        if (c.amount != null && !isNaN(Number(c.amount))) return Math.round(Number(c.amount));
+        if (typeof getCaseAmount === 'function') return Math.round(getCaseAmount(c));
+      }
+    }
+    // 3) フォールバック：時間×単価ベース（1時間あたり ¥7,500 仮）
     const [sh, sm] = (block.start || '00:00').split(':').map(Number);
     const [eh, em] = (block.end || '00:00').split(':').map(Number);
     const dur = (eh + em/60) - (sh + sm/60);
-    // 1時間あたり ¥7,500 仮（プロト用）
     let base = Math.max(0, dur) * 7500;
     if (block.urgent) base *= 1.15;
     return Math.round(base);
@@ -39025,6 +39035,16 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
     let busyDrivers = 0;
     let alerts = 0;
     const perDriver = [];
+    // 同一案件が複数区間（リレー）に分かれて仮確定されている場合に金額を重複計上しないよう、
+    // 案件ごとの確定レッグ数を先に数えて按分する。
+    const confirmedLegCount = {};
+    window.dndDrivers.forEach(d => {
+      const arr = (window.dndAssignments[d.id] && window.dndAssignments[d.id][k]) || [];
+      arr.forEach(a => {
+        if (a.isPreset || !a.confirmed || !a.caseId) return;
+        confirmedLegCount[a.caseId] = (confirmedLegCount[a.caseId] || 0) + 1;
+      });
+    });
     window.dndDrivers.forEach(d => {
       const arr = (window.dndAssignments[d.id] && window.dndAssignments[d.id][k]) || [];
       const nonPreset = arr.filter(a => !a.isPreset);
@@ -39035,7 +39055,8 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
         if (a.confirmed) {
           confirmed++;
           driverConfirmed++;
-          const r = estimateRevenue(a);
+          const legs = (a.caseId && confirmedLegCount[a.caseId]) ? confirmedLegCount[a.caseId] : 1;
+          const r = Math.round(estimateRevenue(a) / legs);
           revenue += r;
           driverRevenue += r;
         }
