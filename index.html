@@ -17581,6 +17581,7 @@ function addToDispatchUnassigned(caseListId, src) {
     caseListId: caseListId,
     originalPhase: 'unprocessed',
     client: src.client || '—',
+    clientTel: src.clientTel || (typeof getClientTel === 'function' ? getClientTel(src.client) : ''),
     status: 'unprocessed',
     from: src.from || '',
     to: src.to || '',
@@ -18602,6 +18603,8 @@ const drivers = (function(){
       id: 'D' + String(i + 1).padStart(3, '0'),  // D001..D050
       name,
       license: i % 3 === 0 ? ['中型','大型'] : (i % 3 === 1 ? ['大型'] : ['中型']),
+      // ★ 連絡先：ドライバー携帯電話（マスタ保持。プロトタイプは決定論的に採番）
+      tel: dndDeriveTel('D' + String(i + 1).padStart(3, '0'), '090'),
       partner: false,
       // ★ Phase 1a 追加：拠点情報
       baseId:     isPartner ? null : ASSIGNED_BASE_IDS[i % ASSIGNED_BASE_IDS.length],
@@ -22371,6 +22374,8 @@ const dndUnassignedCases = (function() {
   // 全案件に算出結果を埋め込む
   const all = base.concat(auto);
   all.forEach(enrichCaseWithLoadingTime);
+  // 荷主電話番号をマスタ照合（無ければ採番）して各案件に保持
+  all.forEach(c => { if (!c.clientTel) c.clientTel = getClientTel(c.client); });
   return all;
 })();
 
@@ -22447,6 +22452,7 @@ const _DND_INIT_DRIVERS = drivers.map((d, i) => {
   const obj = {
     id: v ? v.id : ('V' + String(i).padStart(4, '0')),  // 旧コードは 'V'+vehicleNum 形式を期待
     driver: d.name,
+    tel: d.tel,  // ドライバー携帯（マスタから引き継ぎ）
     vehicle: v ? `${v.plate} (${v.ton}t)` : '—',
     maxLoad: v ? v.maxLoad : 0,
     type: v ? v.type : '平ボディ',
@@ -25439,7 +25445,7 @@ function renderDndList() {
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.from} → ${c.to}</span>
         </div>` : ''}
         ${dvc('goods') ? `<div class="dnd-card-goods" style="font-size:10px;color:var(--text-secondary);line-height:1.4">${c.goods}</div>` : ''}
-        ${dvc('phone') ? `<div class="dnd-card-phone"><span style="color:var(--text-muted)">📞</span><span>${getClientTel(c.client)}</span></div>` : ''}
+        ${dvc('phone') ? `<div class="dnd-card-phone"><span style="color:var(--text-muted)">📞</span><span>${c.clientTel || getClientTel(c.client)}</span></div>` : ''}
         ${(dvc('source') || dvc('time') || dvc('deadline') || (c.urgent && dvc('urgent'))) ? `<div class="dnd-card-meta">
           ${dvc('source') ? renderDndSourceChip(c) : ''}
           ${dvc('time') ? `<span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>` : ''}
@@ -26374,7 +26380,7 @@ function dndBlockTipBuildHtml(driverId, blockIdx) {
       </div>
       <div class="dnd-block-tip-row">
         <span class="dnd-block-tip-icon">📞</span>
-        <span class="dnd-block-tip-text">荷主 <b>${getClientTel(detail.client)}</b></span>
+        <span class="dnd-block-tip-text">荷主 <b>${detail.clientTel || getClientTel(detail.client)}</b></span>
       </div>
       <div class="dnd-block-tip-row">
         <span class="dnd-block-tip-icon">📱</span>
@@ -26537,7 +26543,7 @@ function dndBlockTipBuildHtml(driverId, blockIdx) {
     </div>
     <div class="dnd-block-tip-row">
       <span class="dnd-block-tip-icon">📞</span>
-      <span class="dnd-block-tip-text">荷主 <b>${getClientTel(client)}</b></span>
+      <span class="dnd-block-tip-text">荷主 <b>${(detail && detail.clientTel) || getClientTel(client)}</b></span>
     </div>
     <div class="dnd-block-tip-row">
       <span class="dnd-block-tip-icon">📱</span>
