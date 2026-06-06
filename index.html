@@ -3997,6 +3997,11 @@ function _ssotDerive(seed, build){
     display:flex; align-items:center; gap:4px; margin-top:2px;
   }
   .dnd-card-phone span:last-child { font-variant-numeric:tabular-nums; letter-spacing:.2px; }
+  .dnd-card-amount {
+    font-size:11px; color:var(--text-primary); line-height:1.45;
+    display:flex; align-items:center; gap:4px; margin-top:2px; font-weight:700;
+  }
+  .dnd-card-amount span:last-child { font-variant-numeric:tabular-nums; letter-spacing:.2px; color:#0f7a52; }
   .dnd-card-meta {
     display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;
   }
@@ -8214,6 +8219,11 @@ function _ssotDerive(seed, build){
                 <label class="dnd-edit-label" for="dnd-edit-goods">荷物情報</label>
                 <textarea id="dnd-edit-goods" class="dnd-edit-textarea" placeholder="例：パレット / 800kg / 常温"></textarea>
                 <div class="dnd-edit-hint">種別 / 重量 / 温度帯などを記入</div>
+              </div>
+              <div class="dnd-edit-field full">
+                <label class="dnd-edit-label" for="dnd-edit-amount">金額（運賃・税抜）</label>
+                <input type="number" id="dnd-edit-amount" class="dnd-edit-input" min="0" step="1000" placeholder="例：48000">
+                <div class="dnd-edit-hint">未割当カード・案件詳細に表示されます（円）</div>
               </div>
             </div>
 
@@ -17587,6 +17597,7 @@ function addToDispatchUnassigned(caseListId, src) {
     originalPhase: 'unprocessed',
     client: src.client || '—',
     clientTel: src.clientTel || (typeof getClientTel === 'function' ? getClientTel(src.client) : ''),
+    amount: (src.amount != null) ? src.amount : undefined,
     status: 'unprocessed',
     from: src.from || '',
     to: src.to || '',
@@ -17597,6 +17608,8 @@ function addToDispatchUnassigned(caseListId, src) {
     urgent: _deriveUrgentFromDeadline(src.deadline),
     color: color
   };
+  // 金額（運賃）：指定が無ければ案件内容から算出して必ず保持
+  if (newCard.amount == null && typeof deriveCaseAmount === 'function') newCard.amount = deriveCaseAmount(newCard);
   dndUnassignedCases.unshift(newCard);
 
   // 配車計画表が表示中なら再描画
@@ -18282,7 +18295,7 @@ const DISPATCH_VIEW_KEY = 'logipoke_dispatch_view_v1';
 function dvDefaults() {
   return {
     preset: 'standard',
-    card:   { status:true, route:true, goods:true, phone:true, time:true, deadline:true, urgent:true, source:true, edit:true },
+    card:   { status:true, route:true, goods:true, phone:true, amount:true, time:true, deadline:true, urgent:true, source:true, edit:true },
     driver: { vehicle:true, capacity:true, status:true, kaizen:true },
     showDateBar: true,
     showFilterBar: true,   // #assign-filter-bar（担当/拠点/すべて＋担当者チップ）
@@ -18290,9 +18303,9 @@ function dvDefaults() {
   };
 }
 const DV_PRESETS = {
-  minimal:  { card:{status:false,route:false,goods:false,phone:false,time:false,deadline:false,urgent:false,source:false,edit:false}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showFilterBar:false, showSummaryBar:false },
-  standard: { card:{status:true,route:true,goods:true,phone:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
-  full:     { card:{status:true,route:true,goods:true,phone:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
+  minimal:  { card:{status:false,route:false,goods:false,phone:false,amount:false,time:false,deadline:false,urgent:false,source:false,edit:false}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showFilterBar:false, showSummaryBar:false },
+  standard: { card:{status:true,route:true,goods:true,phone:true,amount:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
+  full:     { card:{status:true,route:true,goods:true,phone:true,amount:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
 };
 function dvLoad() {
   try {
@@ -18346,6 +18359,37 @@ function getDriverTel(driver) {
   return dndDeriveTel(driver._driverId || driver.id || driver.driver || '', '090');
 }
 
+// ── 金額（運賃）ヘルパー（配車計画表カード／編集／詳細共通）──
+// 円表記にフォーマット（null/NaN は「—」）
+function fmtYen(n) {
+  const v = Number(n);
+  if (n == null || isNaN(v)) return '—';
+  return '¥' + Math.round(v).toLocaleString('ja-JP');
+}
+// 案件から運賃を決定論的に算出（マスタ非保持のサンプル用フォールバック）。
+// 所要時間・重量・緊急度をベースに、ID由来のばらつきを加えて1000円単位に丸める。
+function deriveCaseAmount(c) {
+  if (!c) return 0;
+  const h = (c.durationH != null) ? c.durationH : 3;
+  let amt = h * 12000;
+  const kgMatch = String(c.goods || '').match(/(\d[\d,]*)\s*kg/);
+  if (kgMatch) {
+    const kg = parseInt(kgMatch[1].replace(/,/g, ''), 10) || 0;
+    amt += Math.round(kg / 100) * 500;
+  }
+  if (c.urgent) amt += 15000;
+  let seed = 0; const s = String(c.id || c.client || '');
+  for (let i = 0; i < s.length; i++) seed = (seed * 31 + s.charCodeAt(i)) >>> 0;
+  const jitter = ((seed % 31) - 15) / 100; // -0.15 〜 +0.15
+  amt = amt * (1 + jitter);
+  return Math.max(8000, Math.round(amt / 1000) * 1000);
+}
+// 案件の金額を返す（保持値優先、無ければ算出）
+function getCaseAmount(c) {
+  if (c && c.amount != null && !isNaN(Number(c.amount))) return Number(c.amount);
+  return deriveCaseAmount(c);
+}
+
 function dvApplyPreset(p) {
   const d = dvDefaults(); const pr = DV_PRESETS[p] || DV_PRESETS.standard;
   DV = { ...d, preset:p, card:{...pr.card}, driver:{...pr.driver}, showDateBar:pr.showDateBar, showFilterBar:pr.showFilterBar, showSummaryBar:pr.showSummaryBar };
@@ -18397,7 +18441,7 @@ function dvRowHtml(label, on, onclick, must) {
     + '<span class="dvsw ' + (must ? 'lock' : (on ? 'on' : '')) + '"></span></div>';
 }
 function dvPreviewCardHtml() {
-  const c = { client:'株式会社○○商事', from:'埼玉県川口市', to:'神奈川県横浜市', goods:'パレット / 800kg / 常温', preferredStart:'09:00', durationH:3, deadline:'05/25 AM指定', urgent:true };
+  const c = { client:'株式会社○○商事', from:'埼玉県川口市', to:'神奈川県横浜市', goods:'パレット / 800kg / 常温', preferredStart:'09:00', durationH:3, deadline:'05/25 AM指定', urgent:true, amount:48000 };
   const minimal = !dvc('route') && !dvc('goods') && !dvc('time') && !dvc('deadline');
   const meta = (dvc('source') || dvc('time') || dvc('deadline') || (c.urgent && dvc('urgent'))) ? ('<div class="dnd-card-meta">'
       + (dvc('source') ? '<span class="dnd-card-source">🎙 AI受付</span>' : '')
@@ -18410,6 +18454,7 @@ function dvPreviewCardHtml() {
     + (dvc('route') ? '<div class="dnd-card-route"><span style="color:var(--text-muted)">📍</span><span>' + c.from + ' → ' + c.to + '</span></div>' : '')
     + (dvc('goods') ? '<div class="dnd-card-goods" style="font-size:10px;color:var(--text-secondary);line-height:1.4">' + c.goods + '</div>' : '')
     + (dvc('phone') ? '<div class="dnd-card-phone"><span style="color:var(--text-muted)">📞</span><span>' + getClientTel(c.client) + '</span></div>' : '')
+    + (dvc('amount') ? '<div class="dnd-card-amount"><span style="color:var(--text-muted)">💴</span><span>' + fmtYen(getCaseAmount(c)) + '</span></div>' : '')
     + meta
     + '<div class="dnd-card-airec"><span class="dnd-card-airec-ico">🤖</span><span class="dnd-card-airec-label">AI推奨</span><span class="dnd-card-airec-target">山田 一郎</span><span class="dnd-card-airec-time">09:20〜12:20</span></div>'
     + '<button class="dnd-card-partner-btn' + (minimal ? ' dnd-card-partner-btn--sm' : '') + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>協力会社へ依頼</button>'
@@ -18422,6 +18467,7 @@ function renderDisplaySettings() {
     ['取引先名', null, true], ['AI推薦（おすすめ配車）', null, true], ['協力会社へ依頼ボタン', null, true],
     ['ステータスバッジ', 'status'], ['発着ルート（発地→着地）', 'route'], ['荷物情報（種別/重量/温度）', 'goods'],
     ['荷主の電話番号', 'phone'],
+    ['金額（運賃）', 'amount'],
     ['時刻・所要時間', 'time'], ['納期', 'deadline'], ['緊急マーク', 'urgent'],
     ['受付経路アイコン（AI受付など）', 'source'], ['編集ボタン', 'edit'],
   ].map(function(r){ const l=r[0], k=r[1], must=r[2]; return dvRowHtml(l, must?true:c[k], must?'':("dvSetCard('"+k+"',"+(!c[k])+")"), must); }).join('');
@@ -22391,6 +22437,8 @@ const dndUnassignedCases = (function() {
   all.forEach(enrichCaseWithLoadingTime);
   // 荷主電話番号をマスタ照合（無ければ採番）して各案件に保持
   all.forEach(c => { if (!c.clientTel) c.clientTel = getClientTel(c.client); });
+  // 金額（運賃）を全案件（既存サンプル含む）に保持
+  all.forEach(c => { if (c.amount == null) c.amount = deriveCaseAmount(c); });
   return all;
 })();
 
@@ -25461,6 +25509,7 @@ function renderDndList() {
         </div>` : ''}
         ${dvc('goods') ? `<div class="dnd-card-goods" style="font-size:10px;color:var(--text-secondary);line-height:1.4">${c.goods}</div>` : ''}
         ${dvc('phone') ? `<div class="dnd-card-phone"><span style="color:var(--text-muted)">📞</span><span>${c.clientTel || getClientTel(c.client)}</span></div>` : ''}
+        ${dvc('amount') ? `<div class="dnd-card-amount"><span style="color:var(--text-muted)">💴</span><span>${fmtYen(getCaseAmount(c))}</span></div>` : ''}
         ${(dvc('source') || dvc('time') || dvc('deadline') || (c.urgent && dvc('urgent'))) ? `<div class="dnd-card-meta">
           ${dvc('source') ? renderDndSourceChip(c) : ''}
           ${dvc('time') ? `<span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>` : ''}
@@ -25647,6 +25696,8 @@ function openDndEditModal(caseId) {
   document.getElementById('dnd-edit-client').value   = c.client   || '';
   const telEl = document.getElementById('dnd-edit-client-tel');
   if (telEl) telEl.value = c.clientTel || (typeof getClientTel === 'function' ? getClientTel(c.client) : '');
+  const amtEl = document.getElementById('dnd-edit-amount');
+  if (amtEl) amtEl.value = (typeof getCaseAmount === 'function') ? getCaseAmount(c) : (c.amount != null ? c.amount : '');
   document.getElementById('dnd-edit-from').value     = c.from     || '';
   document.getElementById('dnd-edit-to').value       = c.to       || '';
   document.getElementById('dnd-edit-goods').value    = c.goods    || '';
@@ -25722,6 +25773,9 @@ function saveDndEditModal() {
   const newClient   = (document.getElementById('dnd-edit-client').value || '').trim();
   const _telEl      = document.getElementById('dnd-edit-client-tel');
   const newClientTel = _telEl ? (_telEl.value || '').trim() : '';
+  const _amtEl      = document.getElementById('dnd-edit-amount');
+  const _amtRaw     = _amtEl ? (_amtEl.value || '').trim() : '';
+  const newAmount   = (_amtRaw === '') ? c.amount : Math.max(0, Math.round(parseFloat(_amtRaw) || 0));
   const newFrom     = (document.getElementById('dnd-edit-from').value || '').trim();
   const newTo       = (document.getElementById('dnd-edit-to').value || '').trim();
   const newGoods    = (document.getElementById('dnd-edit-goods').value || '').trim();
@@ -25740,6 +25794,7 @@ function saveDndEditModal() {
   c.client = newClient;
   // 取引先名が変わった場合、電話番号が空 or 旧取引先のマスタ番号のままなら新取引先で補完
   c.clientTel = newClientTel || (typeof getClientTel === 'function' ? getClientTel(newClient) : '');
+  c.amount = (newAmount != null) ? newAmount : c.amount;
   c.from   = newFrom;
   c.to     = newTo;
   c.goods  = newGoods;
@@ -36334,6 +36389,15 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
       ? `<span style="display:inline-block; padding:3px 10px; background:#16a34a; color:#fff; font-size:11px; font-weight:700; border-radius:12px; margin-left:8px;">✓ 確定済み</span>`
       : `<span style="display:inline-block; padding:3px 10px; background:#dbeafe; color:#1e40af; font-size:11px; font-weight:700; border-radius:12px; margin-left:8px;">📋 未確定</span>`;
 
+    // 金額（運賃）：ブロック → 配車計画表の案件 → caseObj → 算出 の順で解決
+    const amountCase = (a.caseId && Array.isArray(window.dndUnassignedCases))
+      ? window.dndUnassignedCases.find(x => x.id === a.caseId) : null;
+    const amountVal = (a.amount != null) ? a.amount
+      : (amountCase && amountCase.amount != null) ? amountCase.amount
+      : (caseObj && caseObj.amount != null) ? caseObj.amount
+      : (typeof deriveCaseAmount === 'function' ? deriveCaseAmount(amountCase || caseObj || a) : null);
+    const amountStr = (typeof fmtYen === 'function') ? fmtYen(amountVal) : ('¥' + amountVal);
+
     const body = document.getElementById('dnd-detail-body');
     body.innerHTML = `
       <div class="dnd-detail-section">
@@ -36367,6 +36431,7 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
           荷物・条件
         </div>
         <div class="dnd-detail-row"><span class="dnd-detail-label">荷姿</span><span class="dnd-detail-val">${a.goods || '—'}</span></div>
+        <div class="dnd-detail-row"><span class="dnd-detail-label">金額</span><span class="dnd-detail-val" style="font-weight:700; color:#0f7a52;">${amountStr}</span></div>
         <div class="dnd-detail-row"><span class="dnd-detail-label">納期</span><span class="dnd-detail-val">${a.deadline || '—'}</span></div>
         ${caseObj ? `<div class="dnd-detail-row"><span class="dnd-detail-label">案件番号</span><span class="dnd-detail-val" style="font-family:'Inter',sans-serif; font-size:11px;">${caseObj.id}</span></div>` : ''}
         ${caseObj && caseObj.priority ? `<div class="dnd-detail-row"><span class="dnd-detail-label">優先度</span><span class="dnd-detail-val">${caseObj.priority}</span></div>` : ''}
