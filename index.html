@@ -12906,14 +12906,15 @@ window.__opStoreConsistent = function () {
 // 失敗/件数不一致時は live配列を一切触らず従来動作に縮退。
 function applyDndBlocksViaSSoT(driverId, dateKey, liveArr) {
   if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined'
-      || !LogipokeDB.ingestDndBlocks || !Array.isArray(liveArr) || liveArr.length === 0) return;
+      || !LogipokeDB.ingestDndBlocks || !Array.isArray(liveArr) || liveArr.length === 0) return false;
   try {
     const db = LogipokeDB.createDB();
     LogipokeDB.ingestDndBlocks(db, driverId, dateKey, liveArr);
     const view = LogipokeDB.toDndBlocks(db, driverId, dateKey);
-    if (view.length !== liveArr.length) return;           // 不一致なら触らない
+    if (view.length !== liveArr.length) return false;     // 不一致なら触らない
     liveArr.length = 0; view.forEach(b => liveArr.push(b)); // ロスレス往復を live に反映（配列identity保持）
-  } catch (e) { /* 縮退：live配列はそのまま */ }
+    return true;
+  } catch (e) { return false; /* 縮退：live配列はそのまま */ }
 }
 window.applyDndBlocksViaSSoT = applyDndBlocksViaSSoT;
 
@@ -30635,6 +30636,8 @@ function dndTrackDrop(e, driverId) {
     const fromArr = (dndAssignments[dndDraggingFromDriver] && dndAssignments[dndDraggingFromDriver][dndDraggingFromDateKey]) || [];
     if (fromArr[dndDraggingBlockIdx]) {
       fromArr.splice(dndDraggingBlockIdx, 1);
+      // C6第14段：移動元の dndAssignments も store-first（ロスレス往復を in-place 反映）。
+      applyDndBlocksViaSSoT(dndDraggingFromDriver, dndDraggingFromDateKey, fromArr);
     }
   }
 
@@ -30706,6 +30709,8 @@ function dndTrackDrop(e, driverId) {
   dndAssignments[driverId][targetKey].push(_newBlock);
   // 開始時刻順にソート
   dndAssignments[driverId][targetKey].sort((a,b) => timeToMin(a.start) - timeToMin(b.start));
+  // C6第14段：配車先の dndAssignments を store-first（ingestDndBlocks→toDndBlocks のロスレス往復を in-place 反映）。
+  applyDndBlocksViaSSoT(driverId, targetKey, dndAssignments[driverId][targetKey]);
 
   // ★M3: 新スキーマ jobs[]/steps[] にも同じ内容を追加
   // 既存のブロック .push() を維持しつつ、jobs/steps を整合させる
@@ -30874,6 +30879,8 @@ function dndRemoveAssignment(driverId, idx) {
   }
 
   arr.splice(idx, 1);
+  // C6第14段：割当解除後の dndAssignments も store-first（ロスレス往復を in-place 反映）。
+  applyDndBlocksViaSSoT(driverId, currentKey, arr);
 
   // ★M3: 新スキーマ jobs[]/steps[] からも該当ジョブを削除
   try {
