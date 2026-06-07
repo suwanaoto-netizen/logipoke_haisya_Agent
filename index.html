@@ -604,6 +604,7 @@ function _ssotDerive(seed, build){
   .so-recommended { color:#0D4A3A; background:#EAF5F0; border:1px solid #b6e6d3; } .so-recommended .dot { background:#3BB888; } /* 推奨＝グリーン */
   .so-negotiate   { color:#92400e; background:#fffbeb; border:1px solid #fde68a; } .so-negotiate .dot { background:#d97706; }  /* 要交渉＝アンバー */
   .so-review      { color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; } .so-review .dot { background:#94a3b8; }    /* 要確認＝グレー */
+  .so-applied     { color:#fff; background:#0D4A3A; border:1px solid #0D4A3A; } .so-applied .dot { background:#7be0bd; } /* 増車適用済み＝ソリッドグリーン */
   /* 増車コメント（PR5・詳細パネル）。色は verdict トーン（so-* の背景/枠/文字）を流用 */
   .scaleout-rationale { display:flex; align-items:flex-start; gap:7px; padding:9px 12px; border-radius:8px; font-size:11.5px; font-weight:600; line-height:1.55; border:1px solid var(--border); }
   .scaleout-rationale.so-required    { color:#9a3412; background:#fff7ed; border-color:#fed7aa; }
@@ -14179,22 +14180,50 @@ function applyScaleOutPlanFromBoard(caseIdx) {
   if (typeof renderSchedule === 'function') { try { renderSchedule(); } catch (e) {} }
 }
 
+// ボード案件に紐づく処理中エントリを取得（無ければ null）。生成はしない。
+function findProcessingForBoardCase(boardCase) {
+  if (!boardCase || typeof processingCases === 'undefined') return null;
+  let pc = null;
+  if (boardCase.caseListId) pc = processingCases.find(x => x.id === boardCase.caseListId);
+  if (!pc) pc = processingCases.find(x => x.id === boardCase.id || x._boardCaseId === boardCase.id);
+  return pc || null;
+}
+
+// 増車プランが適用済みか（applyScaleOutPlan で multi 化＋AI増車プラン便が入っている）。
+function isBoardCaseScaleOutApplied(boardCase) {
+  const pc = findProcessingForBoardCase(boardCase);
+  if (!pc || pc.vehicleMode !== 'multi') return false;
+  const ownApplied = Array.isArray(pc.legs) && pc.legs.some(l => l && l.reason === 'AI増車プラン');
+  const partnerApplied = Array.isArray(pc.scaleOutPartnerLegs) && pc.scaleOutPartnerLegs.length > 0;
+  return ownApplied || partnerApplied;
+}
+
 // ボード用：増車バッジをクリック可能に（required/recommended のみプランを開ける）。
+// 適用済みは「⊕ 増車適用済み」表示に切替（クリックで再表示・再適用は可）。
 function boardScaleOutBadgeHtml(c) {
+  const wrap = (badge, tip, suffix) =>
+    '<div class="scaleout-badge-board" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px;cursor:pointer"'
+    + ' onmousedown="event.stopPropagation()"'
+    + ' ondragstart="event.preventDefault();event.stopPropagation()"'
+    + ' draggable="false"'
+    + ' onclick="event.stopPropagation();openBoardScaleOutPlan(\'' + c.id + '\')"'
+    + ' title="' + tip + '">'
+    + badge
+    + '<span style="font-size:9px;font-weight:800;color:#0D4A3A;margin-left:2px">' + suffix + '</span>'
+    + '</div>';
+
+  if (isBoardCaseScaleOutApplied(c)) {
+    return wrap(
+      '<div class="scaleout-badge so-applied"><span class="dot"></span>⊕ 増車適用済み</div>',
+      '増車プラン適用済み。クリックで再表示・再適用できます',
+      '▸ 再表示');
+  }
   const inner = scaleOutBadgeHtml(c);
   if (!inner) return '';
   let v;
   try { v = getCaseScaleOut(c); } catch (e) { return inner; }
   if (!v || (v.verdict !== 'required' && v.verdict !== 'recommended')) return inner;
-  return '<div class="scaleout-badge-board" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px;cursor:pointer"'
-    + ' onmousedown="event.stopPropagation()"'
-    + ' ondragstart="event.preventDefault();event.stopPropagation()"'
-    + ' draggable="false"'
-    + ' onclick="event.stopPropagation();openBoardScaleOutPlan(\'' + c.id + '\')"'
-    + ' title="クリックでAI増車プランを開く（配車計画表で割り当て）">'
-    + inner
-    + '<span style="font-size:9px;font-weight:800;color:#0D4A3A;margin-left:2px">▸ プランを開く</span>'
-    + '</div>';
+  return wrap(inner, 'クリックでAI増車プランを開く（配車計画表で割り当て）', '▸ プランを開く');
 }
 
 // 増車が必要/推奨の案件件数（required + recommended）。運行スケジュールのサマリー集計用。
