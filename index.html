@@ -626,7 +626,12 @@ function _ssotDerive(seed, build){
   .dnd-section-divider { font-size:10px; font-weight:800; color:#9a3412; background:#fff7ed; border:1px solid #fed7aa; border-radius:6px; padding:4px 10px; margin:8px 0 4px; display:inline-flex; align-items:center; gap:6px; }
   .dnd-row-partner .dnd-driver-cell { background:#fffbeb; border-color:#fde68a; }
   .dnd-partner-row-label { color:#c2410c !important; }
-  .dnd-block-partner-leg { background-color:#c2410c; background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.22), rgba(255,255,255,.22) 4px, transparent 4px, transparent 8px); }
+  .dnd-block-partner-leg { background-color:#c2410c; background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.22), rgba(255,255,255,.22) 4px, transparent 4px, transparent 8px); cursor:pointer; }
+  .dnd-block-partner-leg.po-done { background-image:none; box-shadow:inset 0 0 0 2px rgba(255,255,255,.55); }
+  /* 増車枠バー上の「発注確定」ボタン（右上） */
+  .dnd-po-btn { position:absolute; top:2px; right:2px; z-index:4; font-size:8.5px; font-weight:800; line-height:1; padding:2px 6px; border-radius:4px; border:none; cursor:pointer; background:#fff; color:#c2410c; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+  .dnd-po-btn:hover { background:#fff7ed; }
+  .dnd-block-partner-leg.po-done .dnd-po-btn { background:#16a34a; color:#fff; }
 
   .btn { 
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -13907,7 +13912,31 @@ function applyScaleOutPlan(caseIdx) {
   if (typeof renderSchedule === 'function') { try { renderSchedule(); } catch (e) {} }
   const pc = c.scaleOutPartnerLegs.length;
   showToast('自社' + c.legs.length + '台を複数台配車に流し込みました（配車割当にバー表示）'
-    + (pc ? '。協力' + pc + '社は「協力会社へ依頼」から手配してください' : ''), 'success');
+    + (pc ? '。協力' + pc + '社は増車枠バーから「発注確定」できます' : ''), 'success');
+}
+
+// 増車枠バーから協力会社便を直接「発注確定」（ボード上で完結・発注書PO発行）。
+// ここで発行したPO番号は確定(confirmDispatch)時の請求連携にそのまま引き継がれる。
+function confirmPartnerLegPO(caseId, legIdx) {
+  const c = (typeof processingCases !== 'undefined' ? processingCases : []).find(function (x) { return x.id === caseId; });
+  if (!c || !c.scaleOutPartnerLegs || !c.scaleOutPartnerLegs[legIdx]) return;
+  const leg = c.scaleOutPartnerLegs[legIdx];
+  if (leg.poConfirmed) {
+    showToast('発注確定済みです（' + leg.purchaseOrderNo + ' / ' + (leg.name || '協力会社') + '）', 'info');
+    return;
+  }
+  const charge = (leg.charge || 0).toLocaleString();
+  if (!confirm((leg.name || '協力会社') + ' へ 傭車¥' + charge + ' で発注確定します。\n発注書（PO）を発行し、確定時に請求へ連携します。よろしいですか？')) return;
+  const now = new Date();
+  leg.poConfirmed = true;
+  leg.purchaseOrderNo = 'PO-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random() * 90000) + 10000);
+  leg.purchaseOrderIssuedAt = now.toLocaleString('ja-JP');
+  if (typeof renderDnd === 'function') { try { renderDnd(); } catch (e) {} }
+  if (typeof renderProcessingList === 'function') { try { renderProcessingList(); } catch (e) {} }
+  if (typeof renderProcessingDetail === 'function' && typeof selectedProcessing !== 'undefined') {
+    try { renderProcessingDetail(selectedProcessing); } catch (e) {}
+  }
+  showToast('✅ ' + (leg.name || '協力会社') + ' へ発注確定（' + leg.purchaseOrderNo + '）。発注書を発行しました', 'success');
 }
 
 // 増車が必要/推奨の案件件数（required + recommended）。運行スケジュールのサマリー集計用。
@@ -17756,7 +17785,8 @@ function confirmDispatch() {
       const legSales = _salesPerLeg;
       const legProfit = legSales - charge;       // 傭車支払が原価＝粗利を圧縮
       const seqNo = c.legs.length + pi + 1;
-      const poNo = 'PO-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random() * 90000) + 10000);
+      // ボードで先に「発注確定」済みなら、その発注書番号・発行時刻を引き継ぐ
+      const poNo = leg.purchaseOrderNo || ('PO-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random() * 90000) + 10000));
       processedCases.unshift({
         id: c.id + '-P' + (pi + 1), status: '完了', casePattern: c.casePattern || null,
         partner: true, partnerName: leg.name || '協力会社',
@@ -17772,7 +17802,7 @@ function confirmDispatch() {
         invoiceDate: formatDateSlash(now), due: _payDue, paid: false,
         // ── 発注書（下請法対応）──
         purchaseOrderNo: poNo, purchaseOrderTotal: charge,
-        purchaseOrderIssuedAt: now.toLocaleString('ja-JP'),
+        purchaseOrderIssuedAt: leg.purchaseOrderIssuedAt || now.toLocaleString('ja-JP'),
         purchaseOrderMethod: '銀行振込（月末締め翌月末払い）',
         purchaseOrderRoute: c.from + ' → ' + c.to,
         purchaseOrderGoods: c.goods,
@@ -26777,11 +26807,17 @@ function renderDndTimeline() {
     let pRows = '';
     soCases.forEach(c => {
       const clientShort = (c.client || '').length > 8 ? c.client.substring(0, 7) + '…' : c.client;
-      c.scaleOutPartnerLegs.forEach(leg => {
+      c.scaleOutPartnerLegs.forEach((leg, plegIdx) => {
         const start = leg.startTime || '09:00', end = leg.endTime || '13:00';
         const left = timeToPercent(start), width = durationToPercent(start, end);
         const charge = (leg.charge || 0).toLocaleString();
-        const tip = `${c.client} / 協力会社：${leg.name} / 傭車¥${charge} / ${start} - ${end}`;
+        const done = !!leg.poConfirmed;
+        const tip = done
+          ? `${c.client} / 協力会社：${leg.name} / 発注済 ${leg.purchaseOrderNo} / 傭車¥${charge}`
+          : `${c.client} / 協力会社：${leg.name} / 傭車¥${charge} / クリックで発注確定`;
+        const rowStatus = done
+          ? '<span class="dnd-driver-status dnd-partner-row-label">✓ 発注済</span>'
+          : '<span class="dnd-driver-status dnd-partner-row-label">協力会社</span>';
         pRows += `<div class="dnd-row dnd-row-partner">
           <div class="dnd-driver-cell">
             <div class="dnd-driver-line1">
@@ -26789,16 +26825,18 @@ function renderDndTimeline() {
               <span class="dnd-driver-vehicle">傭車</span>
             </div>
             <div class="dnd-driver-line2">
-              <span class="dnd-driver-status dnd-partner-row-label">協力会社</span>
+              ${rowStatus}
               <span class="dnd-driver-capacity" title="${(c.client || '').replace(/"/g, '&quot;')} 増車">${clientShort} 増車</span>
             </div>
           </div>
           <div class="dnd-track dnd-track-partner">
             ${isToday ? `<div class="dnd-now-line" style="left:${nowPct}%"></div>` : ''}
-            <div class="dnd-block dnd-block-partner-leg" style="left:${left}%;width:${width}%"
-                 title="${tip.replace(/"/g, '&quot;')}">
-              <div class="dnd-block-title">${leg.name || '協力会社'}</div>
-              <div class="dnd-block-sub">傭車¥${charge}</div>
+            <div class="dnd-block dnd-block-partner-leg${done ? ' po-done' : ''}" style="left:${left}%;width:${width}%"
+                 title="${tip.replace(/"/g, '&quot;')}"
+                 onclick="confirmPartnerLegPO('${c.id}',${plegIdx})">
+              <button class="dnd-po-btn" onclick="event.stopPropagation();confirmPartnerLegPO('${c.id}',${plegIdx})" title="${done ? '発注書を確認' : 'この内容で発注確定（発注書を発行）'}">${done ? '✓ 発注済' : '発注確定'}</button>
+              <div class="dnd-block-title">${done ? '✓ ' : ''}${leg.name || '協力会社'}</div>
+              <div class="dnd-block-sub">${done ? leg.purchaseOrderNo : '傭車¥' + charge}</div>
             </div>
           </div>
         </div>`;
