@@ -128,7 +128,7 @@ function _ssotDerive(seed, build){
   .header-badge-count {
     position: absolute; top: 0; right: 0;
     width: 16px; height: 16px;
-    background: #ef4444;
+    background: var(--orange);
     border-radius: 50%;
     font-size: 9px; color: #fff;
     display: flex; align-items: center; justify-content: center;
@@ -457,10 +457,10 @@ function _ssotDerive(seed, build){
     color: var(--text-secondary);
     transition: all .18s;
   }
-  /* 未処理・処理中のバッジは常に赤（0件時はグレー） */
+  /* 未処理・処理中のバッジは常にオレンジ（0件時はグレー） */
   .phase-tab.unprocessed .tab-count,
   .phase-tab.processing .tab-count {
-    background: var(--red);
+    background: var(--orange);
     color: #fff;
   }
   .phase-tab.unprocessed .tab-count[data-zero="true"],
@@ -5835,7 +5835,7 @@ function _ssotDerive(seed, build){
     display: flex; align-items: center; gap: 6px;
   }
   .fax-left-title-count {
-    background: var(--red); color: #fff;
+    background: var(--orange); color: #fff;
     font-size: 10px; font-weight: 800; padding: 1px 6px;
     border-radius: 10px; font-family: 'Inter', sans-serif;
   }
@@ -5872,7 +5872,7 @@ function _ssotDerive(seed, build){
   .fax-type-badge.fax  { background: #fef3c7; color: #92400e; }
   .fax-addr-unread {
     margin-left: auto;
-    background: var(--red); color: #fff;
+    background: var(--orange); color: #fff;
     font-size: 10px; font-weight: 700; min-width: 18px; height: 18px;
     border-radius: 9px; display: flex; align-items: center; justify-content: center;
     padding: 0 5px; font-family: 'Inter', sans-serif;
@@ -8094,7 +8094,7 @@ function _ssotDerive(seed, build){
             <button class="dispatch-tab active" id="dtab-planning" onclick="switchDispatchTab('planning')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 4v3h-7V8z"/></svg>
               計画中
-              <span style="font-size:10px;font-weight:800;font-family:'Inter',sans-serif;padding:2px 8px;border-radius:20px;background:var(--red);color:#fff">6</span>
+              <span style="font-size:10px;font-weight:800;font-family:'Inter',sans-serif;padding:2px 8px;border-radius:20px;background:var(--orange);color:#fff">6</span>
             </button>
             <div class="tooltip-box">処理中にある車両一覧を含む、確定されていない全ての車両の計画</div>
           </div>
