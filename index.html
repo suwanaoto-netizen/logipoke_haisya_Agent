@@ -12804,6 +12804,31 @@ window.customerAffinity = function (vehicleId, clientName, _deps) {
 // ===== AI-AFFINITY-END =====
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  運行層SSoT 描画ブリッジ（課題C6・第2段：読取専用ビューの切替）
+//  読取専用の投影（DnD盤の中継行など）を SSoT 派生に切替えるフラグ。既定OFFで従来描画を維持。
+//  ONにすると c.legs を LogipokeDB.ingestCaseLegs → toCaseTimeline 経由で再構成して描画する。
+//  ※書込先は引き続き c.legs（中継編集UI）。ここで差し替えるのは読取専用ビューのみ。
+//  ※派生失敗時は必ず c.legs にフォールバック（描画は決して壊さない）。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+window.__useOperationSSoT = window.__useOperationSSoT || false;
+function deriveRelayLegsView(c) {
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined' || !c) return (c && c.legs) || [];
+  try {
+    LogipokeDB.resetSeq();
+    const db = LogipokeDB.createDB();
+    LogipokeDB.ingestCaseLegs(db, c);
+    const tl = LogipokeDB.toCaseTimeline(db, c.id);
+    if (!tl.length) return c.legs || [];
+    // SSoT 派生行 → 旧 leg 形（読取専用ビューが参照するフィールドのみ復元）
+    return tl.map(function (r) {
+      return { legNo: r.sequenceNo, driverName: r.driverName, vehicleId: r.vehicleLabel, vehicleName: r.vehicleLabel,
+        startTime: r.start, endTime: r.end, relayFrom: r.from, relayTo: r.to, role: r.role };
+    });
+  } catch (e) { return c.legs || []; }
+}
+window.deriveRelayLegsView = deriveRelayLegsView;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  ページ・フェーズ切替
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -27696,17 +27721,19 @@ function renderDndTimeline() {
       c.vehicleMode === 'relay' && c.legs && c.legs.length > 0
     );
     relayRowsHtml = relayCases.map(c => {
-      const driverChain = c.legs
+      // 読取専用ビュー：SSoT 派生（フラグON時）or レガシー c.legs（既定）
+      const legs = deriveRelayLegsView(c);
+      const driverChain = legs
         .map(l => (l.driverName || '—').split(' ')[0])
         .join(' → ');
-      const vehicleList = c.legs.map(l => l.vehicleId).join(' / ');
+      const vehicleList = legs.map(l => l.vehicleId).join(' / ');
       // 各区間のブロック
-      const blocksHtml = c.legs.map(leg => {
+      const blocksHtml = legs.map(leg => {
         const left = timeToPercent(leg.startTime || '00:00');
         const width = durationToPercent(leg.startTime || '00:00', leg.endTime || '00:00');
         const tip = `${c.client}\n区間${leg.legNo}: ${leg.relayFrom} → ${leg.relayTo}\n${leg.startTime} - ${leg.endTime}\n${leg.driverName} (${leg.vehicleId})`;
         return `<div class="dnd-block dnd-block-relay-leg"
-                     data-leg-no="${leg.legNo}/${c.legs.length}"
+                     data-leg-no="${leg.legNo}/${legs.length}"
                      style="left:${left}%;width:${width}%;background:#0d9488"
                      title="${tip.replace(/"/g, '&quot;').replace(/\n/g, ' / ')}">
           <div class="dnd-block-title">${(leg.driverName || '').split(' ')[0]}</div>
@@ -27714,7 +27741,7 @@ function renderDndTimeline() {
         </div>`;
       }).join('');
       // 車両IDから"車両"プレフィックスを除去（通常行と同じ表示形式）
-      const vehicleListShort = c.legs.map(l => (l.vehicleId || '').replace('車両', '')).join('/');
+      const vehicleListShort = legs.map(l => (l.vehicleId || '').replace('車両', '')).join('/');
       // 取引先名（長すぎる場合は省略）
       const clientShort = (c.client || '').length > 8
         ? c.client.substring(0, 7) + '…'
@@ -27726,7 +27753,7 @@ function renderDndTimeline() {
             <span class="dnd-driver-vehicle" title="${vehicleList.replace(/"/g, '&quot;')}">${vehicleListShort}</span>
           </div>
           <div class="dnd-driver-line2">
-            <span class="dnd-driver-status dnd-relay-row-label">リレー ${c.legs.length}区間</span>
+            <span class="dnd-driver-status dnd-relay-row-label">リレー ${legs.length}区間</span>
             <span class="dnd-driver-capacity" title="${driverChain.replace(/"/g, '&quot;')}">${driverChain}</span>
           </div>
         </div>

@@ -51,13 +51,18 @@ SSoT 未接続のままでした）。
   ガント／DnD盤／案件タイムラインを **派生**（`toScheduleBlocks` / `toDndBoard` /
   `toCaseTimeline`）する純ロジックを整備。中継案件 `20240524104` でロスレス往復・
   引き継ぎ連続性（I9）・sequence_no 一意（I4）・区間連鎖を `verify_operation.mjs` で検証済み。
-  **書込先の一本化のみで本体UIは未変更**（後続フェーズで描画系を派生へ接続）。
+  本体UIは未変更（描画系の接続は第2段）。
+- ✅ **運行層SSoT 描画ブリッジ（課題C6・第2段）**: 本体に `deriveRelayLegsView()` と
+  フラグ `window.__useOperationSSoT`（既定 **OFF**）を追加。ONにすると DnD盤の**中継行（読取専用）**を
+  `ingestCaseLegs → toCaseTimeline` 経由で再構成して描画する（書込先は引き続き中継編集UIの `c.legs`、
+  差し替えるのは読取専用ビューのみ。派生失敗時は `c.legs` にフォールバックし描画を壊さない）。
+  フラグON時も従来描画と**バーが1:1一致**することを `verify_operation.mjs` の「描画切替パリティ」で保証済み。
+  既定OFFのため通常表示は無変更で、有効化は `window.__useOperationSSoT = true` のみ。
 - 🔜 **本体ではまだ未接続（順次対応）**: 他マスタ（取引先 / 協力会社 / ユーザー / 定期便）、
   受付（本体は今も旧 `logipoke_ai_intake_queue` を使用。`logipoke_db_receptions_v1` への切替は未）、
-  案件（`unprocessed` / `processing` / `processed` の4分割）。運行層は上記でSSoT基盤が入ったが、
-  本体の描画（`renderSchedule` / `renderDnd` / 案件詳細）はまだ旧 `scheduleData` / `dndDrivers` /
-  `assignments` を直接参照しており、派生ビューへの切替は次段階。`vehicleMasterData` は固有データを
-  持つ独立レジストリのため、物理統合はデータ判断を要します。
+  案件（`unprocessed` / `processing` / `processed` の4分割）。運行層は中継行の読取ビューをSSoT派生へ
+  切替可能にしたが、ガント本体（`renderSchedule`）・DnDの通常行・案件詳細の描画は引き続き旧構造を参照。
+  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

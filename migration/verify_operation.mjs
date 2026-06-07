@@ -156,6 +156,28 @@ check('単一便：legs[] 無しでも 案件の from/to/driver から1区間を
   assert.equal(db.trips.get(r.tripId).shape, 'single');
 });
 
+check('描画切替パリティ：DnD中継行ビューが旧 legs[] と1:1一致（第2段の契約）', () => {
+  // index.html の deriveRelayLegsView が行う SSoT→旧leg形マッピングを再現し、
+  // フラグONでも従来描画と同一バーになることを保証する。
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestCaseLegs(db, relayCase);
+  const view = DB.toCaseTimeline(db, '20240524104').map(r => ({
+    legNo: r.sequenceNo, driverName: r.driverName, vehicleId: r.vehicleLabel,
+    startTime: r.start, endTime: r.end, relayFrom: r.from, relayTo: r.to
+  }));
+  assert.equal(view.length, relayCase.legs.length);
+  relayCase.legs.forEach((src, i) => {
+    assert.equal(view[i].legNo, src.legNo);
+    assert.equal(view[i].driverName, src.driverName);
+    assert.equal(view[i].vehicleId, src.vehicleId);
+    assert.equal(view[i].startTime, src.startTime);
+    assert.equal(view[i].endTime, src.endTime);
+    assert.equal(view[i].relayFrom, src.relayFrom);
+    assert.equal(view[i].relayTo, src.relayTo);
+  });
+});
+
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {
   function build() {
     DB.resetSeq();
