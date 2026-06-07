@@ -44840,21 +44840,42 @@ function _runPartnerStep(index) {
   }
 
   // localStorage 上のキューを全部取り込み、空にする
+  // 【受付C1カットオーバー】正規化受付ストア(logipoke_db_receptions_v1)を「単一の取込パイプライン」とする。
+  // 旧 logipoke_ai_intake_queue は併読をやめ、"一度きりの移行元"に降格：
+  //   ・モデル利用可能時 → 旧キュー項目を正規化ストアへ移送し、以降は正規化ストアのみで取込（単一経路）。
+  //   ・モデル未読込時のみ → 旧キューを直接取込（安全網）。
   function drainIntakeQueue() {
-    var queue = [];
+    var ingested = 0;
+    var hasModel = !!(window.LogipokeDB && LogipokeDB.loadReceptions);
+
+    var legacy = [];
     try {
       var raw = localStorage.getItem(INTAKE_QUEUE_KEY);
-      queue = raw ? JSON.parse(raw) : [];
-    } catch(e){ queue = []; }
-    var ingested = 0;
-    if (Array.isArray(queue) && queue.length) {
-      queue.forEach(function(item){ if (ingestIntakeItem(item)) ingested++; });
-      // 処理済みなので旧キューを空にする
+      legacy = raw ? JSON.parse(raw) : [];
+    } catch(e){ legacy = []; }
+    if (Array.isArray(legacy) && legacy.length) {
+      if (hasModel && LogipokeDB.createReception && LogipokeDB.pushReception) {
+        // 旧キュー → 正規化ストアへ移送（単一パイプライン化）。原 intake は _legacyIntake でロスレス保持。
+        legacy.forEach(function(item){
+          try {
+            var r = LogipokeDB.createReception(null, {
+              id: item.id, client: item.client, from: item.from, to: item.to,
+              goods: item.goods, deadline: item.deadline, conditions: item.conditions,
+              channel: item.ch === 'mail' ? 'mail' : 'ai_phone', receivedAt: item.receivedAt
+            });
+            r._legacyIntake = item;
+            LogipokeDB.pushReception(r);
+          } catch(e){ if (ingestIntakeItem(item)) ingested++; } // 移送失敗時のみ直接取込
+        });
+      } else {
+        // モデル未読込：旧キューを直接取込（安全網）
+        legacy.forEach(function(item){ if (ingestIntakeItem(item)) ingested++; });
+      }
       try { localStorage.removeItem(INTAKE_QUEUE_KEY); } catch(e){}
     }
 
-    // SSoT(正規化) 受付ストアからも取り込む（logipoke_db_receptions_v1 へ置換した本流）
-    if (window.LogipokeDB && LogipokeDB.loadReceptions) {
+    // 正規化受付ストア(logipoke_db_receptions_v1)= 単一の取込パイプライン（上で移送した旧キュー分も含む）
+    if (hasModel) {
       try {
         var receptions = LogipokeDB.loadReceptions();
         if (receptions && receptions.length) {

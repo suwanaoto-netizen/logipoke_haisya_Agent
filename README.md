@@ -138,14 +138,18 @@ SSoT 未接続のままでした）。
   - **読取ファサード**：`window.OpStore`（`assignments(tab)`/`conflicts(id)`）を**単一情報源の読取API**として公開。
   - **整合不変条件**：`window.__opStoreConsistent()` が「store 由来 ≡ `assignments[]`」を常時検証。jsdom（既定ON）で
     起動時整合・store-first reassign（`via:'opstore'`・store/legacy 両反映・整合維持）・描画無例外を目視確認。
+- ✅ **受付 C1 カットオーバー**: `index.html` の `drainIntakeQueue` を「正規化受付ストア
+  `logipoke_db_receptions_v1` を単一の取込パイプライン」に再構成。旧 `logipoke_ai_intake_queue` は
+  併読をやめ "一度きりの移行元" に降格（モデル利用可能時は旧キュー項目を正規化ストアへ移送→単一経路で取込、
+  モデル未読込時のみ直接取込の安全網）。`ai-phone-reception.html` は既に正規化ストアが主経路（旧キューは
+  フォールバックのみ）。実ブラウザQA（HTTP同一オリジン）で 正規化経由取込／旧キュー→移送→取込・旧キー除去・
+  ストア空 を確認。
 - 🔜 **完全インバージョン最後の一歩（ブラウザQA必須）**: `assignments[]`/`c.legs`/`dndAssignments` の
-  **`const` 実体を物理的に getter/Proxy へ置換**し、全 writer（`push`/`splice`/`a.x=…` の直接変異が数十箇所）を
-  store-first へ寄せる物理一本化。**無損失表現・reader 経路・書込先一本化（reassign）・不変条件権威・整合
-  不変条件は全て確立済み**で、残るは「直接変異 writer 群の store-first 化」と「const 実体の getter 化」だが、
-  これは稼働中UIの全画面ブラウザ目視を要するため別ラウンド（当環境は実機目視不可のため安全側で保留）。
-  あわせて 他マスタ（取引先/協力会社/ユーザー/定期便）・受付（旧 `logipoke_ai_intake_queue` →
-  `logipoke_db_receptions_v1`）・案件4分割（`unprocessed`/`processing`/`processed`）の接続が残る。
-  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
+  `const` 実体は **Proxy 化済み（第15-16段）**。残るは `assignments→store` 安全同期の単方向化
+  （`rebuildAssignmentIndex` の store←assignments 同期を外し store 単一権威へ。全直接変異 writer の
+  洗い出し＋全画面ブラウザQAが必要）。あわせて **案件4分割（`unprocessed`/`processing`/`processed`/
+  `allCasesMasterData`）の統合（C7）** が残る。`vehicleMasterData` は固有データを持つ独立レジストリのため、
+  物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）
