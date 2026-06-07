@@ -152,8 +152,15 @@ SSoT 未接続のままでした）。
   で従来の常時同期に戻せる）。実ブラウザQAで CRUD/reassign/DnD 実行後も **乖離 0**（=全 writer が store-first で
   back-flow 不要）・store/legacy 一致・全画面整合 true・エラー0 を確認。store が単一権威、`assignments[]` は
   その射影。万一の非 store-first 変異も自己修復＋warn で検出（データ損失なし）。
-- 🔜 **残**: **案件4分割（`unprocessed`/`processing`/`processed`/`allCasesMasterData`）の統合（C7）**（最大規模）。
-  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
+- ✅ **案件層統合 基盤（課題C7・第1段）**: 旧 4分割配列（`unprocessedCases`/`processingCases`/
+  `processedCases`/`allCasesMasterData`）を `LogipokeDB.ingestCases` で**単一ストアへ統合**し、
+  per-phase 配列を**完全ロスレス復元**（`toUnprocessedCases`/`toProcessingCases`/`toProcessedCases`/
+  `toAllCasesMaster`）＋横断ビュー `toCaseOverview`。同一 id が複数フェーズに異なるシェイプで併存できる
+  よう (phase, id) キーで保持。`verify_cases.mjs`（8件）でロスレス往復・フェーズ分離・順序保持・決定性を検証。
+  **本体UIは未変更**（4配列の reader を派生へ接続するのが後続フェーズ＝段階適用・全画面QA）。
+- 🔜 **残（C7 後続）**: 本体の一覧/詳細 reader（未処理/処理中/完了/総覧）を `LogipokeDB` の per-phase 派生へ
+  1画面ずつ切替え、最終的に 4配列を「単一ストアの派生ビュー」に降格。`vehicleMasterData` は固有データを
+  持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）
