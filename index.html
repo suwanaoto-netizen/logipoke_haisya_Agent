@@ -604,6 +604,7 @@ function _ssotDerive(seed, build){
   .so-recommended { color:#0D4A3A; background:#EAF5F0; border:1px solid #b6e6d3; } .so-recommended .dot { background:#3BB888; } /* 推奨＝グリーン */
   .so-negotiate   { color:#92400e; background:#fffbeb; border:1px solid #fde68a; } .so-negotiate .dot { background:#d97706; }  /* 要交渉＝アンバー */
   .so-review      { color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; } .so-review .dot { background:#94a3b8; }    /* 要確認＝グレー */
+  .so-applied     { color:#fff; background:#0D4A3A; border:1px solid #0D4A3A; } .so-applied .dot { background:#7be0bd; } /* 増車適用済み＝ソリッドグリーン */
   /* 増車コメント（PR5・詳細パネル）。色は verdict トーン（so-* の背景/枠/文字）を流用 */
   .scaleout-rationale { display:flex; align-items:flex-start; gap:7px; padding:9px 12px; border-radius:8px; font-size:11.5px; font-weight:600; line-height:1.55; border:1px solid var(--border); }
   .scaleout-rationale.so-required    { color:#9a3412; background:#fff7ed; border-color:#fed7aa; }
@@ -13920,7 +13921,10 @@ function getScaleOutPlan(c, verdict) {
 }
 
 // 増車プランカード（自社①②＋協力会社＋利益影響）。required/recommended のみ。
-function buildScaleOutPlanCard(c, verdict, caseIdx) {
+// applyFnName: 適用ボタンの呼び出し先関数名（既定 applyScaleOutPlan。配車計画表からは
+//              applyScaleOutPlanFromBoard を渡し、適用後にモーダルを閉じてボードを再描画する）。
+function buildScaleOutPlanCard(c, verdict, caseIdx, applyFnName) {
+  const applyFn = applyFnName || 'applyScaleOutPlan';
   const plan = getScaleOutPlan(c, verdict);
   if (!plan || !plan.legs.length) return '';
   const ownN = plan.legs.filter(function (l) { return l.kind === 'own'; }).length;
@@ -13954,7 +13958,7 @@ function buildScaleOutPlanCard(c, verdict, caseIdx) {
     + '</div>'
     + (plan.satisfied ? '' : '<div style="font-size:10.5px;color:#9a3412;margin-top:6px">⚠ 候補が不足しています（手配先の追加が必要）</div>')
     + ((caseIdx != null && ownN >= 1)
-      ? '<button class="btn btn-orange" style="width:100%;margin-top:10px;justify-content:center" onclick="applyScaleOutPlan(' + caseIdx + ')">'
+      ? '<button class="btn btn-orange" style="width:100%;margin-top:10px;justify-content:center" onclick="' + applyFn + '(' + caseIdx + ')">'
         + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
         + '⊕ この増車プランで配車（自社' + ownN + '台' + (plan.partnerCount ? '＋協力' + plan.partnerCount : '') + '）</button>'
       : '')
@@ -14047,6 +14051,179 @@ function confirmPartnerLegPO(caseId, legIdx) {
     }, leg);
     openPOPreviewModal(po);
   }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  配車計画表（ボード）からの増車割り当て導線
+//  「⊕ 増車必要/増車推奨」バッジをクリック → AI増車プランをモーダル表示 → applyScaleOutPlan。
+//  発注確定（協力会社・増車枠）までを配車計画表で完結。請求確定は従来どおり個別案件処理側。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ボード案件に推薦用の自社車両候補が無い場合、ボードの稼働ドライバーから候補を生成する。
+function seedBoardCaseCandidates(boardCase) {
+  if (typeof dndDrivers === 'undefined' || !Array.isArray(dndDrivers)) return [];
+  const okLaw = { status:'ok', label:'適合', items:[
+    {ok:true,title:'日間運転時間',val:'9h以内'},
+    {ok:true,title:'拘束時間',val:'13h以内'},
+    {ok:true,title:'連続運転制限',val:'上限まで余裕あり'},
+    {ok:true,title:'休憩確保',val:'30分休憩ルール適合'}
+  ]};
+  const base = boardCase.from
+    ? String(boardCase.from).replace(/^(.+?[都道府県])/, '') || '近隣'
+    : '近隣';
+  return dndDrivers
+    .filter(d => !d.partner && d.maxLoad > 0)
+    .slice(0, 6)
+    .map((d, i) => ({
+      rank: i + 1, id: d.id, driver: d.driver, base: base, avail: '空車',
+      cap: (d.maxLoad || 0).toLocaleString() + 'kg',
+      stars: Math.max(3, 5 - Math.floor(i / 2)),
+      score: Math.max(60, 94 - i * 5),
+      law: okLaw
+    }));
+}
+
+// ボード案件 → 処理中エントリ（processingCases）を解決。無ければ生成して相互リンクする。
+// 請求確定（confirmDispatch）も処理中エントリから辿れるよう、ここで processingCases に載せる。
+function ensureProcessingForBoardCase(boardCase) {
+  if (!boardCase || typeof processingCases === 'undefined') return null;
+  let idx = -1;
+  if (boardCase.caseListId) idx = processingCases.findIndex(x => x.id === boardCase.caseListId);
+  if (idx < 0) idx = processingCases.findIndex(x => x.id === boardCase.id || x._boardCaseId === boardCase.id);
+  if (idx >= 0) {
+    const pc = processingCases[idx];
+    if (!pc.vehicles || !pc.vehicles.length) pc.vehicles = seedBoardCaseCandidates(boardCase);
+    return { pc, idx };
+  }
+  // 紐付け先が無いボード専用案件 → 処理中エントリを新規生成
+  const distanceKm = (typeof estimateDistance === 'function')
+    ? estimateDistance(boardCase.from || '', boardCase.to || '') : 0;
+  const pc = {
+    id: boardCase.id,
+    status: '処理中',
+    priority: boardCase.urgent ? '緊急' : '通常',
+    casePattern: boardCase.urgent ? 'スポット案件' : '定期案件',
+    client: boardCase.client, from: boardCase.from, to: boardCase.to,
+    goods: boardCase.goods, deadline: boardCase.deadline,
+    vehicle: '未割当', driver: '',
+    distance: distanceKm ? distanceKm + 'km' : '',
+    selectedVehicleIdx: 0,
+    vehicleMode: 'single', legs: [], multiReasons: [],
+    aiResult: boardCase.aiResult || {
+      confidence:'中信頼度', client:boardCase.client, from:boardCase.from, to:boardCase.to,
+      goods:boardCase.goods, deadline:boardCase.deadline,
+      conditions: boardCase.urgent ? '緊急対応' : '通常', vehicle:'中型', count:1
+    },
+    sales: null,
+    vehicles: seedBoardCaseCandidates(boardCase),
+    _boardCaseId: boardCase.id,
+    _fromBoardScaleOut: true
+  };
+  idx = processingCases.length;
+  processingCases.push(pc);
+  boardCase.caseListId = pc.id; // 再クリック時の再利用・請求確定への橋渡し
+  return { pc, idx };
+}
+
+// バッジクリック：AI増車プランをモーダルで開く（required/recommended のみ）。
+function openBoardScaleOutPlan(caseId) {
+  const boardCase = (typeof dndUnassignedCases !== 'undefined')
+    ? dndUnassignedCases.find(x => x.id === caseId) : null;
+  if (!boardCase) { if (typeof showDndToast === 'function') showDndToast('案件が見つかりません'); return; }
+  const ref = ensureProcessingForBoardCase(boardCase);
+  if (!ref) { if (typeof showDndToast === 'function') showDndToast('増車プランを開けません'); return; }
+  const verdict = getCaseScaleOut(ref.pc);
+  if (!verdict || (verdict.verdict !== 'required' && verdict.verdict !== 'recommended')) {
+    if (typeof showDndToast === 'function') showDndToast('この案件は増車対象ではありません');
+    return;
+  }
+  const planCard = (typeof buildScaleOutPlanCard === 'function')
+    ? buildScaleOutPlanCard(ref.pc, verdict, ref.idx, 'applyScaleOutPlanFromBoard') : '';
+  const reasonText = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.explainVerdict)
+    ? LogipokeScaleOut.explainVerdict(verdict) : '';
+  const escAttr = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+
+  let modal = document.getElementById('board-scaleout-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.id = 'board-scaleout-modal';
+    modal.setAttribute('onclick', 'if(event.target===this)closeBoardScaleOutModal()');
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML =
+    '<div class="modal" style="max-width:560px;width:95vw;max-height:90vh;display:flex;flex-direction:column">'
+    + '<div style="display:flex;align-items:center;gap:8px;padding:16px 18px;border-bottom:1px solid var(--border)">'
+    + '<span style="font-size:15px;font-weight:800;color:#0D4A3A;white-space:nowrap">⊕ 増車割り当て</span>'
+    + '<span style="font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escAttr((boardCase.client||'') + '：' + (boardCase.from||'') + ' → ' + (boardCase.to||'')) + '">'
+    + (boardCase.client||'') + '：' + (boardCase.from||'') + ' → ' + (boardCase.to||'') + '</span>'
+    + '<button onclick="closeBoardScaleOutModal()" style="margin-left:auto;border:none;background:none;font-size:22px;line-height:1;cursor:pointer;color:var(--text-muted)" title="閉じる">×</button>'
+    + '</div>'
+    + '<div style="padding:16px 18px;overflow:auto">'
+    + (reasonText ? '<div class="scaleout-rationale so-' + verdict.verdict + '" style="margin-bottom:14px"><span>💡</span><span>' + reasonText + '</span></div>' : '')
+    + (planCard || '<div style="font-size:12px;color:var(--text-secondary)">適用可能な増車プランがありません（候補車両・協力会社を確認してください）。</div>')
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">※ 「この増車プランで配車」を押すと、自社便は複数台配車に流し込み、協力会社便は配車計画表の<b>増車枠</b>にバー表示されます。協力会社は増車枠から<b>発注確定</b>、<b>請求確定は個別案件処理</b>で行います。</div>'
+    + '</div></div>';
+  modal.style.display = 'flex';
+}
+
+function closeBoardScaleOutModal() {
+  const modal = document.getElementById('board-scaleout-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+// 配車計画表からの増車適用：applyScaleOutPlan を実行し、モーダルを閉じてボードを再描画。
+function applyScaleOutPlanFromBoard(caseIdx) {
+  try { applyScaleOutPlan(caseIdx); } catch (e) { console.warn('applyScaleOutPlanFromBoard', e); }
+  closeBoardScaleOutModal();
+  if (typeof renderDnd === 'function') { try { renderDnd(); } catch (e) {} }
+  if (typeof renderSchedule === 'function') { try { renderSchedule(); } catch (e) {} }
+}
+
+// ボード案件に紐づく処理中エントリを取得（無ければ null）。生成はしない。
+function findProcessingForBoardCase(boardCase) {
+  if (!boardCase || typeof processingCases === 'undefined') return null;
+  let pc = null;
+  if (boardCase.caseListId) pc = processingCases.find(x => x.id === boardCase.caseListId);
+  if (!pc) pc = processingCases.find(x => x.id === boardCase.id || x._boardCaseId === boardCase.id);
+  return pc || null;
+}
+
+// 増車プランが適用済みか（applyScaleOutPlan で multi 化＋AI増車プラン便が入っている）。
+function isBoardCaseScaleOutApplied(boardCase) {
+  const pc = findProcessingForBoardCase(boardCase);
+  if (!pc || pc.vehicleMode !== 'multi') return false;
+  const ownApplied = Array.isArray(pc.legs) && pc.legs.some(l => l && l.reason === 'AI増車プラン');
+  const partnerApplied = Array.isArray(pc.scaleOutPartnerLegs) && pc.scaleOutPartnerLegs.length > 0;
+  return ownApplied || partnerApplied;
+}
+
+// ボード用：増車バッジをクリック可能に（required/recommended のみプランを開ける）。
+// 適用済みは「⊕ 増車適用済み」表示に切替（クリックで再表示・再適用は可）。
+function boardScaleOutBadgeHtml(c) {
+  const wrap = (badge, tip, suffix) =>
+    '<div class="scaleout-badge-board" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px;cursor:pointer"'
+    + ' onmousedown="event.stopPropagation()"'
+    + ' ondragstart="event.preventDefault();event.stopPropagation()"'
+    + ' draggable="false"'
+    + ' onclick="event.stopPropagation();openBoardScaleOutPlan(\'' + c.id + '\')"'
+    + ' title="' + tip + '">'
+    + badge
+    + '<span style="font-size:9px;font-weight:800;color:#0D4A3A;margin-left:2px">' + suffix + '</span>'
+    + '</div>';
+
+  if (isBoardCaseScaleOutApplied(c)) {
+    return wrap(
+      '<div class="scaleout-badge so-applied"><span class="dot"></span>⊕ 増車適用済み</div>',
+      '増車プラン適用済み。クリックで再表示・再適用できます',
+      '▸ 再表示');
+  }
+  const inner = scaleOutBadgeHtml(c);
+  if (!inner) return '';
+  let v;
+  try { v = getCaseScaleOut(c); } catch (e) { return inner; }
+  if (!v || (v.verdict !== 'required' && v.verdict !== 'recommended')) return inner;
+  return wrap(inner, 'クリックでAI増車プランを開く（配車計画表で割り当て）', '▸ プランを開く');
 }
 
 // 増車が必要/推奨の案件件数（required + recommended）。運行スケジュールのサマリー集計用。
@@ -26103,7 +26280,7 @@ function renderDndList() {
           ${dvc('time') ? `<span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>` : ''}
           ${dvc('deadline') ? (c.urgent && dvc('urgent') ? `<span class="dnd-card-chip urgent">⚡ ${c.deadline}</span>` : `<span class="dnd-card-chip">${c.deadline}</span>`) : (c.urgent && dvc('urgent') ? `<span class="dnd-card-chip urgent">⚡ 緊急</span>` : '')}
         </div>` : ''}
-        ${(!assigned && !processed) ? scaleOutBadgeHtml(c) : ''}
+        ${(!assigned && !processed) ? boardScaleOutBadgeHtml(c) : ''}
         ${recInfo}
         ${assignedInfo}
         ${partnerBtn}
