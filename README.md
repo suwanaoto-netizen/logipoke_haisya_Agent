@@ -119,13 +119,19 @@ SSoT 未接続のままでした）。
   push 永続」semantics を保持＝表示・挙動は不変だが reader が正規化SSoTを経由）。件数不一致/失敗時は
   live配列を一切触らず縮退。jsdom（既定ON）で往復ロスレス（値不変）・`renderDnd` 無例外・再入維持を目視、
   `verify_operation.mjs` 計32件で DnDブロックの拡張フィールド込み deepStrictEqual 往復・driver/date 分離を保証。
-- 🔜 **物理統合の残り（順次・画面ごと目視）**: 案件詳細・確定タブ等の残 reader を SSoT 由来へ切替え、
-  最終的に `assignments[]`/`c.legs`/`dndAssignments` を**単一の永続 `LogipokeDB` の getter へ降格**して
-  唯一の物理ストア化を完了する（無損失表現と reader 経路は確立済みのため、残るは「書込先の物理一本化＋
-  配列の getter 化」）。あわせて 他マスタ（取引先/協力会社/ユーザー/定期便）・受付（旧
-  `logipoke_ai_intake_queue` → `logipoke_db_receptions_v1`）・案件4分割（`unprocessed`/`processing`/
-  `processed`）の接続が残る。`vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合は
-  データ判断を要します。
+- ✅ **物理統合の段階適用③：案件詳細・確定タブの reader 切替（課題C6・第10段）**:
+  - **案件詳細**（`renderProcessingDetail`）の運行層読取＝複数台サマリーは第2段で `deriveRelayLegsView`
+    によりSSoT派生済み（中継編集リストは書込面＝第5段でSSoT検証）。読取投影は既にSSoT経由。
+  - **確定タブ**（`renderDndTimeline` の `dndConfirmedAssignments` 行・読取専用＝注入なし）にも
+    `applyDndBlocksViaSSoT` を適用し、`ingestDndBlocks→toDndBlocks` のロスレス往復を in-place 反映。
+    jsdom（既定ON）で 確定タブ切替・`renderDnd` 無例外・確定行のロスレス往復・計画タブ復帰を目視確認。
+  これで運行層の主要 reader（ガント／DnD通常行／DnD確定行／中継表示／案件サマリー）が**すべてSSoT経由**に。
+- 🔜 **物理統合の最終段（順次・画面ごと目視）**: 主要 reader はSSoT経由化が完了。残るは
+  `assignments[]`/`c.legs`/`dndAssignments` を**単一の永続 `LogipokeDB` の getter へ降格**し、書込先を
+  物理一本化して唯一の物理ストア化を完了する段（無損失表現・reader 経路・不変条件権威は確立済み）。
+  あわせて 他マスタ（取引先/協力会社/ユーザー/定期便）・受付（旧 `logipoke_ai_intake_queue` →
+  `logipoke_db_receptions_v1`）・案件4分割（`unprocessed`/`processing`/`processed`）の接続が残る。
+  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

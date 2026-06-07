@@ -27608,6 +27608,9 @@ function renderDndTimeline() {
     let assigned;
     if (isConfirmedTab) {
       assigned = (dndConfirmedAssignments[d.id] && dndConfirmedAssignments[d.id][currentDateKey]) || [];
+      // C6・第10段：確定タブの reader も SSoT ライブ派生へ（確定行は読取専用＝注入なし。
+      // 既存配列へロスレス往復を in-place 反映。空なら no-op）。
+      applyDndBlocksViaSSoT(d.id, currentDateKey, assigned);
     } else {
       assigned = dndAssignmentsFor(d.id, currentDateKey);
       // C6・第9段：DnD通常行の reader を SSoT ライブ派生へ（live配列へロスレス往復を in-place 反映）。
