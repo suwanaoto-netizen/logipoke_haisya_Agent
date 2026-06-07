@@ -46,15 +46,24 @@ SSoT 未接続のままでした）。
   / 紐づくドライバー `D-id`）を付与し、**あらゆる旧IDを 1 台へ解決する単一窓口
   `resolveVehicleRef()`** を追加。`vehicleMasterData` には正規車両への `_canonicalVehicleId`
   クロスリンクを後付け（非破壊）。
+- ✅ **運行層SSoT 取込＋派生（課題C6・第1段）**: 旧 `case.legs[]`（単一/中継）を
+  `LogipokeDB.ingestCaseLegs` で **Trip>Leg>Stop+Assignment へ取込み**、SSoT から
+  ガント／DnD盤／案件タイムラインを **派生**（`toScheduleBlocks` / `toDndBoard` /
+  `toCaseTimeline`）する純ロジックを整備。中継案件 `20240524104` でロスレス往復・
+  引き継ぎ連続性（I9）・sequence_no 一意（I4）・区間連鎖を `verify_operation.mjs` で検証済み。
+  **書込先の一本化のみで本体UIは未変更**（後続フェーズで描画系を派生へ接続）。
 - 🔜 **本体ではまだ未接続（順次対応）**: 他マスタ（取引先 / 協力会社 / ユーザー / 定期便）、
   受付（本体は今も旧 `logipoke_ai_intake_queue` を使用。`logipoke_db_receptions_v1` への切替は未）、
-  案件（`unprocessed` / `processing` / `processed` の4分割）、運行（`scheduleData` / `dndDrivers`
-  / `assignments`）は本体側が literal のまま。`vehicleMasterData` は固有データを持つ独立レジストリ
-  のため、物理統合はデータ判断を要します（次段階）。運行層は `Trip>Leg>Stop+Assignment` へ集約予定。
+  案件（`unprocessed` / `processing` / `processed` の4分割）。運行層は上記でSSoT基盤が入ったが、
+  本体の描画（`renderSchedule` / `renderDnd` / 案件詳細）はまだ旧 `scheduleData` / `dndDrivers` /
+  `assignments` を直接参照しており、派生ビューへの切替は次段階。`vehicleMasterData` は固有データを
+  持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）
 node migration/verify_model.mjs
+# 運行層SSoT 取込＋派生（課題C6・第1段：中継案件の往復・不変条件）
+node migration/verify_operation.mjs
 ```
 
 ## ローカルで動かす

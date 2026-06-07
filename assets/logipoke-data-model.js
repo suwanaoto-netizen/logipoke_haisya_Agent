@@ -289,6 +289,131 @@
     return out.sort(function (x, y) { return (x.sequenceNo || 0) - (y.sequenceNo || 0); });
   }
 
+  /* ───────────────────────── ④ 運行層 取込（旧 case.legs[] → SSoT）課題C6 ───── */
+  // 旧プロトタイプの案件(caseObj)を Trip>Leg>Stop+Assignment へ取込む（書込先を一本化）。
+  // vehicleMode: single/relay/multi を Trip.shape に集約し、中継は driver_swap 引き継ぎ＋
+  // next_leg_id 連鎖で表現。区間の担当はプロトタイプ表記(driverName/vehicleLabel)のまま保持
+  // （氏名→ID解決＝C2/C3 は別フェーズ。本フェーズは「運行構造の一本化」に限定）。
+  var _CASE_SHAPE = { single: 'single', relay: 'relay', multi: 'co_load' };
+  function ingestCaseLegs(db, caseObj) {
+    caseObj = caseObj || {};
+    var shape = _CASE_SHAPE[caseObj.vehicleMode] || 'single';
+    var orderId = caseObj.id || mkId('ord');
+    if (db.orders && !db.orders.has(orderId)) {
+      db.orders.set(orderId, {
+        id: orderId, orderNo: orderId, clientName: caseObj.client || null,
+        pattern: PATTERN_ENUM[caseObj.casePattern] || 'spot',
+        originRaw: caseObj.from || null, destinationRaw: caseObj.to || null, legacyCase: caseObj
+      });
+    }
+    var trip = createTrip(db, {
+      id: caseObj.jobId || mkId('trip'), shape: shape,
+      multiReasons: (caseObj.multiReasons || []).slice(), legacyCaseId: orderId
+    });
+    // legs[] が無い単一便は 案件の from/to/vehicle/driver から1区間を合成
+    var srcLegs = (caseObj.legs && caseObj.legs.length) ? caseObj.legs : [{
+      legNo: 1, vehicleId: caseObj.vehicle, vehicleName: caseObj.vehicle, driverName: caseObj.driver,
+      relayFrom: caseObj.from, relayTo: caseObj.to, startTime: caseObj.startTime, endTime: caseObj.endTime,
+      role: 'pickup_delivery'
+    }];
+    var isRelay = shape === 'relay';
+    var legIds = [];
+    srcLegs.forEach(function (l, i) {
+      var lastLeg = i === srcLegs.length - 1;
+      var leg = addLeg(db, {
+        id: l.legId || mkId('leg'), tripId: trip.id, sequenceNo: l.legNo || (i + 1),
+        driverName: l.driverName || null, vehicleLabel: l.vehicleId || l.vehicleName || null,
+        role: l.role || (isRelay ? 'relay' : 'pickup_delivery'),
+        startTime: l.startTime || null, endTime: l.endTime || null,
+        handoffType: (isRelay && !lastLeg) ? 'driver_swap' : null,
+        handoffLocation: (isRelay && !lastLeg) ? (l.relayTo || null) : null,
+        capacity: l.capacity || null, notes: l.notes || null
+      });
+      // Stop: 発(pickup/中継受け) → 着(dropoff/中継渡し)
+      addStop(db, { legId: leg.id, sequenceNo: 1, kind: (isRelay && i > 0) ? 'relay_handoff' : 'pickup',
+        locationRaw: l.relayFrom || null, orderId: orderId });
+      addStop(db, { legId: leg.id, sequenceNo: 2, kind: (isRelay && !lastLeg) ? 'relay_handoff' : 'dropoff',
+        locationRaw: l.relayTo || null, orderId: orderId });
+      // Assignment: 同一案件を各区間へ（中継は両Legに同一Order＝多対多の中核）
+      assign(db, { orderId: orderId, legId: leg.id, sequenceNo: leg.sequenceNo });
+      legIds.push(leg.id);
+    });
+    // 区間連鎖（前→次）
+    for (var k = 0; k < legIds.length - 1; k++) { db.legs.get(legIds[k]).nextLegId = legIds[k + 1]; }
+    return { tripId: trip.id, orderId: orderId, legIds: legIds };
+  }
+
+  /* ───────────────────────── ④ 運行層 派生（SSoT → 旧3画面）課題C6 ─────────── */
+  function _legStops(db, legId) {
+    var s = []; db.stops.forEach(function (x) { if (x.legId === legId) s.push(x); });
+    return s.sort(function (a, b) { return (a.sequenceNo || 0) - (b.sequenceNo || 0); });
+  }
+  function _legClients(db, legId) {
+    var names = [];
+    db.assignments.forEach(function (a) {
+      if (a.legId !== legId) return;
+      var o = db.orders.get(a.orderId);
+      if (o && o.clientName && names.indexOf(o.clientName) < 0) names.push(o.clientName);
+    });
+    return names;
+  }
+
+  // v_schedule_block 相当：1 Leg = 1ブロック（配車計画ガント）
+  function toScheduleBlocks(db) {
+    var out = [];
+    db.legs.forEach(function (leg) {
+      if (leg.active === false) return;
+      var stops = _legStops(db, leg.id);
+      var trip = db.trips.get(leg.tripId);
+      out.push({
+        legId: leg.id, tripId: leg.tripId, shape: trip ? trip.shape : null,
+        sequenceNo: leg.sequenceNo, driverName: leg.driverName, vehicleLabel: leg.vehicleLabel,
+        role: leg.role, start: leg.startTime, end: leg.endTime,
+        from: stops.length ? stops[0].locationRaw : null,
+        to: stops.length ? stops[stops.length - 1].locationRaw : null,
+        clients: _legClients(db, leg.id).join(' / '),
+        handoffType: leg.handoffType, handoffLocation: leg.handoffLocation
+      });
+    });
+    return out.sort(function (a, b) {
+      return String(a.tripId + '#' + a.sequenceNo).localeCompare(String(b.tripId + '#' + b.sequenceNo));
+    });
+  }
+
+  // v_dnd_board 相当：driver×vehicle ごとの区間配列（DnDボード）
+  function toDndBoard(db) {
+    var byKey = {};
+    db.legs.forEach(function (leg) {
+      if (leg.active === false) return;
+      var key = (leg.driverName || '?') + '|' + (leg.vehicleLabel || '?');
+      if (!byKey[key]) byKey[key] = { driverName: leg.driverName, vehicleLabel: leg.vehicleLabel, legs: [] };
+      byKey[key].legs.push({ legId: leg.id, role: leg.role, start: leg.startTime, end: leg.endTime, handoff: leg.handoffType });
+    });
+    return Object.keys(byKey).map(function (k) {
+      byKey[k].legs.sort(function (a, b) { return String(a.start).localeCompare(String(b.start)); });
+      return byKey[k];
+    });
+  }
+
+  // v_case_timeline 相当（プロトタイプ表記の driverName/vehicleLabel をそのまま射影）
+  function toCaseTimeline(db, orderId) {
+    var rows = [];
+    db.assignments.forEach(function (a) {
+      if (a.orderId !== orderId) return;
+      var leg = db.legs.get(a.legId); if (!leg || leg.active === false) return;
+      var stops = _legStops(db, leg.id);
+      rows.push({
+        orderId: orderId, legId: leg.id, sequenceNo: leg.sequenceNo, role: leg.role,
+        start: leg.startTime, end: leg.endTime, handoffType: leg.handoffType, handoffLocation: leg.handoffLocation,
+        driverName: leg.driverName, vehicleLabel: leg.vehicleLabel,
+        from: stops.length ? stops[0].locationRaw : null,
+        to: stops.length ? stops[stops.length - 1].locationRaw : null,
+        isMultiday: false
+      });
+    });
+    return rows.sort(function (x, y) { return (x.sequenceNo || 0) - (y.sequenceNo || 0); });
+  }
+
   /* ───────────────────────── 公開API ─────────────────────────────────────── */
   return {
     // helpers / value objects
@@ -304,6 +429,8 @@
     RECEPTION_KEY: RECEPTION_KEY, saveReceptions: saveReceptions, loadReceptions: loadReceptions,
     pushReception: pushReception, clearReceptions: clearReceptions,
     // ④ operation
-    createTrip: createTrip, addLeg: addLeg, addStop: addStop, assign: assign, deriveCaseTimeline: deriveCaseTimeline
+    createTrip: createTrip, addLeg: addLeg, addStop: addStop, assign: assign, deriveCaseTimeline: deriveCaseTimeline,
+    // ④ operation：旧 case.legs[] → SSoT 取込 と SSoT → 3画面 派生（課題C6）
+    ingestCaseLegs: ingestCaseLegs, toScheduleBlocks: toScheduleBlocks, toDndBoard: toDndBoard, toCaseTimeline: toCaseTimeline
   };
 });
