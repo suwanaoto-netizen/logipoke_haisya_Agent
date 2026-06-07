@@ -92,12 +92,23 @@ SSoT 未接続のままでした）。
   effectiveBaseId/crossBase/ownerId/caseIds を保持したまま in-place 変更＋SSoT検証）。
   これで **reassign / D&D / 中継編集 の全書込経路で不変条件が正規化SSoTに集約**された
   （`verify_operation.mjs` 計23件）。書込面（リッチな編集レコード）は据え置き＝SSoTが「不変条件の権威」。
-- 🔜 **本体ではまだ未接続（順次対応）**: 他マスタ（取引先 / 協力会社 / ユーザー / 定期便）、
-  受付（旧 `logipoke_ai_intake_queue` → `logipoke_db_receptions_v1` 未切替）、案件4分割
-  （`unprocessed` / `processing` / `processed`）。運行層は**読取＝SSoT派生・書込検証＝SSoT権威**まで到達。
-  残るは「正規化モデルが拡張フィールドまで吸収し**唯一の物理ストア**になる」完全インバージョン（現状は
-  リッチなレガシーレコードを編集面に残す折衷）と、上記マスタ/受付/案件層の接続。`vehicleMasterData` は
-  固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
+- ✅ **正規化モデルの拡張フィールド吸収＝完全ロスレス化（課題C6・第7段／完全インバージョンの土台）**:
+  `ingestAssignments`/`toAssignments` を拡張し、`assignments[]` の拡張フィールド
+  （`effectiveBaseId`/`crossBase`/`ownerId`/`mainOwnerId`/`caseIds`/`isReturn`/`relatedReturnId`/監査）を
+  Leg/Order の**正規化スロットへ吸収**。DnD固有の派生項目（`loadMin`/`driveMin`/`sub`/`isPreset` 等）は
+  `_extra` に温存し、**元のキー集合だけを射影**して `deepStrictEqual` を満たす。同様に `c.legs`（中継）も
+  `vehicleType`/`vehicleIdx`/`lawOk` 等まで吸収する `toCaseLegs` を追加。これにより
+  **`toX(ingest(X)) === X`（拡張フィールド込み）** が成立し、`reassignLeg` で driver を変えても
+  拡張フィールドは保持されることを `verify_operation.mjs`（計26件）で保証。jsdom（既定ON）でも
+  `deriveAssignmentsView` のロスレス・ガント/DnD無例外を再確認済み。**SSoTを唯一の物理ストアにする前提
+  （無損失表現）が整った**。
+- 🔜 **本体ではまだ未接続（順次対応）**: 残る完全インバージョンの最終段は「単一の永続 `LogipokeDB` を
+  保持し、`assignments[]`/`c.legs`/`dndAssignments` を**ライブ派生（getter）に降格**して全 reader/writer を
+  そこへ寄せる物理統合」。無損失表現は第7段で確立済みのため**安全に実施可能**だが、reader が多数（数十箇所）
+  に及ぶため、画面ごとの目視を伴う段階適用が必要（別ラウンド）。あわせて 他マスタ（取引先/協力会社/
+  ユーザー/定期便）・受付（旧 `logipoke_ai_intake_queue` → `logipoke_db_receptions_v1`）・案件4分割
+  （`unprocessed`/`processing`/`processed`）の接続が残る。`vehicleMasterData` は固有データを持つ独立
+  レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

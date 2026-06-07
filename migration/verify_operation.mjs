@@ -221,6 +221,46 @@ check('assignments ロスレス往復：toAssignments が元配列と完全一�
   assert.deepEqual(norm(round), norm(flatAssignments));
 });
 
+check('完全ロスレス：拡張フィールド全部入りの assignment が deepStrictEqual で往復', () => {
+  // DnD由来の拡張フィールド（effectiveBaseId/crossBase/owner/caseIds/監査/DnD固有 loadMin等）を全部入り。
+  const rich = [{
+    id: 'A09001', tab: 'planning', date: '2026-05-27', driverId: 'D001', vehicleId: 'V0001',
+    start: '06:00', end: '10:30', status: '運行中', client: 'A社', from: '川口', to: '横浜',
+    goods: 'パレット/800kg/常温', deadline: '本日中', label: 'A社', color: '#3BB888',
+    effectiveBaseId: 'B001', ownerId: 'me', mainOwnerId: 'me', crossBase: true,
+    caseIds: ['20240524001'], isReturn: false, relatedReturnId: null,
+    _caseId: '20240524001', loadMin: 30, driveMin: 240, unloadMin: 30,
+    loadStart: '06:00', loadEnd: '06:30', driveEnd: '10:00', unloadEnd: '10:30',
+    sub: '川口→横浜', isPreset: false, urgent: false,
+    createdAt: '2026-05-27T06:00:00.000Z', updatedAt: '2026-05-27T06:00:00.000Z'
+  }];
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, rich);
+  const round = DB.toAssignments(db);
+  assert.equal(round.length, 1);
+  assert.deepEqual(round[0], rich[0]);   // 拡張フィールドまで含めて完全一致
+});
+
+check('完全ロスレス：reassignLeg 後も拡張フィールドが保持（driverのみ変化）', () => {
+  const rich = {
+    id: 'A09002', tab: 'planning', date: '2026-05-27', driverId: 'D001', vehicleId: 'V0001',
+    start: '06:00', end: '10:30', status: '運行中', client: 'A社', from: '川口', to: '横浜',
+    goods: 'x/100kg/常温', deadline: '本日中', label: 'A社', color: '#1',
+    effectiveBaseId: 'B001', ownerId: 'me', caseIds: ['c1'], loadMin: 30, sub: 'X'
+  };
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, [rich]);
+  DB.reassignLeg(db, 'A09002', { driverId: 'D999' });
+  const out = DB.toAssignments(db)[0];
+  assert.equal(out.driverId, 'D999');           // 変更は反映
+  assert.equal(out.effectiveBaseId, 'B001');    // 拡張フィールドは保持
+  assert.deepEqual(out.caseIds, ['c1']);
+  assert.equal(out.loadMin, 30);
+  assert.equal(out.sub, 'X');
+});
+
 check('assignments 往復は決定的（同入力で同出力）', () => {
   function build() {
     DB.resetSeq();
@@ -327,6 +367,16 @@ check('中継検証：別ドライバーなら時間が重なっても ok（中�
     { legNo: 2, driverName: '山田 一郎', relayFrom: 'B', relayTo: 'C', startTime: '10:00', endTime: '14:30' }
   ];
   assert.equal(DB.validateRelayLegs(ok).ok, true);
+});
+
+check('完全ロスレス：中継 c.legs が toCaseLegs で deepStrictEqual 往復（拡張フィールド込み）', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestCaseLegs(db, relayCase);
+  const legs = DB.toCaseLegs(db, '20240524104');
+  assert.equal(legs.length, relayCase.legs.length);
+  // 元の各 leg（legId/vehicleType/vehicleIdx/lawOk/notes/capacity 等を含む）と完全一致
+  relayCase.legs.forEach((src, i) => assert.deepEqual(legs[i], src));
 });
 
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {

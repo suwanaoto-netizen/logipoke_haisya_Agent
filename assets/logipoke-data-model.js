@@ -295,6 +295,11 @@
   // next_leg_id 連鎖で表現。区間の担当はプロトタイプ表記(driverName/vehicleLabel)のまま保持
   // （氏名→ID解決＝C2/C3 は別フェーズ。本フェーズは「運行構造の一本化」に限定）。
   var _CASE_SHAPE = { single: 'single', relay: 'relay', multi: 'co_load' };
+  // toCaseLegs が正規化スロット/Stop から復元するキー。それ以外は _extra に温存（完全ロスレス）。
+  var _CASELEG_MAPPED = {
+    legId: 1, legNo: 1, vehicleId: 1, vehicleName: 1, driverName: 1, role: 1,
+    relayFrom: 1, relayTo: 1, startTime: 1, endTime: 1
+  };
   function ingestCaseLegs(db, caseObj) {
     caseObj = caseObj || {};
     var shape = _CASE_SHAPE[caseObj.vehicleMode] || 'single';
@@ -320,6 +325,10 @@
     var legIds = [];
     srcLegs.forEach(function (l, i) {
       var lastLeg = i === srcLegs.length - 1;
+      // 中継編集(c.legs)の拡張フィールド（vehicleType/vehicleIdx/lawOk/notes 等）を温存し、
+      // toCaseLegs で完全ロスレスに復元する（モデルが拡張フィールドを吸収＝C6・第7段）。
+      var legExtra = {};
+      Object.keys(l).forEach(function (k) { if (!_CASELEG_MAPPED[k]) legExtra[k] = l[k]; });
       var leg = addLeg(db, {
         id: l.legId || mkId('leg'), tripId: trip.id, sequenceNo: l.legNo || (i + 1),
         driverName: l.driverName || null, vehicleLabel: l.vehicleId || l.vehicleName || null,
@@ -327,7 +336,8 @@
         startTime: l.startTime || null, endTime: l.endTime || null,
         handoffType: (isRelay && !lastLeg) ? 'driver_swap' : null,
         handoffLocation: (isRelay && !lastLeg) ? (l.relayTo || null) : null,
-        capacity: l.capacity || null, notes: l.notes || null
+        capacity: l.capacity || null, notes: l.notes || null,
+        vehicleName: l.vehicleName, _extra: legExtra, _origKeys: Object.keys(l)
       });
       // Stop: 発(pickup/中継受け) → 着(dropoff/中継渡し)
       addStop(db, { legId: leg.id, sequenceNo: 1, kind: (isRelay && i > 0) ? 'relay_handoff' : 'pickup',
@@ -414,11 +424,47 @@
     return rows.sort(function (x, y) { return (x.sequenceNo || 0) - (y.sequenceNo || 0); });
   }
 
+  // SSoT → 旧 c.legs 形（完全ロスレス復元。中継編集の書込面を SSoT から再構成できる土台）。
+  function toCaseLegs(db, orderId) {
+    var rows = [];
+    db.assignments.forEach(function (a) {
+      if (a.orderId !== orderId) return;
+      var leg = db.legs.get(a.legId); if (!leg || leg.active === false) return;
+      var stops = _legStops(db, leg.id);
+      var full = {
+        legId: leg.id, legNo: leg.sequenceNo,
+        vehicleId: leg.vehicleLabel, vehicleName: leg.vehicleName != null ? leg.vehicleName : leg.vehicleLabel,
+        driverName: leg.driverName, role: leg.role,
+        relayFrom: stops.length ? stops[0].locationRaw : null,
+        relayTo: stops.length ? stops[stops.length - 1].locationRaw : null,
+        startTime: leg.startTime, endTime: leg.endTime
+      };
+      var extra = leg._extra || {};
+      for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) full[k] = extra[k];
+      var keys = leg._origKeys || Object.keys(full);
+      var rec = {};
+      keys.forEach(function (k) { rec[k] = full[k]; });
+      rec._seq = leg.sequenceNo;   // 並び替え用（出力では除去）
+      rows.push(rec);
+    });
+    rows.sort(function (x, y) { return (x._seq || 0) - (y._seq || 0); });
+    rows.forEach(function (r) { delete r._seq; });
+    return rows;
+  }
+
   /* ───────────────────────── ④ 運行層 取込（旧 assignments[] → SSoT）課題C6 ─── */
   // 配車計画ガント/DnD通常行の正準フラット層 assignments[]（1ブロック=1運行）を
   // 正規化 Trip>Leg>Stop+Assignment へ取込む。同一(tab×日×driver×vehicle)を1 Tripに束ね、
   // 各ブロックを Leg（pickup/dropoff の2 Stop）として表現。表示/再構築に要する素フィールドは
   // 欠損なく保持し、toAssignments でロスレスに復元できる（ガントの裏付けをSSoTへ移すための土台）。
+  // 拡張フィールドを正規化スロットへ吸収（完全インバージョンの土台＝課題C6・第7段）。
+  // 下記キーは Leg/Order/Stop の正規化スロットから復元する（モデルが権威）。それ以外（DnD固有の
+  // loadMin/driveMin/sub/isPreset 等）は assignment._extra に温存し、_origKeys で元の形に射影する。
+  var _ASSIGN_MAPPED = {
+    id:1, tab:1, date:1, driverId:1, vehicleId:1, start:1, end:1, status:1, client:1, from:1, to:1,
+    goods:1, deadline:1, label:1, color:1, effectiveBaseId:1, crossBase:1, ownerId:1, mainOwnerId:1,
+    caseIds:1, isReturn:1, relatedReturnId:1, createdAt:1, updatedAt:1
+  };
   function ingestAssignments(db, flat) {
     flat = flat || [];
     var seqByTrip = {};
@@ -428,23 +474,33 @@
         id: tripKey, tab: a.tab || 'planning', serviceDate: a.date || null, shape: 'single', source: 'assignments'
       });
       var seq = (seqByTrip[tripKey] = (seqByTrip[tripKey] || 0) + 1);
+      // 区間単位の拡張フィールドを Leg スロットへ吸収（1 assignment = 1 Leg のため可逆）。
       var leg = addLeg(db, {
         id: a.id, tripId: trip.id, sequenceNo: seq,
         driverId: a.driverId, vehicleId: a.vehicleId,
-        startTime: a.start, endTime: a.end, status: a.status, role: 'pickup_delivery'
+        startTime: a.start, endTime: a.end, status: a.status, role: 'pickup_delivery',
+        effectiveBaseId: a.effectiveBaseId, crossBase: a.crossBase,
+        ownerId: a.ownerId, mainOwnerId: a.mainOwnerId,
+        isReturn: a.isReturn, relatedReturnId: a.relatedReturnId,
+        legCreatedAt: a.createdAt, legUpdatedAt: a.updatedAt
       });
       addStop(db, { legId: leg.id, sequenceNo: 1, kind: 'pickup', locationRaw: a.from, orderId: a.id });
       addStop(db, { legId: leg.id, sequenceNo: 2, kind: 'dropoff', locationRaw: a.to, orderId: a.id });
       if (db.orders && !db.orders.has(a.id)) {
         db.orders.set(a.id, { id: a.id, orderNo: a.id, clientName: a.client || null,
-          goods: a.goods || null, deadline: a.deadline || null, originRaw: a.from || null, destinationRaw: a.to || null });
+          goods: a.goods || null, deadline: a.deadline || null, originRaw: a.from || null,
+          destinationRaw: a.to || null, caseIds: a.caseIds });
       }
-      assign(db, { id: a.id, orderId: a.id, legId: leg.id, label: a.label, color: a.color });
+      // 非マッピング項目を温存（完全ロスレス）。元のキー集合も保持し、射影時に余分なキーを出さない。
+      var extra = {};
+      Object.keys(a).forEach(function (k) { if (!_ASSIGN_MAPPED[k]) extra[k] = a[k]; });
+      assign(db, { id: a.id, orderId: a.id, legId: leg.id, label: a.label, color: a.color,
+        _extra: extra, _origKeys: Object.keys(a) });
     });
     return db;
   }
 
-  // SSoT → 旧 assignments[] 形（ロスレス復元。id 昇順で安定化）
+  // SSoT → 旧 assignments[] 形（完全ロスレス復元。元のキー集合のみ射影し deepStrictEqual を満たす）。
   function toAssignments(db) {
     var out = [];
     db.assignments.forEach(function (as) {
@@ -452,14 +508,25 @@
       var trip = db.trips.get(leg.tripId) || {};
       var order = db.orders.get(as.orderId) || {};
       var stops = _legStops(db, leg.id);
-      out.push({
+      var full = {
         id: as.id, tab: trip.tab, date: trip.serviceDate,
         driverId: leg.driverId, vehicleId: leg.vehicleId,
         start: leg.startTime, end: leg.endTime, status: leg.status,
         client: order.clientName, from: stops.length ? stops[0].locationRaw : null,
         to: stops.length ? stops[stops.length - 1].locationRaw : null,
-        goods: order.goods, deadline: order.deadline, label: as.label, color: as.color
-      });
+        goods: order.goods, deadline: order.deadline, label: as.label, color: as.color,
+        effectiveBaseId: leg.effectiveBaseId, crossBase: leg.crossBase,
+        ownerId: leg.ownerId, mainOwnerId: leg.mainOwnerId, caseIds: order.caseIds,
+        isReturn: leg.isReturn, relatedReturnId: leg.relatedReturnId,
+        createdAt: leg.legCreatedAt, updatedAt: leg.legUpdatedAt
+      };
+      var extra = as._extra || {};
+      for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) full[k] = extra[k];
+      // 元の assignment が持っていたキーだけを出力（undefined キー混入を防ぐ）。
+      var keys = as._origKeys || Object.keys(full);
+      var rec = {};
+      keys.forEach(function (k) { rec[k] = full[k]; });
+      out.push(rec);
     });
     return out.sort(function (a, b) { return String(a.id).localeCompare(String(b.id)); });
   }
@@ -545,7 +612,8 @@
     // ④ operation
     createTrip: createTrip, addLeg: addLeg, addStop: addStop, assign: assign, deriveCaseTimeline: deriveCaseTimeline,
     // ④ operation：旧 case.legs[] → SSoT 取込 と SSoT → 3画面 派生（課題C6）
-    ingestCaseLegs: ingestCaseLegs, toScheduleBlocks: toScheduleBlocks, toDndBoard: toDndBoard, toCaseTimeline: toCaseTimeline,
+    ingestCaseLegs: ingestCaseLegs, toScheduleBlocks: toScheduleBlocks, toDndBoard: toDndBoard,
+    toCaseTimeline: toCaseTimeline, toCaseLegs: toCaseLegs,
     // ④ operation：旧 assignments[]（ガント/DnD正準層）の SSoT ロスレス往復（課題C6・第3段）
     ingestAssignments: ingestAssignments, toAssignments: toAssignments,
     // ④ operation：書込先SSoT化＋不変条件 I1/I2 の強制（課題C6・第4段）
