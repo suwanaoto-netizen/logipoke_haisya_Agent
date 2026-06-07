@@ -162,12 +162,16 @@ check('描画切替パリティ：DnD中継行ビューが旧 legs[] と1:1一�
   DB.resetSeq();
   const db = DB.createDB();
   DB.ingestCaseLegs(db, relayCase);
-  const view = DB.toCaseTimeline(db, '20240524104').map(r => ({
-    legNo: r.sequenceNo, driverName: r.driverName, vehicleId: r.vehicleLabel,
-    startTime: r.start, endTime: r.end, relayFrom: r.from, relayTo: r.to
-  }));
+  const view = DB.toCaseTimeline(db, '20240524104').map((r, i) => {
+    const sc = relayCase.legs[i] || {};
+    return { legId: r.legId, legNo: r.sequenceNo, driverName: r.driverName, vehicleId: r.vehicleLabel,
+      vehicleName: sc.vehicleName || r.vehicleLabel, startTime: r.start, endTime: r.end,
+      relayFrom: r.from, relayTo: r.to, vehicleType: sc.vehicleType, capacity: sc.capacity, lawOk: sc.lawOk };
+  });
   assert.equal(view.length, relayCase.legs.length);
   relayCase.legs.forEach((src, i) => {
+    // 構造（SSoT由来）
+    assert.equal(view[i].legId, src.legId);
     assert.equal(view[i].legNo, src.legNo);
     assert.equal(view[i].driverName, src.driverName);
     assert.equal(view[i].vehicleId, src.vehicleId);
@@ -175,6 +179,11 @@ check('描画切替パリティ：DnD中継行ビューが旧 legs[] と1:1一�
     assert.equal(view[i].endTime, src.endTime);
     assert.equal(view[i].relayFrom, src.relayFrom);
     assert.equal(view[i].relayTo, src.relayTo);
+    // 表示用付帯情報（順序対応で原データから引継ぎ）
+    assert.equal(view[i].vehicleName, src.vehicleName);
+    assert.equal(view[i].vehicleType, src.vehicleType);
+    assert.equal(view[i].capacity, src.capacity);
+    assert.equal(view[i].lawOk, src.lawOk);
   });
 });
 

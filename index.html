@@ -12819,10 +12819,14 @@ function deriveRelayLegsView(c) {
     LogipokeDB.ingestCaseLegs(db, c);
     const tl = LogipokeDB.toCaseTimeline(db, c.id);
     if (!tl.length) return c.legs || [];
-    // SSoT 派生行 → 旧 leg 形（読取専用ビューが参照するフィールドのみ復元）
-    return tl.map(function (r) {
-      return { legNo: r.sequenceNo, driverName: r.driverName, vehicleId: r.vehicleLabel, vehicleName: r.vehicleLabel,
-        startTime: r.start, endTime: r.end, relayFrom: r.from, relayTo: r.to, role: r.role };
+    // SSoT 派生行 → 旧 leg 形。構造（誰/どこ/いつ/順序/引継ぎ）は SSoT 由来、
+    // 表示用の付帯情報（車格ラベル/積載/法令バッジ等＝運行SSoTの構造外）は順序対応で原データから引継ぐ。
+    return tl.map(function (r, i) {
+      var src = (c.legs && c.legs[i]) || {};
+      return { legId: r.legId, legNo: r.sequenceNo, driverName: r.driverName,
+        vehicleId: r.vehicleLabel, vehicleName: src.vehicleName || r.vehicleLabel,
+        startTime: r.start, endTime: r.end, relayFrom: r.from, relayTo: r.to, role: r.role,
+        vehicleType: src.vehicleType, capacity: src.capacity, lawOk: src.lawOk, vehicleIdx: src.vehicleIdx };
     });
   } catch (e) { return c.legs || []; }
 }
@@ -15795,6 +15799,8 @@ function renderProcessingDetail(i) {
   const el = document.getElementById('processing-detail');
   const selIdx = c.selectedVehicleIdx ?? 0;
   const selV = c.vehicles[selIdx];
+  // 複数台サマリー（読取専用）の表示元：SSoT派生（フラグON時）or レガシー c.legs（既定）。
+  const _legsView = (typeof deriveRelayLegsView === 'function') ? deriveRelayLegsView(c) : (c.legs || []);
 
   // 増車コメント（PR5）：決定的な理由文を即表示。selectProcessingでLLM文に上書き（任意）。
   const _so = (typeof getCaseScaleOut === 'function') ? getCaseScaleOut(c) : { verdict: 'none' };
@@ -16014,10 +16020,10 @@ function renderProcessingDetail(i) {
     <div id="multi-summary-block-${i}" style="background:var(--accent-pale);border:1.5px solid var(--sidebar-bg);border-radius:10px;padding:12px 16px;margin-bottom:16px;display:${(c.vehicleMode||'single')==='multi'&&(c.legs||[]).length>0?'block':'none'}">
       <div style="font-size:10px;color:var(--sidebar-bg);font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 4v3h-7V8z"/></svg>
-        複数台配車構成（${(c.legs||[]).length}台）
+        複数台配車構成（${_legsView.length}台）
       </div>
-      ${(c.legs||[]).map((leg,li) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;${li<(c.legs||[]).length-1?'border-bottom:1px solid #d1fae5':''}">
+      ${_legsView.map((leg,li) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;${li<_legsView.length-1?'border-bottom:1px solid #d1fae5':''}">
           <span style="font-size:10px;font-weight:700;color:#6DD5A8;background:var(--sidebar-bg);padding:2px 6px;border-radius:10px;flex-shrink:0">第${li+1}便</span>
           <span style="font-size:12px;font-weight:600;color:var(--sidebar-bg)">${leg.driverName}（${leg.vehicleName}）</span>
           <span style="font-size:10px;color:var(--text-muted);margin-left:auto">${leg.vehicleType} · ${leg.capacity}</span>
@@ -27508,7 +27514,8 @@ function renderDndTimeline() {
       const driverFirstName = (d.name || '').split(' ')[0];
       processingCases.forEach(c => {
         if (c.vehicleMode !== 'relay' || !c.legs) return;
-        c.legs.forEach(leg => {
+        // 読取専用ビュー：SSoT派生（フラグON時）or レガシー c.legs（既定）
+        deriveRelayLegsView(c).forEach((leg, _li, _legsV) => {
           if (!leg.driverName) return;
           // ドライバー名のマッチング（姓のみで判定）
           const legFirstName = leg.driverName.split(' ')[0];
@@ -27521,7 +27528,7 @@ function renderDndTimeline() {
             _relayLegId: leg.legId,
             _relayJobId: c.jobId || c.id,
             _relayLegNo: leg.legNo,
-            _relayTotalLegs: c.legs.length,
+            _relayTotalLegs: _legsV.length,
             _relayCaseId: c.id,
             start: leg.startTime || '00:00',
             end: leg.endTime || '00:00',
@@ -27531,7 +27538,7 @@ function renderDndTimeline() {
             goods: c.goods,
             deadline: c.deadline,
             color: '#0d9488',
-            label: c.client + ` (${leg.legNo}/${c.legs.length})`,
+            label: c.client + ` (${leg.legNo}/${_legsV.length})`,
             locked: true,  // リレー区間は配車割当ページからは編集不可（モーダルで操作）
             _isRelayLeg: true
           });
