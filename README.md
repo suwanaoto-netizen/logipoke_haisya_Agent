@@ -68,23 +68,34 @@ python3 -m http.server 8000
 # → http://localhost:8000/ にアクセス
 ```
 
-## GitHub Pages で公開する（Actions 自動デプロイ）
-
-`.github/workflows/pages.yml` を同梱しており、対象ブランチ（`main` / `claude/gallant-gauss-UsC5y`）への
-push で自動的に GitHub Pages へデプロイされます。初回のみ以下の設定が必要です。
-
-1. リポジトリの **Settings → Pages** を開きます。
-2. **Source** を **`GitHub Actions`** に設定します。
-3. 対象ブランチへ push（または Actions タブから `Deploy to GitHub Pages` を手動実行）。
-4. 数十秒〜数分で `https://<ユーザー名>.github.io/<リポジトリ名>/` に公開されます。
+## GitHub Pages で公開する
 
 公開後の入口:
 
 - `/` … 配車管理（メイン, `index.html`）
 - **`/review.html` … レビュー入口**（各画面・増車UIモック・設計ドキュメントへのリンク集）
 
-> `.nojekyll` を含めているため Jekyll 処理は行われず、ファイルがそのまま配信されます。
-> 従来の「Deploy from a branch（`/ (root)`）」方式でも公開できます（その場合 Actions は不要）。
+### A. マージ後に Actions で自動公開（推奨・本番）
+
+`.github/workflows/pages.yml` を同梱。**`main` への push（PRマージ）で自動デプロイ**されます。初回のみ:
+
+1. **Settings → Pages** で **Source = `GitHub Actions`** に設定。
+2. PR をマージ（or Actions タブから `Deploy to GitHub Pages` を手動実行）。
+3. 数分で `https://<ユーザー名>.github.io/<リポジトリ名>/` に公開。
+
+> `github-pages` 環境は既定で **デフォルトブランチ(main)のみ**デプロイ許可のため、
+> feature ブランチからの自動デプロイはブロックされます（これは仕様です）。
+
+### B. マージ前に feature ブランチをプレビューしたい場合
+
+次のいずれか:
+
+- **classic 方式**: Settings → Pages → Source = `Deploy from a branch` → ブランチ
+  `claude/gallant-gauss-UsC5y`・フォルダ `/ (root)`。環境制限を受けず即時公開。
+- または Settings → Environments → `github-pages` → Deployment branches に当該ブランチを追加後、
+  Actions タブから手動実行。
+
+`.nojekyll` を同梱しているため Jekyll 処理は行われず、ファイルがそのまま配信されます。
 
 ## ライセンス
 

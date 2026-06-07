@@ -1,12 +1,13 @@
 name: Deploy to GitHub Pages
 
 # 配車Agent（静的HTML）を GitHub Pages へ公開する。
-# Pages の Source を「GitHub Actions」に設定すると、対象ブランチへの push で自動デプロイされる。
+# Pages の Source を「GitHub Actions」に設定すると、main への push（マージ）で自動デプロイされる。
+# 注意: github-pages 環境は既定で「デフォルトブランチ(main)のみ」デプロイ許可のため、
+#       feature ブランチからの自動デプロイはブロックされる（手動実行 workflow_dispatch は可）。
 on:
   push:
     branches:
       - main
-      - claude/gallant-gauss-UsC5y
   workflow_dispatch:
 
 permissions:
