@@ -61,12 +61,20 @@ SSoT 未接続のままでした）。
   派生失敗時は `c.legs` にフォールバックして描画を壊さない。フラグON時も従来描画と**1:1一致**することを
   `verify_operation.mjs` の「描画切替パリティ」で保証済み。既定OFFのため通常表示は無変更で、有効化は
   `window.__useOperationSSoT = true` のみ。
+- ✅ **運行層SSoT 取込＋ガント裏付け（課題C6・第3段）**: 配車計画ガント/DnD通常行の正準フラット層
+  `assignments[]`（1ブロック=1運行）を `LogipokeDB.ingestAssignments` で **Trip>Leg>Stop+Assignment** へ
+  取込み、`toAssignments` で**ロスレスに復元**（同一 tab×日×driver×vehicle を1 Tripに束ね、ブロックを Leg、
+  発着を Stop に正規化）。本体に `deriveAssignmentsView(tab)` を追加し、フラグON時の
+  `buildScheduleViewFromAssignments`（=ガント `__useAssignmentView` 経路）が**正規化SSoTに裏付けられた
+  往復ビュー**を使うよう接続（往復失敗時は素の `assignments` に縮退）。往復の無損失性は
+  `verify_operation.mjs`（計14件）で保証。これで正規化モデルが **中継案件(c.legs) と ガント(assignments)
+  の両方を読取側で表現可能**になり、C6の読取側基盤がほぼ揃った。
 - 🔜 **本体ではまだ未接続（順次対応）**: 他マスタ（取引先 / 協力会社 / ユーザー / 定期便）、
   受付（本体は今も旧 `logipoke_ai_intake_queue` を使用。`logipoke_db_receptions_v1` への切替は未）、
-  案件（`unprocessed` / `processing` / `processed` の4分割）。運行層は `c.legs` 系の読取ビューをSSoT派生へ
-  切替可能にしたが、**ガント本体（`renderSchedule`）・DnDの通常行は別データ源**（`scheduleData` /
-  `dndAssignments`）のため、SSoTへの取込（schedule→Trip/Leg）を伴う次ラウンドで対応。
-  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
+  案件（`unprocessed` / `processing` / `processed` の4分割）。**DnDの通常行**は `dndAssignments`（ドラッグ&
+  ドロップで書込まれる可変ストア）が源で純粋な読取投影ではないため、「SSoTを書込先にする」フェーズで対応
+  （読取はSSoT派生／書込面は据え置き、の原則に従う）。`vehicleMasterData` は固有データを持つ独立
+  レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

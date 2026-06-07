@@ -12832,6 +12832,22 @@ function deriveRelayLegsView(c) {
 }
 window.deriveRelayLegsView = deriveRelayLegsView;
 
+// 正準フラット層 assignments[] を 正規化SSoT(Trip>Leg>Stop) 経由でロスレス往復した結果を返す。
+// フラグON時、ガント(buildScheduleViewFromAssignments)はこの「SSoTに裏付けられた」配列を使う。
+// 往復は欠損なし（verify_operation の assignments パリティで保証）。失敗時は素の assignments に縮退。
+function deriveAssignmentsView(tab) {
+  const raw = (typeof assignments !== 'undefined' ? assignments : []).filter(a => !tab || a.tab === tab);
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined') return raw;
+  try {
+    LogipokeDB.resetSeq();
+    const db = LogipokeDB.createDB();
+    LogipokeDB.ingestAssignments(db, raw);
+    const round = LogipokeDB.toAssignments(db);
+    return round.length === raw.length ? round : raw;
+  } catch (e) { return raw; }
+}
+window.deriveAssignmentsView = deriveAssignmentsView;
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  ページ・フェーズ切替
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -20718,8 +20734,12 @@ function reassignVehicle(assignmentId, newVehicleId) {
 //  ステップ4で renderSchedule をこちらに切り替える
 // ═══════════════════════════════════════════════════════════════
 function buildScheduleViewFromAssignments(tab) {
+  // データ源：フラグON時は 正規化SSoT 往復ビュー（deriveAssignmentsView）、既定は素の assignments。
+  const _src = (typeof deriveAssignmentsView === 'function')
+    ? deriveAssignmentsView(tab)
+    : assignments.filter(a => a.tab === tab);
   const byDriver = {};
-  assignments.filter(a => a.tab === tab).forEach(a => {
+  _src.forEach(a => {
     if (!byDriver[a.driverId]) byDriver[a.driverId] = [];
     byDriver[a.driverId].push(a);
   });

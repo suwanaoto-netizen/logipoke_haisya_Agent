@@ -187,6 +187,50 @@ check('描画切替パリティ：DnD中継行ビューが旧 legs[] と1:1一�
   });
 });
 
+// ── 旧 assignments[]（ガント/DnD正準層）の SSoT ロスレス往復（第3段 / b-2） ──
+// 同一ドライバーの複数ブロック・planning/confirmed の両タブを含む代表サンプル。
+const flatAssignments = [
+  { id: 'A00001', tab: 'planning', date: '2026-05-27', driverId: 'D001', vehicleId: 'V0001',
+    start: '06:00', end: '10:30', status: '稼動中', client: '株式会社○○商事', from: '埼玉県川口市',
+    to: '神奈川県横浜市', goods: 'パレット/800kg/常温', deadline: '本日中', label: '○○商事', color: '#3BB888' },
+  { id: 'A00002', tab: 'planning', date: '2026-05-27', driverId: 'D001', vehicleId: 'V0001',
+    start: '12:00', end: '15:00', status: '稼動中', client: '△△食品株式会社', from: '東京都大田区',
+    to: '千葉県船橋市', goods: 'ケース/500kg/冷蔵', deadline: '夕方', label: '△△食品', color: '#60a5fa' },
+  { id: 'A00003', tab: 'confirmed', date: '2026-05-27', driverId: 'D002', vehicleId: 'V0002',
+    start: '08:00', end: '18:30', status: 'アラート', client: '南関東物流株式会社', from: '神奈川県川崎市',
+    to: '静岡県静岡市', goods: '電子部品/400kg/精密', deadline: '⚠ 遅延の恐れ', label: '南関東', color: '#f97316' }
+];
+
+check('assignments 取込：Trip束ね（同driver×vehicle×tab×日=1 Trip / ブロック=Leg）', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, flatAssignments);
+  // D001 の planning 2件 → 1 Trip / 2 Leg、D002 confirmed 1件 → 1 Trip / 1 Leg
+  assert.equal(db.trips.size, 2);
+  assert.equal(db.legs.size, 3);
+  assert.equal(db.stops.size, 6);          // 各Leg 2 Stop
+  assert.equal(db.assignments.size, 3);
+});
+
+check('assignments ロスレス往復：toAssignments が元配列と完全一致', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, flatAssignments);
+  const round = DB.toAssignments(db);
+  const norm = arr => arr.slice().sort((a, b) => a.id.localeCompare(b.id));
+  assert.deepEqual(norm(round), norm(flatAssignments));
+});
+
+check('assignments 往復は決定的（同入力で同出力）', () => {
+  function build() {
+    DB.resetSeq();
+    const db = DB.createDB();
+    DB.ingestAssignments(db, flatAssignments);
+    return JSON.stringify(DB.toAssignments(db));
+  }
+  assert.equal(build(), build());
+});
+
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {
   function build() {
     DB.resetSeq();

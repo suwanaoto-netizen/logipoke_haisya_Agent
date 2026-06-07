@@ -414,6 +414,56 @@
     return rows.sort(function (x, y) { return (x.sequenceNo || 0) - (y.sequenceNo || 0); });
   }
 
+  /* ───────────────────────── ④ 運行層 取込（旧 assignments[] → SSoT）課題C6 ─── */
+  // 配車計画ガント/DnD通常行の正準フラット層 assignments[]（1ブロック=1運行）を
+  // 正規化 Trip>Leg>Stop+Assignment へ取込む。同一(tab×日×driver×vehicle)を1 Tripに束ね、
+  // 各ブロックを Leg（pickup/dropoff の2 Stop）として表現。表示/再構築に要する素フィールドは
+  // 欠損なく保持し、toAssignments でロスレスに復元できる（ガントの裏付けをSSoTへ移すための土台）。
+  function ingestAssignments(db, flat) {
+    flat = flat || [];
+    var seqByTrip = {};
+    flat.forEach(function (a) {
+      var tripKey = [a.tab, a.date, a.driverId, a.vehicleId].join('|');
+      var trip = db.trips.get(tripKey) || createTrip(db, {
+        id: tripKey, tab: a.tab || 'planning', serviceDate: a.date || null, shape: 'single', source: 'assignments'
+      });
+      var seq = (seqByTrip[tripKey] = (seqByTrip[tripKey] || 0) + 1);
+      var leg = addLeg(db, {
+        id: a.id, tripId: trip.id, sequenceNo: seq,
+        driverId: a.driverId, vehicleId: a.vehicleId,
+        startTime: a.start, endTime: a.end, status: a.status, role: 'pickup_delivery'
+      });
+      addStop(db, { legId: leg.id, sequenceNo: 1, kind: 'pickup', locationRaw: a.from, orderId: a.id });
+      addStop(db, { legId: leg.id, sequenceNo: 2, kind: 'dropoff', locationRaw: a.to, orderId: a.id });
+      if (db.orders && !db.orders.has(a.id)) {
+        db.orders.set(a.id, { id: a.id, orderNo: a.id, clientName: a.client || null,
+          goods: a.goods || null, deadline: a.deadline || null, originRaw: a.from || null, destinationRaw: a.to || null });
+      }
+      assign(db, { id: a.id, orderId: a.id, legId: leg.id, label: a.label, color: a.color });
+    });
+    return db;
+  }
+
+  // SSoT → 旧 assignments[] 形（ロスレス復元。id 昇順で安定化）
+  function toAssignments(db) {
+    var out = [];
+    db.assignments.forEach(function (as) {
+      var leg = db.legs.get(as.legId); if (!leg) return;
+      var trip = db.trips.get(leg.tripId) || {};
+      var order = db.orders.get(as.orderId) || {};
+      var stops = _legStops(db, leg.id);
+      out.push({
+        id: as.id, tab: trip.tab, date: trip.serviceDate,
+        driverId: leg.driverId, vehicleId: leg.vehicleId,
+        start: leg.startTime, end: leg.endTime, status: leg.status,
+        client: order.clientName, from: stops.length ? stops[0].locationRaw : null,
+        to: stops.length ? stops[stops.length - 1].locationRaw : null,
+        goods: order.goods, deadline: order.deadline, label: as.label, color: as.color
+      });
+    });
+    return out.sort(function (a, b) { return String(a.id).localeCompare(String(b.id)); });
+  }
+
   /* ───────────────────────── 公開API ─────────────────────────────────────── */
   return {
     // helpers / value objects
@@ -431,6 +481,8 @@
     // ④ operation
     createTrip: createTrip, addLeg: addLeg, addStop: addStop, assign: assign, deriveCaseTimeline: deriveCaseTimeline,
     // ④ operation：旧 case.legs[] → SSoT 取込 と SSoT → 3画面 派生（課題C6）
-    ingestCaseLegs: ingestCaseLegs, toScheduleBlocks: toScheduleBlocks, toDndBoard: toDndBoard, toCaseTimeline: toCaseTimeline
+    ingestCaseLegs: ingestCaseLegs, toScheduleBlocks: toScheduleBlocks, toDndBoard: toDndBoard, toCaseTimeline: toCaseTimeline,
+    // ④ operation：旧 assignments[]（ガント/DnD正準層）の SSoT ロスレス往復（課題C6・第3段）
+    ingestAssignments: ingestAssignments, toAssignments: toAssignments
   };
 });
