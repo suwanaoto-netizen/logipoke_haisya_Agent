@@ -13928,15 +13928,30 @@ function confirmPartnerLegPO(caseId, legIdx) {
   const charge = (leg.charge || 0).toLocaleString();
   if (!confirm((leg.name || '協力会社') + ' へ 傭車¥' + charge + ' で発注確定します。\n発注書（PO）を発行し、確定時に請求へ連携します。よろしいですか？')) return;
   const now = new Date();
+  const payDue = formatDateSlash(new Date(now.getTime() + 30 * 86400000));
   leg.poConfirmed = true;
   leg.purchaseOrderNo = 'PO-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random() * 90000) + 10000);
   leg.purchaseOrderIssuedAt = now.toLocaleString('ja-JP');
+  leg.purchaseOrderTotal = leg.charge || 0;
+  leg.purchaseOrderMethod = '銀行振込（月末締め翌月末払い）';
+  leg.purchaseOrderRoute = c.from + ' → ' + c.to;
+  leg.purchaseOrderGoods = c.goods;
+  leg.purchaseOrderReceipt = c.to + 'にて荷受け担当者へ';
+  leg.purchaseOrderPayDue = payDue;
   if (typeof renderDnd === 'function') { try { renderDnd(); } catch (e) {} }
   if (typeof renderProcessingList === 'function') { try { renderProcessingList(); } catch (e) {} }
   if (typeof renderProcessingDetail === 'function' && typeof selectedProcessing !== 'undefined') {
     try { renderProcessingDetail(selectedProcessing); } catch (e) {}
   }
-  showToast('✅ ' + (leg.name || '協力会社') + ' へ発注確定（' + leg.purchaseOrderNo + '）。発注書を発行しました', 'success');
+  showToast('✅ ' + (leg.name || '協力会社') + ' へ発注確定（' + leg.purchaseOrderNo + '）', 'success');
+  // 発注書プレビュー（PDF／送信）を開く
+  if (typeof openPOPreviewModal === 'function') {
+    const po = Object.assign({
+      partnerName: leg.name || '協力会社', from: c.from, to: c.to, goods: c.goods,
+      _partnerId: leg.id, _client: c.client, _caseId: c.id, _legIdx: legIdx
+    }, leg);
+    openPOPreviewModal(po);
+  }
 }
 
 // 増車が必要/推奨の案件件数（required + recommended）。運行スケジュールのサマリー集計用。
@@ -17803,11 +17818,11 @@ function confirmDispatch() {
         // ── 発注書（下請法対応）──
         purchaseOrderNo: poNo, purchaseOrderTotal: charge,
         purchaseOrderIssuedAt: leg.purchaseOrderIssuedAt || now.toLocaleString('ja-JP'),
-        purchaseOrderMethod: '銀行振込（月末締め翌月末払い）',
-        purchaseOrderRoute: c.from + ' → ' + c.to,
-        purchaseOrderGoods: c.goods,
-        purchaseOrderReceipt: c.to + 'にて荷受け担当者へ',
-        purchaseOrderPayDue: _payDue,
+        purchaseOrderMethod: leg.purchaseOrderMethod || '銀行振込（月末締め翌月末払い）',
+        purchaseOrderRoute: leg.purchaseOrderRoute || (c.from + ' → ' + c.to),
+        purchaseOrderGoods: leg.purchaseOrderGoods || c.goods,
+        purchaseOrderReceipt: leg.purchaseOrderReceipt || (c.to + 'にて荷受け担当者へ'),
+        purchaseOrderPayDue: leg.purchaseOrderPayDue || _payDue,
         progress: 50, truckTop: 50, progressPct: 50, remain: '—', eta: '—', donekm: 0
       });
     });
@@ -35658,23 +35673,17 @@ async function downloadInvoicePDF() {
   }
 }
 
-// 処理済み画面から発注書PDFを再ダウンロード
-function redownloadPurchaseOrderPDF(i) {
-  const c = processedCases[i];
-  if (!c || !c.purchaseOrderNo) { showToast('発注書データが見つかりません', 'error'); return; }
-
-  // 案件データから印刷エリアを再構築して _downloadPurchaseOrderPDF を呼ぶ
-  const area = document.getElementById('po-print-area');
-  if (!area) { showToast('印刷エリアが初期化されていません', 'error'); return; }
-
-  const poNum    = c.purchaseOrderNo;
+// 発注書の印刷用HTMLを生成（再DL／ボード発注確定プレビューで共用）
+function buildPOPrintHTML(c, opts) {
+  opts = opts || {};
+  const poNum    = c.purchaseOrderNo || '—';
   const issuedAt = c.purchaseOrderIssuedAt || '—';
   const total    = c.purchaseOrderTotal ? '¥' + c.purchaseOrderTotal.toLocaleString() : '—';
   const subtotalVal = c.purchaseOrderTotal ? Math.round(c.purchaseOrderTotal / 1.1) : 0;
   const taxVal      = c.purchaseOrderTotal ? c.purchaseOrderTotal - subtotalVal : 0;
-  const now = new Date().toLocaleString('ja-JP');
-
-  area.innerHTML = `
+  const extraLine = opts.redownloadAt
+    ? `<div style="font-size:10px;color:#9ca3af">再ダウンロード：${opts.redownloadAt}</div>` : '';
+  return `
     <div style="border-bottom:3px solid #0D4A3A;padding-bottom:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-end">
       <div>
         <div style="font-size:22px;font-weight:700;color:#0D4A3A;letter-spacing:0.05em">発 注 書</div>
@@ -35683,7 +35692,7 @@ function redownloadPurchaseOrderPDF(i) {
       <div style="text-align:right;font-size:12px;color:#374151">
         <div><b>発注書番号：</b>${poNum}</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px">交付日時：${issuedAt}</div>
-        <div style="font-size:10px;color:#9ca3af">再ダウンロード：${now}</div>
+        ${extraLine}
       </div>
     </div>
 
@@ -35727,7 +35736,14 @@ function redownloadPurchaseOrderPDF(i) {
       <span>発行：東日本物流株式会社</span>
     </div>
   `;
+}
 
+// 発注書オブジェクト → 印刷エリアへ展開し PDF 保存（共用）
+function downloadPOPDF(c, opts) {
+  const area = document.getElementById('po-print-area');
+  if (!area) { showToast('印刷エリアが初期化されていません', 'error'); return; }
+  if (!window.html2canvas || !window.jspdf) { showToast('PDFライブラリが読み込まれていません', 'error'); return; }
+  area.innerHTML = buildPOPrintHTML(c, opts);
   html2canvas(area, { scale:2, useCORS:true, backgroundColor:'#ffffff', logging:false })
     .then(canvas => {
       const { jsPDF } = window.jspdf;
@@ -35747,10 +35763,87 @@ function redownloadPurchaseOrderPDF(i) {
           yOffset += pageH;
         }
       }
-      pdf.save('発注書_' + poNum + '.pdf');
+      pdf.save('発注書_' + (c.purchaseOrderNo || 'PO') + '.pdf');
       showToast('発注書PDFをダウンロードしました', 'success');
     })
     .catch(e => { showToast('PDF生成エラー: ' + e.message, 'error'); });
+}
+
+// 処理済み画面から発注書PDFを再ダウンロード
+function redownloadPurchaseOrderPDF(i) {
+  const c = processedCases[i];
+  if (!c || !c.purchaseOrderNo) { showToast('発注書データが見つかりません', 'error'); return; }
+  downloadPOPDF(c, { redownloadAt: new Date().toLocaleString('ja-JP') });
+}
+
+// ━━ 発注書プレビュー（ボード発注確定から：プレビュー＋PDF＋送信） ━━
+let _previewPO = null;
+function openPOPreviewModal(po) {
+  _previewPO = po;
+  let ov = document.getElementById('so-po-preview');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'so-po-preview';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:24px';
+    ov.onclick = function (e) { if (e.target === ov) closePOPreviewModal(); };
+    document.body.appendChild(ov);
+  }
+  // 送信先（協力会社マスタから連絡先を解決）
+  const pm = (typeof partnerMasterData !== 'undefined' ? partnerMasterData : []).find(function (p) { return p.id === po._partnerId || p.name === po.partnerName; });
+  const email = (pm && pm.email) || '';
+  const tel = (pm && pm.tel) || '';
+  ov.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:#fff;z-index:2">
+        <span style="font-size:15px;font-weight:800;color:#0D4A3A">📄 発注書プレビュー</span>
+        <span style="font-size:11px;color:var(--text-muted)">${po.purchaseOrderNo}</span>
+        <button onclick="closePOPreviewModal()" style="margin-left:auto;width:28px;height:28px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;font-size:16px">✕</button>
+      </div>
+      <div style="padding:18px">
+        <div style="border:1px solid var(--border);border-radius:8px;padding:18px 22px;background:#fff">${buildPOPrintHTML(po, {})}</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;padding:14px 18px;border-top:1px solid var(--border);position:sticky;bottom:0;background:#fafbfc">
+        <button class="btn btn-secondary btn-sm" onclick="downloadPOPDF(_previewPO,{})">⬇ PDFダウンロード</button>
+        <div style="flex:1"></div>
+        <button id="sopo-send-email" class="btn btn-sm" style="background:#0D4A3A;color:#fff" onclick="sendPOFromPreview('email','${email.replace(/'/g, '')}')">📧 メール送信</button>
+        <button id="sopo-send-slack" class="btn btn-sm" style="background:#4A154B;color:#fff" onclick="sendPOFromPreview('slack','#partner-${(po._partnerId || '').toLowerCase()}')">💬 Slack送信</button>
+        <button id="sopo-send-sms" class="btn btn-sm" style="background:#1a7a5e;color:#fff" onclick="sendPOFromPreview('sms','${tel.replace(/'/g, '')}')">📱 SMS送信</button>
+      </div>
+      <div id="sopo-send-status" style="display:none;margin:0 18px 16px;padding:8px 12px;border-radius:8px;font-size:11px"></div>
+    </div>`;
+  ov.style.display = 'flex';
+}
+function closePOPreviewModal() {
+  const ov = document.getElementById('so-po-preview');
+  if (ov) ov.style.display = 'none';
+}
+async function sendPOFromPreview(method, to) {
+  const po = _previewPO; if (!po) return;
+  const labels = { email: 'メール', slack: 'Slack', sms: 'SMS' };
+  const icons = { email: '📧', slack: '💬', sms: '📱' };
+  if ((method === 'email' || method === 'sms') && !to) {
+    to = prompt(method === 'email' ? '送信先メールアドレス' : '送信先電話番号', '') || '';
+    if (!to) { showToast('送信先を入力してください', 'error'); return; }
+  }
+  const btn = document.getElementById('sopo-send-' + method);
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = '送信中...'; }
+  await new Promise(function (r) { setTimeout(r, 1000); });
+  const sentAt = new Date().toLocaleString('ja-JP');
+  // 既存の送信ログ(poSentLog)にも記録して整合
+  if (typeof poSentLog !== 'undefined' && Array.isArray(poSentLog)) poSentLog.push({ method: method, to: to, sentAt: sentAt });
+  // 協力会社便に送信履歴を残す（確定後も追跡可能）
+  if (po._caseId != null && po._legIdx != null && typeof processingCases !== 'undefined') {
+    const c = processingCases.find(function (x) { return x.id === po._caseId; });
+    const leg = c && c.scaleOutPartnerLegs && c.scaleOutPartnerLegs[po._legIdx];
+    if (leg) { leg.poSentLog = leg.poSentLog || []; leg.poSentLog.push({ method: method, to: to, sentAt: sentAt }); }
+  }
+  const st = document.getElementById('sopo-send-status');
+  if (st) {
+    st.style.display = 'block'; st.style.background = '#f0fdf4'; st.style.border = '1px solid #a7f3d0'; st.style.color = '#065f46';
+    st.innerHTML = (st.innerHTML || '') + `<div style="display:flex;align-items:center;gap:6px"><span>${icons[method]}</span><b>${labels[method]}</b>で送信完了（${sentAt}）→ ${to}</div>`;
+  }
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerHTML = '✓ 送信済'; }
+  showToast('発注書 ' + po.purchaseOrderNo + ' を' + labels[method] + 'で送信しました', 'success');
 }
 
 // 処理済み移動時に請求管理ページへ連動させる
