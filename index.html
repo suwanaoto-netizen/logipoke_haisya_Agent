@@ -9640,6 +9640,22 @@ function _ssotDerive(seed, build){
           '<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;padding:4px 0">'
           +'<input type="checkbox" value="'+v+'" '+(c.vehicleTypes.includes(v)?'checked':'')+' style="accent-color:#1e40af;width:14px;height:14px"> '+v+'</label>'
         ).join('');
+        // 傭車レート（車格別）入力行
+        const rateRows = (c.vehicleTypes||[]).map(function(t){
+          const r = (c.partnerRates||[]).find(x=>x.vehicleType===t) || {};
+          return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px" data-rate-type="'+t+'">'
+            +'<span style="width:100px;font-size:11px;font-weight:600;flex-shrink:0">'+t+'</span>'
+            +'<input class="form-input pt-rate-base" type="number" placeholder="基本料金" value="'+(r.baseCharge!=null?r.baseCharge:'')+'" style="width:110px">'
+            +'<span style="font-size:10px;color:var(--text-muted)">円 ＋</span>'
+            +'<input class="form-input pt-rate-km" type="number" placeholder="km単価" value="'+(r.perKm!=null?r.perKm:'')+'" style="width:80px">'
+            +'<span style="font-size:10px;color:var(--text-muted)">円/km</span>'
+          +'</div>';
+        }).join('') || '<div style="font-size:11px;color:var(--text-muted)">対応車格を選択して保存すると入力欄が出ます</div>';
+        const _pf = c.performance || {};
+        const pOt = _pf.onTimeRate!=null ? Math.round(_pf.onTimeRate*100) : '';
+        const pQl = _pf.qualityScore!=null ? _pf.qualityScore : '';
+        const pCr = _pf.avgCostRatio!=null ? _pf.avgCostRatio : '';
+        const pJc = _pf.jobCount!=null ? _pf.jobCount : '';
         el.innerHTML = '<div class="detail-card" style="margin-bottom:16px">'
           +'<div class="detail-card-header" style="background:#1e3a8a;padding:14px 16px;border-radius:0">'
             +'<div style="width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,0.15);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;flex-shrink:0">'+initials+'</div>'
@@ -9663,6 +9679,13 @@ function _ssotDerive(seed, build){
             +'<div class="form-row full"><div class="form-group"><label class="form-label">メールアドレス</label><input class="form-input" id="edit-pt-email" value="'+c.email+'"></div></div>'
             +'<div class="form-row full"><div class="form-group"><label class="form-label">対応車格</label>'
             +'<div id="edit-pt-vtypes" style="display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:6px">'+vtChecks+'</div></div></div>'
+            +'<div class="form-row full"><div class="form-group"><label class="form-label">傭車レート（車格別）</label>'
+            +'<div id="edit-pt-rates" style="margin-top:6px">'+rateRows+'</div>'
+            +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">傭車見積＝基本料金＋km単価×距離。未入力の車格は原価から自動推定されます。</div></div></div>'
+            +'<div class="form-row"><div class="form-group"><label class="form-label">定時遵守率（%）</label><input class="form-input" type="number" id="edit-pt-ontime" value="'+pOt+'" placeholder="例:98"></div>'
+            +'<div class="form-group"><label class="form-label">品質スコア（0-100）</label><input class="form-input" type="number" id="edit-pt-quality" value="'+pQl+'" placeholder="例:90"></div></div>'
+            +'<div class="form-row"><div class="form-group"><label class="form-label">原価比（自社=1.0）</label><input class="form-input" type="number" step="0.01" id="edit-pt-costratio" value="'+pCr+'" placeholder="例:0.95"></div>'
+            +'<div class="form-group"><label class="form-label">実績件数</label><input class="form-input" type="number" id="edit-pt-jobcount" value="'+pJc+'" placeholder="例:62"></div></div>'
           +'</div>'
         +'</div>'
         +'<div class="detail-card">'
@@ -9692,6 +9715,16 @@ function _ssotDerive(seed, build){
             +'</div>'
             +'<div style="margin-top:12px"><div class="info-label" style="margin-bottom:6px">対応車格</div>'
             +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+c.vehicleTypes.map(v=>'<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe">'+v+'</span>').join('')+'</div></div>'
+            +((c.partnerRates&&c.partnerRates.length)?'<div style="margin-top:12px"><div class="info-label" style="margin-bottom:6px">傭車レート</div>'
+              +c.partnerRates.map(function(r){return '<div style="font-size:12px;color:var(--text-secondary)">'+r.vehicleType+'：¥'+(r.baseCharge||0).toLocaleString()+' ＋ '+(r.perKm||0)+'円/km</div>';}).join('')
+              +'</div>':'')
+            +(c.performance?'<div style="margin-top:12px"><div class="info-label" style="margin-bottom:6px">実績（推薦スコアに反映）</div>'
+              +'<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)">'
+              +'<span>定時遵守 '+(c.performance.onTimeRate!=null?Math.round(c.performance.onTimeRate*100)+'%':'—')+'</span>'
+              +'<span>品質 '+(c.performance.qualityScore!=null?c.performance.qualityScore:'—')+'</span>'
+              +'<span>原価比 '+(c.performance.avgCostRatio!=null?c.performance.avgCostRatio:'—')+'</span>'
+              +'<span>実績 '+(c.performance.jobCount!=null?c.performance.jobCount+'件':'—')+'</span>'
+              +'</div></div>':'')
           +'</div>'
         +'</div>'
         +'<div class="detail-card">'
@@ -9714,6 +9747,32 @@ function _ssotDerive(seed, build){
       const checked = document.querySelectorAll('#edit-pt-vtypes input[type=checkbox]:checked');
       c.vehicleTypes = Array.from(checked).map(cb=>cb.value);
       if(!c.vehicleTypes.length) c.vehicleTypes = ['未設定'];
+      // 傭車レート（車格別。解除された車格は除外、未入力車格はスキップ＝自動推定に委ねる）
+      const rateRows = document.querySelectorAll('#edit-pt-rates [data-rate-type]');
+      const rates = [];
+      rateRows.forEach(function(row){
+        const t = row.getAttribute('data-rate-type');
+        if(c.vehicleTypes.indexOf(t)<0) return;
+        const base = parseInt(row.querySelector('.pt-rate-base')?.value,10);
+        const km   = parseInt(row.querySelector('.pt-rate-km')?.value,10);
+        if(!isNaN(base)||!isNaN(km)) rates.push({vehicleType:t, baseCharge:isNaN(base)?0:base, perKm:isNaN(km)?0:km});
+      });
+      c.partnerRates = rates.length ? rates : undefined;
+      // 実績（performance）
+      const ot=parseFloat(document.getElementById('edit-pt-ontime')?.value);
+      const ql=parseInt(document.getElementById('edit-pt-quality')?.value,10);
+      const cr=parseFloat(document.getElementById('edit-pt-costratio')?.value);
+      const jc=parseInt(document.getElementById('edit-pt-jobcount')?.value,10);
+      if(!isNaN(ot)||!isNaN(ql)||!isNaN(cr)||!isNaN(jc)){
+        c.performance = {
+          onTimeRate:  isNaN(ot)?undefined:ot/100,
+          qualityScore:isNaN(ql)?undefined:ql,
+          avgCostRatio:isNaN(cr)?undefined:cr,
+          jobCount:    isNaN(jc)?undefined:jc
+        };
+      } else {
+        c.performance = undefined;
+      }
       renderCustPartnerList((document.getElementById('cust-search')?.value||'').toLowerCase());
       renderPartnerDetail(id);
       showToast('保存しました','success');
