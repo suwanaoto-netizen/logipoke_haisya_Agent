@@ -179,12 +179,11 @@
     var ownCost = ownBreakdown.reduce(function (s, b) { return s + b.total; }, 0);
     var partnerCharge = partnerLegs.reduce(function (s, l) { return s + (l.charge || 0); }, 0);
 
-    // 受注額：指定が無ければ「単一車前提の市場推奨運賃」を原価×目標粗利で推定。
+    // 受注額：指定が無ければ「この増車構成の総原価 × 目標粗利」を推奨見積として用いる
+    // （構成台数ぶんの原価＋傭車を回収できる運賃ライン。calcFare の 粗利28% 設計と一致）。
     var sales = ctx.sales;
     if (sales == null) {
-      var single = estimateLegCost(ctx.distanceKm, paramsForCapKg(
-        ownLegs.concat(partnerLegs).reduce(function (m, l) { return Math.max(m, l.capKg || 0); }, 4000)));
-      sales = round1000(single.total * cfg.TARGET_MARGIN);
+      sales = round1000((ownCost + partnerCharge) * cfg.TARGET_MARGIN);
     }
     var grossProfit = sales - ownCost - partnerCharge;
     var marginPct = sales > 0 ? Math.round(grossProfit / sales * 100) : 0;

@@ -13,6 +13,8 @@
 <!-- 増車（scale-out）判定エンジン。docs/scale-out-judgement.md / assets/logipoke-scaleout.js。
      window.LogipokeScaleOut.evaluateScaleOut(order, deps, config) を提供（純ロジック・決定的）。 -->
 <script src="assets/logipoke-scaleout.js"></script>
+<!-- 増車推薦エンジン（自社車両/協力会社/運賃/プラン合成）。assets/logipoke-recommend.js。 -->
+<script src="assets/logipoke-recommend.js"></script>
 <script>
 /* SSoT由来 derive 共通ヘルパー: derive結果が seed と lossless(JSON一致)なら採用、違えば seed にフォールバック。
    本体は常に正しいデータ（最悪 seed）を使い、lossless 性は migration/verify_model.mjs が判定する。 */
@@ -609,6 +611,17 @@ function _ssotDerive(seed, build){
   .scaleout-rationale.so-negotiate   { color:#92400e; background:#fffbeb; border-color:#fde68a; }
   .scaleout-rationale.so-review      { color:#475569; background:#f1f5f9; border-color:#cbd5e1; }
   .so-rationale-ico { flex-shrink:0; }
+  /* 増車プランカード（PR7・自社＋協力会社＋利益影響）。グリーン基調／協力会社＝既存オレンジ */
+  .so-leg { display:flex; align-items:center; gap:8px; padding:6px 9px; border:1px solid var(--border); border-radius:7px; margin-bottom:5px; font-size:11px; background:#fff; }
+  .so-leg.own { border-color:#b6e6d3; } .so-leg.partner { border-color:#fde68a; background:#fffbeb; }
+  .so-leg-tag { width:18px; height:18px; border-radius:4px; background:#0D4A3A; color:#fff; font-size:10px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .so-leg.partner .so-leg-tag { background:#c2410c; }
+  .so-leg-name { font-weight:700; color:var(--text-primary); }
+  .so-leg-meta { margin-left:auto; font-size:9.5px; color:var(--text-secondary); font-weight:600; }
+  .so-profit { margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
+  .so-profit-row { display:flex; justify-content:space-between; font-size:11px; padding:2px 0; }
+  .so-profit-row b { font-family:'Inter',sans-serif; }
+  .so-profit-row.total { border-top:1px dashed var(--border); margin-top:4px; padding-top:6px; font-weight:800; }
 
   .btn { 
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -12447,7 +12460,7 @@ const processingCases = [
        ]}},
     ]
   },
-  { id:'20240524105', status:'処理中', priority:'通常', casePattern:'特殊条件案件', client:'九州青果株式会社', from:'福岡県福岡市', to:'東京都中央区', goods:'青果物 / 1,200kg / 冷蔵', deadline:'05/25 夕方', vehicle:'未割当', driver:'未割当', distance:'1,100km', selectedVehicleIdx:0,
+  { id:'20240524105', status:'処理中', priority:'通常', casePattern:'特殊条件案件', client:'九州青果株式会社', from:'福岡県福岡市', to:'東京都中央区', goods:'青果物 / 7,000kg / 冷蔵', deadline:'05/25 夕方', vehicle:'未割当', driver:'未割当', distance:'1,100km', selectedVehicleIdx:0,
     vehicleMode:'single', legs:[], multiReasons:[],
     vehicles:[
       {rank:1,id:'車両3301',driver:'山本 十三',base:'福岡市',avail:'空車',cap:'2,000kg',stars:5,score:89,
@@ -13767,6 +13780,74 @@ async function aiExplainScaleOut(caseObj) {
     const text = data.content.map(function (b) { return b.text || ''; }).join('').trim();
     return text || fallback;
   } catch (e) { return fallback; }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  増車推薦（自社車両/協力会社/運賃）アダプタ ― 既存case → 推薦エンジン
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function getScaleOutPlan(c, verdict) {
+  if (!c || typeof LogipokeRecommend === 'undefined') return null;
+  verdict = verdict || getCaseScaleOut(c);
+  if (!verdict || (verdict.verdict !== 'required' && verdict.verdict !== 'recommended')) return null;
+  const distanceKm = parseInt(String(c.distance || '').replace(/[^\d]/g, ''), 10)
+    || (typeof estimateDistance === 'function' ? estimateDistance(c.from || '', c.to || '') : 0);
+  const weightKg = (typeof LogipokeScaleOut !== 'undefined') ? LogipokeScaleOut.parseWeightKg(c.goods) : 0;
+  const reqType = /冷凍/.test(c.goods || '') ? '冷凍車'
+    : /冷蔵/.test(c.goods || '') ? '冷蔵車'
+    : (c.aiResult && c.aiResult.vehicle) || (c.vehicle && c.vehicle !== '未割当' ? c.vehicle : '') || '4tウィング';
+  const candidates = (c.vehicles || []).map(function (v) {
+    return { id: v.id, driver: v.driver, cap: v.cap, score: v.score, avail: v.avail,
+      complianceOk: !v.law || v.law.status !== 'ng' };
+  });
+  const partners = (typeof partnerMasterData !== 'undefined' ? partnerMasterData : []).map(function (p) {
+    return { id: p.id, name: p.name, area: p.area, vehicleTypes: p.vehicleTypes, cases: p.cases, available: true };
+  });
+  const order = {
+    weightKg: weightKg, distanceKm: distanceKm, from: c.from, vehicle: c.vehicle, aiResult: c.aiResult,
+    origin: { prefecture: (String(c.from || '').match(/^(.+?[都道府県])/) || [])[1] }
+  };
+  try {
+    return LogipokeRecommend.composeScaleOutPlan(order, verdict, {
+      distanceKm: distanceKm, requiredVehicleType: reqType, requiredKg: weightKg,
+      candidates: candidates, partners: partners, sales: (c.sales || null)
+    });
+  } catch (e) { return null; }
+}
+
+// 増車プランカード（自社①②＋協力会社＋利益影響）。required/recommended のみ。
+function buildScaleOutPlanCard(c, verdict) {
+  const plan = getScaleOutPlan(c, verdict);
+  if (!plan || !plan.legs.length) return '';
+  const f = plan.fare;
+  const shapeLabel = { relay: '中継', parallel: '並走', co_split: '相積み分割' }[plan.shape] || plan.shape;
+  const tags = '①②③④⑤⑥⑦⑧';
+  const legsHtml = plan.legs.map(function (l) {
+    const isOwn = l.kind === 'own';
+    const tag = tags.charAt(l.seq - 1) || ('#' + l.seq);
+    const name = isOwn ? (l.driver || '') + '（' + l.id + '）' : l.name;
+    const meta = isOwn ? '自社 ' + (l.score || 0) + 'pt' : '協力 傭車¥' + (l.charge || 0).toLocaleString();
+    return '<div class="so-leg ' + (isOwn ? 'own' : 'partner') + '">'
+      + '<span class="so-leg-tag">' + tag + '</span>'
+      + '<span class="so-leg-name">' + name + '</span>'
+      + '<span class="so-leg-meta">' + meta + '</span></div>';
+  }).join('');
+  const pColor = (f.grossProfit < 0 || f.status === 'ng') ? '#dc2626' : (f.status === 'warn' ? '#d97706' : '#16a34a');
+  return ''
+    + '<div class="detail-card so-plan-card" style="margin-bottom:14px">'
+    + '<div class="detail-card-header" style="background:#EAF5F0">'
+    + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D4A3A" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>'
+    + '<div class="detail-card-title" style="color:#0D4A3A">AI増車プラン（自社' + plan.ownCount + '＋協力' + plan.partnerCount + '）</div>'
+    + '<span style="margin-left:auto;font-size:10px;font-weight:700;color:#0D4A3A;background:#fff;border:1px solid #b6e6d3;padding:2px 8px;border-radius:10px">分割：' + shapeLabel + '</span>'
+    + '</div>'
+    + '<div style="padding:12px">' + legsHtml
+    + '<div class="so-profit">'
+    + '<div class="so-profit-row"><span>受注運賃</span><b>¥' + f.sales.toLocaleString() + '</b></div>'
+    + '<div class="so-profit-row"><span>自社原価（' + plan.ownCount + '台）</span><b>− ¥' + f.ownCost.toLocaleString() + '</b></div>'
+    + (f.partnerCharge > 0 ? '<div class="so-profit-row"><span>傭車支払（協力' + plan.partnerCount + '）</span><b>− ¥' + f.partnerCharge.toLocaleString() + '</b></div>' : '')
+    + '<div class="so-profit-row total"><span>粗利 / 粗利率</span><b style="color:' + pColor + '">¥' + f.grossProfit.toLocaleString() + ' ・ ' + f.marginPct + '%</b></div>'
+    + '</div>'
+    + (plan.satisfied ? '' : '<div style="font-size:10.5px;color:#9a3412;margin-top:6px">⚠ 候補が不足しています（手配先の追加が必要）</div>')
+    + '</div></div>';
 }
 
 // 増車が必要/推奨の案件件数（required + recommended）。運行スケジュールのサマリー集計用。
@@ -15264,6 +15345,7 @@ function renderProcessingDetail(i) {
       </button>
     </div>
     ${_soBanner}
+    ${(typeof buildScaleOutPlanCard === 'function') ? buildScaleOutPlanCard(c, _so) : ''}
 
     <!-- 案件パターン -->
     <div class="detail-card" style="margin-bottom:14px">
