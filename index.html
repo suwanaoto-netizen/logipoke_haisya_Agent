@@ -23714,7 +23714,21 @@ function dndGetCurrentDateKey() {
 }
 
 // 割当状態: { driverId: { 'YYYY-MM-DD': [{caseId, start, end, ...}], ... }, ... }
-let dndAssignments = {};
+// 【物理getter化・C6第16段】dndAssignments を Proxy で包む。ブロック配列は既に store-first 書込
+// （第14段）＋reader が SSoT 派生（第9段）の「射影」。この Proxy は read を素通し（get トラップ無し＝
+// ネイティブ速度・Object.keys / for-in 不変）、最外層の driver キー設定を計測（観測用）。挙動は不変。
+window.__dndAssignmentsWrites = 0;
+function _makeDndAssignmentsProxy(backing) {
+  if (typeof Proxy === 'undefined') return backing;
+  return new Proxy(backing, {
+    set(target, prop, value) {
+      if (window.__useOperationSSoT) window.__dndAssignmentsWrites = (window.__dndAssignmentsWrites || 0) + 1;
+      target[prop] = value; return true;
+    },
+    deleteProperty(target, prop) { delete target[prop]; return true; }
+  });
+}
+let dndAssignments = _makeDndAssignmentsProxy({});
 dndDrivers.forEach(d => {
   dndAssignments[d.id] = {};
   // presetは「今日」の固定便として配置
