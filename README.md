@@ -9,6 +9,7 @@
 | --- | --- |
 | `index.html` | 配車管理画面（メイン）|
 | `ai-phone-reception.html` | AI 電話受付画面 |
+| `review.html` | レビュー入口（各画面・増車モック・設計ドキュメントへのリンク集）|
 
 両ページは `localStorage` 経由でデータを連携しています（AI 電話受付で取り込んだ案件が配車管理側の「未処理 / 未割当」に自動反映）。
 
@@ -67,14 +68,23 @@ python3 -m http.server 8000
 # → http://localhost:8000/ にアクセス
 ```
 
-## GitHub Pages で公開する
+## GitHub Pages で公開する（Actions 自動デプロイ）
 
-1. このリポジトリを GitHub に push します。
-2. リポジトリの **Settings → Pages** を開きます。
-3. **Source** を `Deploy from a branch` にし、ブランチを `main`(または公開したいブランチ)、フォルダを `/ (root)` に設定して保存します。
-4. 数十秒待つと `https://<ユーザー名>.github.io/<リポジトリ名>/` で公開されます。
+`.github/workflows/pages.yml` を同梱しており、対象ブランチ（`main` / `claude/gallant-gauss-UsC5y`）への
+push で自動的に GitHub Pages へデプロイされます。初回のみ以下の設定が必要です。
 
-`.nojekyll` を含めているため、Jekyll による処理は行われず、ファイルがそのまま配信されます。
+1. リポジトリの **Settings → Pages** を開きます。
+2. **Source** を **`GitHub Actions`** に設定します。
+3. 対象ブランチへ push（または Actions タブから `Deploy to GitHub Pages` を手動実行）。
+4. 数十秒〜数分で `https://<ユーザー名>.github.io/<リポジトリ名>/` に公開されます。
+
+公開後の入口:
+
+- `/` … 配車管理（メイン, `index.html`）
+- **`/review.html` … レビュー入口**（各画面・増車UIモック・設計ドキュメントへのリンク集）
+
+> `.nojekyll` を含めているため Jekyll 処理は行われず、ファイルがそのまま配信されます。
+> 従来の「Deploy from a branch（`/ (root)`）」方式でも公開できます（その場合 Actions は不要）。
 
 ## ライセンス
 

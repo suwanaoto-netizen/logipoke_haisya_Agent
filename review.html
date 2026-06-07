@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ロジポケ配車Agent ― レビュー入口</title>
+<style>
+  :root { --sidebar-bg:#1A6B56; --accent:#3BB888; --accent-pale:#EAF5F0; --text-primary:#1a1a1a;
+          --text-secondary:#6b7280; --text-muted:#9ca3af; --border:#e5e7eb; --bg:#f4f6f8; --partner:#c2410c; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Noto Sans JP','Inter',sans-serif; background:var(--bg); color:var(--text-primary); line-height:1.6; }
+  .hero { background:linear-gradient(135deg,#0D4A3A 0%,#1A6B56 100%); color:#fff; padding:36px 24px; }
+  .hero-in { max-width:1040px; margin:0 auto; }
+  .hero h1 { font-size:24px; font-weight:800; display:flex; align-items:center; gap:10px; }
+  .hero p { font-size:13px; color:rgba(255,255,255,.82); margin-top:8px; }
+  .hero .pill { display:inline-block; font-size:11px; font-weight:700; background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.25); padding:3px 10px; border-radius:20px; margin-top:12px; }
+  .wrap { max-width:1040px; margin:0 auto; padding:24px; }
+  .sec-title { font-size:13px; font-weight:800; color:var(--sidebar-bg); margin:24px 0 12px; display:flex; align-items:center; gap:8px; }
+  .sec-title::before { content:''; width:5px; height:16px; background:var(--accent); border-radius:3px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; }
+  .card { display:block; background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px 18px; text-decoration:none; color:inherit; transition:all .15s; }
+  .card:hover { border-color:var(--accent); box-shadow:0 4px 16px rgba(59,184,136,.18); transform:translateY(-2px); }
+  .card-ico { font-size:22px; }
+  .card-title { font-size:14px; font-weight:800; margin:8px 0 4px; display:flex; align-items:center; gap:8px; }
+  .card-desc { font-size:12px; color:var(--text-secondary); }
+  .tag { font-size:9.5px; font-weight:800; padding:1px 8px; border-radius:10px; }
+  .tag-app { background:var(--accent-pale); color:var(--sidebar-bg); }
+  .tag-mock { background:#eef2f7; color:#334155; }
+  .tag-doc { background:#fff7ed; color:var(--partner); }
+  .note { font-size:11.5px; color:var(--text-muted); background:#fff; border:1px dashed var(--border); border-radius:8px; padding:10px 14px; margin-top:20px; line-height:1.7; }
+  .flow { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .flow span { font-size:11px; font-weight:700; background:#fff; border:1px solid var(--border); border-radius:8px; padding:4px 10px; color:var(--text-secondary); }
+  .flow b { color:var(--sidebar-bg); }
+  footer { max-width:1040px; margin:0 auto; padding:20px 24px 40px; font-size:11px; color:var(--text-muted); }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="hero-in">
+      <h1>🚚 ロジポケ配車Agent</h1>
+      <p>物流配車管理 ＋ AI電話受付 ＋ <b>案件の増車対応（AI判定〜推薦〜自動配車〜発注/請求）</b> のプロトタイプ。</p>
+      <p>このページから各画面・モック・設計ドキュメントを確認できます。</p>
+      <div class="pill">GitHub Pages レビュー入口</div>
+      <div class="flow">
+        <span>案件受付</span><span>→ <b>AI増車判定</b></span><span>→ <b>自社車両推薦</b></span><span>→ <b>協力会社推薦</b></span><span>→ <b>運賃推薦</b></span><span>→ <b>自動配車</b></span><span>→ 発注/請求</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="sec-title">本体アプリ（実装）</div>
+    <div class="grid">
+      <a class="card" href="./index.html">
+        <div class="card-ico">🗂️</div>
+        <div class="card-title">配車管理（メイン） <span class="tag tag-app">APP</span></div>
+        <div class="card-desc">個別案件処理・配車計画表（配車割当D&D／運行スケジュール）・請求。増車判定バッジ、AI増車プラン、増車枠（協力会社）バー、発注確定までを実装。</div>
+      </a>
+      <a class="card" href="./ai-phone-reception.html">
+        <div class="card-ico">📞</div>
+        <div class="card-title">AI電話受付 <span class="tag tag-app">APP</span></div>
+        <div class="card-desc">通話内容からAIが案件情報を抽出。配車管理側の未処理キューへ連携。</div>
+      </a>
+    </div>
+
+    <div class="sec-title">増車対応UIモック（設計の意図確認用）</div>
+    <div class="grid">
+      <a class="card" href="./docs/mockups/scale-out-case-processing.html">
+        <div class="card-ico">📋</div>
+        <div class="card-title">個別案件処理（判定反映） <span class="tag tag-mock">MOCK</span></div>
+        <div class="card-desc">増車判定の4状態バッジ（必須/推奨/要交渉/要確認）と、AI増車プラン（自社＋協力会社＋利益影響）。</div>
+      </a>
+      <a class="card" href="./docs/mockups/scale-out-assign.html">
+        <div class="card-ico">🧩</div>
+        <div class="card-title">配車割当（D&D） <span class="tag tag-mock">MOCK</span></div>
+        <div class="card-desc">充足カウンタ・一括配車・AI増車ゴースト・増車枠（協力会社）トラック。</div>
+      </a>
+      <a class="card" href="./docs/mockups/scale-out-plan.html">
+        <div class="card-ico">📊</div>
+        <div class="card-title">運行スケジュール（ガント） <span class="tag tag-mock">MOCK</span></div>
+        <div class="card-desc">増車グループの束ね表示・増車要N件・利益チップ。</div>
+      </a>
+    </div>
+
+    <div class="sec-title">設計ドキュメント</div>
+    <div class="grid">
+      <a class="card" href="./docs/scale-out-judgement.md">
+        <div class="card-ico">📐</div>
+        <div class="card-title">増車判定ロジック設計 <span class="tag tag-doc">DOC</span></div>
+        <div class="card-desc">2段構え（ハード/ソフト）・抑制ガード・verdict・受け入れ基準。</div>
+      </a>
+      <a class="card" href="./docs/ideal-data-model.md">
+        <div class="card-ico">🗃️</div>
+        <div class="card-title">理想データモデル（7層） <span class="tag tag-doc">DOC</span></div>
+        <div class="card-desc">マスタ/受付/案件/運行/法令/運賃/横断の正規化設計。</div>
+      </a>
+      <a class="card" href="./docs/operation-layer-deep-dive.md">
+        <div class="card-ico">🔧</div>
+        <div class="card-title">運行層 深掘り <span class="tag tag-doc">DOC</span></div>
+        <div class="card-desc">Trip/Leg/Stop/Assignment と運行パターン別の表現。</div>
+      </a>
+    </div>
+
+    <div class="note">
+      <b>増車対応の実装範囲（本体アプリ）</b>：判定エンジン（assets/logipoke-scaleout.js）＋推薦エンジン（assets/logipoke-recommend.js）を独立モジュール化し、
+      Nodeテスト（migration/verify_scaleout.mjs / verify_recommend.mjs）で検証。
+      個別案件処理／配車割当／運行スケジュールへ反映し、増車枠バーからの発注確定・発注書PDFプレビュー/送信・請求連携、協力会社マスタの傭車レート/実績編集まで対応。<br>
+      ※ <code>.md</code> ドキュメントはブラウザではテキスト表示になります（GitHub上での閲覧推奨）。
+    </div>
+  </div>
+
+  <footer>ロジポケ配車Agent — 社内検証用プロトタイプ / GitHub Pages</footer>
+</body>
+</html>
