@@ -12933,6 +12933,23 @@ function _ssotValidateRelay(c) {
 }
 window._ssotValidateRelay = _ssotValidateRelay;
 
+// 【書込先一本化・C6第13段】中継編集(c.legs)の writer を store-first 化。
+// 編集後の c.legs を ingestCaseLegs→toCaseLegs でロスレス往復し、結果を c.legs へ in-place 反映
+// （正規化モデルが当該案件の区間構造を再構成＝store が書込先の権威）。件数不一致/失敗時は c.legs を触らず縮退。
+function _opStoreWriteCaseLegs(c) {
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined'
+      || !c || !Array.isArray(c.legs) || c.legs.length === 0 || !LogipokeDB.toCaseLegs) return false;
+  try {
+    const db = LogipokeDB.createDB();
+    LogipokeDB.ingestCaseLegs(db, c);
+    const derived = LogipokeDB.toCaseLegs(db, c.id);
+    if (derived.length !== c.legs.length) return false;     // 不一致なら触らない
+    c.legs.length = 0; derived.forEach(l => c.legs.push(l)); // 配列identity保持で in-place 反映
+    return true;
+  } catch (e) { return false; }
+}
+window._opStoreWriteCaseLegs = _opStoreWriteCaseLegs;
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  ページ・フェーズ切替
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -16965,6 +16982,7 @@ function addRelayLeg(caseIdx) {
   if (lastLeg) {
     lastLeg.relayTo = lastLeg.relayTo === c.to ? '中継地点（未設定）' : lastLeg.relayTo;
   }
+  _opStoreWriteCaseLegs(c);
   _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
@@ -16979,6 +16997,7 @@ function removeRelayLeg(caseIdx, legIdx) {
   c.legs.splice(legIdx, 1);
   // legNo を振り直し
   c.legs.forEach((l, i) => l.legNo = i + 1);
+  _opStoreWriteCaseLegs(c);
   _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
@@ -16995,6 +17014,7 @@ function updateRelayLeg(caseIdx, legIdx, field, value) {
   } else if (field === 'relayFrom' && legIdx > 0) {
     c.legs[legIdx - 1].relayTo = value;
   }
+  _opStoreWriteCaseLegs(c);
   _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
@@ -17011,6 +17031,7 @@ function setRelayLegVehicle(caseIdx, legIdx, vehicleIdx) {
   leg.driverName = v.driver;
   leg.capacity = v.cap;
   leg.lawOk = v.law ? v.law.items.every(it=>it.ok) : true;
+  _opStoreWriteCaseLegs(c);
   _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }

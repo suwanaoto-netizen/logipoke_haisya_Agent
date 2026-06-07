@@ -474,6 +474,21 @@ check('永続ストア update：driver/vehicle/時刻の差し替えが反映', 
   assert.equal(a.client, '株式会社○○商事');   // 他フィールドは保持
 });
 
+check('中継編集 store-first：1区間を編集後も ingest→toCaseLegs がロスレス（編集反映＋他保持）', () => {
+  // 区間2の出発/到着・ドライバーを変更したケースを round-trip。
+  const edited = JSON.parse(JSON.stringify(relayCase));
+  edited.legs[1].relayFrom = '愛知県名古屋市';
+  edited.legs[1].relayTo = '京都府京都市';
+  edited.legs[1].driverName = '別所 太郎';
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestCaseLegs(db, edited);
+  const out = DB.toCaseLegs(db, '20240524104');
+  assert.equal(out.length, 2);
+  assert.deepEqual(out[1], edited.legs[1]);   // 編集が反映され、拡張フィールドも保持
+  assert.deepEqual(out[0], edited.legs[0]);   // 他区間は不変
+});
+
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {
   function build() {
     DB.resetSeq();
