@@ -11960,6 +11960,13 @@ window.AI_WEIGHTS = {
   customer: 10,   // 顧客相性スコア
 };
 
+// 増車判定の調整パラメータ（設定画面と連動・docs/scale-out-judgement.md §11）。
+// LogipokeScaleOut.DEFAULT_CONFIG を基に、自社標準車格(FLEET_DEFAULT_KG)を加えて保持。
+window.SCALEOUT_CONFIG = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.DEFAULT_CONFIG)
+  ? Object.assign({ FLEET_DEFAULT_KG: 4000 }, JSON.parse(JSON.stringify(LogipokeScaleOut.DEFAULT_CONFIG)))
+  : { SCALEOUT_THRESHOLD: 70, LOAD_RATE_TIGHT: 0.95, DEADLINE_MARGIN_MIN: 30, PROFIT_FLOOR_PCT: 10,
+      FLEET_DEFAULT_KG: 4000, weights: { tight: 30, law: 20, profit: 25, customer: 15, pattern: 10 } };
+
 // 各車両が持つ"素点"（0〜100）。重み付けを変えるとスコアが変動する
 const VEHICLE_RAW_SCORES = {
   '車両1245': { distance:98, load:95, driver:100, law:95, customer:90 },
@@ -13687,13 +13694,17 @@ function getCaseScaleOut(c) {
     aiResult: c.aiResult
   };
   const deps = {
-    // 最適1台の最大積載：AI推奨車格・候補車両・割当車格の最大（最大の適合車で判定）
+    // 最適1台＝AI推奨車格 or 割当車格 or 自社標準（候補一覧の小型capは上限判定に使わない＝
+    // 「もっと大きい車を使えば1台で済む」を誤って増車必要と判定しないため。画面間でも一貫）。
     maxSingleLoadKg: function () {
-      const caps = [];
-      const av = LogipokeScaleOut.capLabelToKg(c.aiResult && c.aiResult.vehicle); if (av) caps.push(av);
-      (c.vehicles || []).forEach(function (v) { const x = LogipokeScaleOut.capLabelToKg(v.cap); if (x) caps.push(x); });
-      const vv = LogipokeScaleOut.capLabelToKg(c.vehicle); if (vv) caps.push(vv);
-      return caps.length ? Math.max.apply(null, caps) : null;
+      return LogipokeScaleOut.capLabelToKg(c.aiResult && c.aiResult.vehicle)
+          || LogipokeScaleOut.capLabelToKg(c.vehicle)
+          || (window.SCALEOUT_CONFIG && window.SCALEOUT_CONFIG.FLEET_DEFAULT_KG) || 4000;
+    },
+    // 単独運行の法令適合：候補1位の改善基準ステータスから（warn はソフト判定で加点）
+    complianceSingle: function () {
+      const st = c.vehicles && c.vehicles[0] && c.vehicles[0].law && c.vehicles[0].law.status;
+      return (st === 'ng' || st === 'violation') ? 'violation' : (st === 'warn' ? 'warn' : 'ok');
     }
   };
   try { return LogipokeScaleOut.evaluateScaleOut(order, deps, (window.SCALEOUT_CONFIG || {})); }
@@ -42001,7 +42012,10 @@ var _settingsPanelContents = {
         // ── 優先車両設定 ──
         +'<div class="settings-section-title" style="margin-top:22px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>優先車両設定</div>'
         +'<div class="settings-form-group"><label class="settings-form-label">優先車両ナンバー（カンマ区切り）</label><input class="settings-form-input" placeholder="例：品川 100 あ 1234, 品川 200 い 5678" /></div>'
-        +'<div class="settings-form-group"><label class="settings-form-label">推薦候補数（上位N台を表示）</label><select class="settings-form-select"><option>3台</option><option>5台</option><option>10台</option></select></div>';
+        +'<div class="settings-form-group"><label class="settings-form-label">推薦候補数（上位N台を表示）</label><select class="settings-form-select"><option>3台</option><option>5台</option><option>10台</option></select></div>'
+
+        // ── 増車判定（scale-out）チューニング ──
+        + buildScaleOutSettings();
     }
   },
   api: {
@@ -42022,6 +42036,48 @@ var _settingsPanelContents = {
     }
   }
 };
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  増車判定（scale-out）チューニング設定（docs/scale-out-judgement.md §11）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function buildScaleOutSettings() {
+  var cfg = window.SCALEOUT_CONFIG || {};
+  var th = cfg.SCALEOUT_THRESHOLD != null ? cfg.SCALEOUT_THRESHOLD : 70;
+  var lr = Math.round((cfg.LOAD_RATE_TIGHT != null ? cfg.LOAD_RATE_TIGHT : 0.95) * 100);
+  var pf = cfg.PROFIT_FLOOR_PCT != null ? cfg.PROFIT_FLOOR_PCT : 10;
+  function row(label, id, min, max, val, unit, key, scale) {
+    return '<div class="sp-slider-row" style="margin-bottom:12px">'
+      + '<div class="sp-slider-label" style="width:150px;font-size:12px;font-weight:600;color:#374151">' + label + '</div>'
+      + '<div style="flex:1;display:flex;align-items:center;gap:10px">'
+      + '<input type="range" class="sp-slider" min="' + min + '" max="' + max + '" value="' + val + '" style="flex:1" oninput="scaleOutConfigInput(\'' + key + '\',this.value,' + (scale || 1) + ')">'
+      + '<span id="so-cfg-' + id + '" style="min-width:44px;text-align:right;font-size:13px;font-weight:700;font-family:Inter,sans-serif;color:var(--sidebar-bg)">' + val + unit + '</span>'
+      + '</div></div>';
+  }
+  return ''
+    + '<div class="settings-section-title" style="margin-top:22px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>増車判定（scale-out）</div>'
+    + '<p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">「増車必要/推奨」を出す基準。変更すると個別案件処理・配車計画表のバッジ／件数へ即時反映されます（判定エンジン：assets/logipoke-scaleout.js）。</p>'
+    + row('💡 増車推奨スコア閾値', 'TH', 40, 95, th, '点', 'SCALEOUT_THRESHOLD', 1)
+    + row('📦 余裕薄とみなす積載率', 'LR', 70, 100, lr, '%', 'LOAD_RATE_TIGHT', 100)
+    + row('💰 採算下限（粗利率）', 'PF', 0, 30, pf, '%', 'PROFIT_FLOOR_PCT', 1)
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;line-height:1.6">'
+    + '・積載率がこの値以上 → 1台可能でも<b>増車推奨</b>。閾値を下げるほど推奨が増えます。<br>'
+    + '・採算下限を下回る増車構成は推奨しません（スポット採算ガード）。</div>';
+}
+
+// 設定変更 → window.SCALEOUT_CONFIG を更新し、関連ビューを即時再描画
+function scaleOutConfigInput(key, val, scale) {
+  val = parseFloat(val); scale = scale || 1;
+  if (!window.SCALEOUT_CONFIG) window.SCALEOUT_CONFIG = {};
+  window.SCALEOUT_CONFIG[key] = (scale === 100) ? (val / 100) : val;
+  // 値ラベル更新
+  var idMap = { SCALEOUT_THRESHOLD: ['TH', '点'], LOAD_RATE_TIGHT: ['LR', '%'], PROFIT_FLOOR_PCT: ['PF', '%'] };
+  var info = idMap[key];
+  if (info) { var el = document.getElementById('so-cfg-' + info[0]); if (el) el.textContent = val + info[1]; }
+  // 関連ビューの再描画（存在する画面のみ）
+  ['renderUnprocessedList', 'renderProcessingList', 'renderDnd', 'renderSchedule'].forEach(function (fn) {
+    try { if (typeof window[fn] === 'function') window[fn](); } catch (e) {}
+  });
+}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  設定パネル AI重み付けリアルタイム処理
