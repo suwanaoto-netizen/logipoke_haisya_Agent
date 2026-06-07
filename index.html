@@ -4034,8 +4034,29 @@ function _ssotDerive(seed, build){
   }
   /* タイムラインの確定済みブロック：境界を太く・チェックマーク付き */
   .dnd-block.is-confirmed {
-    box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.4);
+    background-image: linear-gradient(rgba(3,42,31,.30), rgba(3,42,31,.30)); /* 深いグリーンへ寄せ「仮確定済み」を強調 */
+    box-shadow: inset 0 0 0 2.5px rgba(255,255,255,.78), 0 2px 7px rgba(13,74,58,.34);
   }
+  /* タイムラインの未確定（D&D割当・仮配車）ブロック：明るめ＋破線枠で「仮」を表現 */
+  .dnd-block.is-tentative {
+    background-image: linear-gradient(rgba(255,255,255,.18), rgba(255,255,255,.18));
+    box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.42), 0 1px 3px rgba(0,0,0,.12);
+    outline: 1.5px dashed rgba(255,255,255,.85);
+    outline-offset: -4px;
+  }
+  /* 配車ブロックのステータスチップ（常に最前面・セグメントの上に出す） */
+  .dnd-block-status {
+    position:absolute; top:2px; left:3px;
+    display:inline-flex; align-items:center; gap:2px;
+    height:14px; padding:0 5px; border-radius:7px;
+    font-size:8px; font-weight:800; line-height:1; letter-spacing:.02em;
+    z-index:5; pointer-events:none; white-space:nowrap;
+  }
+  .dnd-block-status.confirmed { background:#fff; color:#0D4A3A; box-shadow:0 1px 2px rgba(0,0,0,.22); }
+  .dnd-block-status.tentative { background:rgba(255,255,255,.26); color:#fff; border:1px dashed rgba(255,255,255,.9); }
+  .dnd-block-status .so-dot { width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+  .dnd-block-status.confirmed .so-dot { background:#16a34a; }
+  .dnd-block-status.tentative .so-dot { background:rgba(255,255,255,.9); }
   /* 確定済みタブ：左パネル&タイムラインを「参照のみ」感に */
   .dnd-left.readonly-mode .dnd-left-sub {
     color: #065f46;
@@ -27368,7 +27389,13 @@ function renderDndTimeline() {
       // ゴーストはドラッグ・削除不可
       const interactiveForBlock = interactive && !isGhost;
 
-      return `<div class="dnd-block ${isNew ? 'new-arrival' : ''} ${a.confirmed ? 'is-confirmed' : ''} ${blockKaizenCls} ${relayLegCls} ${multiDayCls}"
+      // 仮配車（D&D割当・未確定）か仮確定済みかを見分けるステータスチップ（プリセット/リレー注入は対象外）
+      const isTentativeBlock = !a.confirmed && !a.isPreset && !a.locked;
+      const statusChip = a.isPreset || a.locked ? ''
+        : (a.confirmed
+            ? `<span class="dnd-block-status confirmed" title="仮確定済みの配車">✓ 確定</span>`
+            : `<span class="dnd-block-status tentative" title="未確定（ドラッグ＆ドロップで仮割当・仮確定前）"><span class="so-dot"></span>仮</span>`);
+      return `<div class="dnd-block ${isNew ? 'new-arrival' : ''} ${a.confirmed ? 'is-confirmed' : (isTentativeBlock ? 'is-tentative' : '')} ${blockKaizenCls} ${relayLegCls} ${multiDayCls}"
                    style="left:${left}%;width:${width}%;background:${a.color}"
                    ${relayLegAttr}
                    ${interactiveForBlock ? `draggable="true"
@@ -27379,6 +27406,7 @@ function renderDndTimeline() {
                    onmousemove="dndBlockTipReposition(event)"
                    onmouseleave="dndBlockTipHide()">
         ${segmentsHtml}
+        ${statusChip}
         ${leftMarker}
         <div class="dnd-block-title">${a.label}${mdm.sequenceTotal > 1 ? `<span class="dnd-block-seq">${mdm.sequenceCurrent}/${mdm.sequenceTotal}</span>` : ''}</div>
         <div class="dnd-block-sub">${a.start}〜${a.end}${a.sub ? ' · ' + a.sub : ''}</div>
