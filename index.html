@@ -622,6 +622,11 @@ function _ssotDerive(seed, build){
   .so-profit-row { display:flex; justify-content:space-between; font-size:11px; padding:2px 0; }
   .so-profit-row b { font-family:'Inter',sans-serif; }
   .so-profit-row.total { border-top:1px dashed var(--border); margin-top:4px; padding-top:6px; font-weight:800; }
+  /* 増車枠（協力会社トラック）：配車割当ボード末尾。既存オレンジ＝協力会社 */
+  .dnd-section-divider { font-size:10px; font-weight:800; color:#9a3412; background:#fff7ed; border:1px solid #fed7aa; border-radius:6px; padding:4px 10px; margin:8px 0 4px; display:inline-flex; align-items:center; gap:6px; }
+  .dnd-row-partner .dnd-driver-cell { background:#fffbeb; border-color:#fde68a; }
+  .dnd-partner-row-label { color:#c2410c !important; }
+  .dnd-block-partner-leg { background-color:#c2410c; background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.22), rgba(255,255,255,.22) 4px, transparent 4px, transparent 8px); }
 
   .btn { 
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -13888,8 +13893,12 @@ function applyScaleOutPlan(caseIdx) {
       lawOk: v && v.law ? v.law.items.every(function (it) { return it.ok; }) : true
     };
   });
-  // 協力会社分は記録（多便UIは自社専用のため、既存「協力会社へ依頼」へ誘導）
-  c.scaleOutPartnerLegs = plan.legs.filter(function (l) { return l.kind === 'partner'; });
+  // 協力会社分は記録（多便UIは自社専用のため、配車割当では「増車枠」トラックに表示）。
+  // 区間時刻は自社便の続きでスタッグ付与（配車割当ボードのバー位置に使用）。
+  c.scaleOutPartnerLegs = plan.legs.filter(function (l) { return l.kind === 'partner'; }).map(function (l, idx) {
+    const startMin = 8 * 60 + (ownLegs.length + idx) * 30;
+    return Object.assign({}, l, { startTime: mmToHHMM(startMin), endTime: mmToHHMM(startMin + durMin) });
+  });
   c.scaleOutFare = plan.fare;
 
   if (typeof renderProcessingList === 'function') renderProcessingList();
@@ -26718,6 +26727,46 @@ function renderDndTimeline() {
     }).join('');
   }
 
+  // 【増車枠（協力会社）】multi 案件の協力会社便を、末尾の「増車枠」セクションにバーで表示
+  let scaleOutPartnerRowsHtml = '';
+  if (!isConfirmedTab && typeof processingCases !== 'undefined') {
+    const soCases = processingCases.filter(c =>
+      c.vehicleMode === 'multi' && c.scaleOutPartnerLegs && c.scaleOutPartnerLegs.length > 0);
+    let pRows = '';
+    soCases.forEach(c => {
+      const clientShort = (c.client || '').length > 8 ? c.client.substring(0, 7) + '…' : c.client;
+      c.scaleOutPartnerLegs.forEach(leg => {
+        const start = leg.startTime || '09:00', end = leg.endTime || '13:00';
+        const left = timeToPercent(start), width = durationToPercent(start, end);
+        const charge = (leg.charge || 0).toLocaleString();
+        const tip = `${c.client} / 協力会社：${leg.name} / 傭車¥${charge} / ${start} - ${end}`;
+        pRows += `<div class="dnd-row dnd-row-partner">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1">
+              <span class="dnd-driver-name" title="${(leg.name || '協力会社').replace(/"/g, '&quot;')}">🤝 ${leg.name || '協力会社'}</span>
+              <span class="dnd-driver-vehicle">傭車</span>
+            </div>
+            <div class="dnd-driver-line2">
+              <span class="dnd-driver-status dnd-partner-row-label">協力会社</span>
+              <span class="dnd-driver-capacity" title="${(c.client || '').replace(/"/g, '&quot;')} 増車">${clientShort} 増車</span>
+            </div>
+          </div>
+          <div class="dnd-track dnd-track-partner">
+            ${isToday ? `<div class="dnd-now-line" style="left:${nowPct}%"></div>` : ''}
+            <div class="dnd-block dnd-block-partner-leg" style="left:${left}%;width:${width}%"
+                 title="${tip.replace(/"/g, '&quot;')}">
+              <div class="dnd-block-title">${leg.name || '協力会社'}</div>
+              <div class="dnd-block-sub">傭車¥${charge}</div>
+            </div>
+          </div>
+        </div>`;
+      });
+    });
+    if (pRows) {
+      scaleOutPartnerRowsHtml = `<div class="dnd-section-divider">⊕ 増車枠（協力会社 / 傭車）</div>` + pRows;
+    }
+  }
+
   wrap.innerHTML = `
     <div class="dnd-time-header">
       <div class="dnd-time-header-label">ドライバー / 車両</div>
@@ -26727,7 +26776,8 @@ function renderDndTimeline() {
       </div>
     </div>
     ${rowsHtml}
-    ${relayRowsHtml}`;
+    ${relayRowsHtml}
+    ${scaleOutPartnerRowsHtml}`;
 }
 
 function updateDndStats() {
