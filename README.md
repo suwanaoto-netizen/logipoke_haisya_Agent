@@ -39,9 +39,14 @@ SSoT 未接続のままでした）。
   Location / Cargo / TimeWindow と round-trip）。
 
 #### プロトタイプ本体（`index.html`）への接続状況
+- ✅ **マスタ層は全てSSoT派生済み（`_ssotDerive`）**: 拠点 `bases` / 取引先 `clientMasterData` /
+  協力会社 `partnerMasterData` / ユーザー `TEAM_MEMBERS` / 定期便 `TEIKI_SAMPLES` に加え、
+  **ドライバー `drivers` / 車両 `vehicles`** も `seedMasters → toDriversArray/toVehiclesArray` で
+  derive（往復ロスレス時は LogipokeDB 由来、失敗時は seed フォールバック＝`_ssotDerive` が JSON 一致で自己検証）。
+  検証は `verify_model.mjs`（計16件）、実ブラウザQAで drivers/vehicles 50/50・名前/プレート・全画面整合を確認。
+  ※`vehicleMasterData` は固有データを持つ独立レジストリのため物理統合はデータ判断を要する（保留）。
 - ✅ **拠点 `bases`**: 本体が `window.LogipokeDB` を読み込み、`seedMasters → toBasesArray` で
-  **derive** するよう変更（"縦串" 第1号）。読み込み失敗時は seed にフォールバックするため、
-  オフライン / 厳格 CSP でも壊れません。
+  **derive**。読み込み失敗時は seed にフォールバックするため、オフライン / 厳格 CSP でも壊れません。
 - ✅ **車両 / ドライバーの ID 互換**: `vehicles[]` に `legacyIds[]`（`V1245` / `1245` / `車両1245`
   / 紐づくドライバー `D-id`）を付与し、**あらゆる旧IDを 1 台へ解決する単一窓口
   `resolveVehicleRef()`** を追加。`vehicleMasterData` には正規車両への `_canonicalVehicleId`

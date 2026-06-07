@@ -205,6 +205,14 @@
   function toTeamMembers(db) {
     var out = []; db.users.forEach(function (u) { out.push({ id: u.id, name: u.name, color: u.color, initial: u.initial }); }); return out;
   }
+  // ドライバー / 車両：seedMasters が Object.assign で全プロパティを保持しているため、
+  // 挿入順（=seed順）に射影すれば JSON 一致のロスレス往復（_ssotDerive 用）。
+  function toDriversArray(db) {
+    var out = []; db.drivers.forEach(function (d) { out.push(Object.assign({}, d)); }); return out;
+  }
+  function toVehiclesArray(db) {
+    var out = []; db.vehicles.forEach(function (v) { out.push(Object.assign({}, v)); }); return out;
+  }
   function toTeikiSamples(db) {
     var out = [];
     db.recurringRoutes.forEach(function (r) {
@@ -694,6 +702,7 @@
     // ① masters
     seedMasters: seedMasters, toClientMaster: toClientMaster, toPartnerMaster: toPartnerMaster,
     toBasesArray: toBasesArray, toTeamMembers: toTeamMembers, toTeikiSamples: toTeikiSamples,
+    toDriversArray: toDriversArray, toVehiclesArray: toVehiclesArray,
     // ② reception
     createReception: createReception, receptionToLegacyIntake: receptionToLegacyIntake,
     RECEPTION_KEY: RECEPTION_KEY, saveReceptions: saveReceptions, loadReceptions: loadReceptions,

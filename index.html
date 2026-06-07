@@ -19702,7 +19702,7 @@ function getBaseDistance(fromBaseId, toBaseId) {
 // ドライバーマスタ：車両を持たない
 // 論点3：協力会社ドライバーは baseId:null（拠点なし）
 // 論点P：通常ドライバーは単一拠点。複数拠点運用は車両側で表現
-const drivers = (function(){
+const _driversSeed = (function(){
   const NAMES = [
     '山田 一郎','鈴木 次郎','佐藤 三郎','田中 四郎','高橋 五郎','渡辺 六郎','伊藤 七郎','中村 八郎','小林 九郎','松本 十郎',
     '加藤 十一','吉田 十二','山本 十三','井上 十四','木村 十五','斉藤 十六','清水 十七','林  十八','山口 十九','森  二十',
@@ -19739,11 +19739,16 @@ const drivers = (function(){
     return obj;
   });
 })();
+// 【マスタ接続・C6後続】ドライバーマスタも SSoT 派生（client/partner/teiki/team と同様）。
+// 往復ロスレスなら LogipokeDB 由来、失敗時は seed フォールバック（_ssotDerive が JSON 一致検証）。
+const drivers = _ssotDerive(_driversSeed, function (DB) {
+  var db = DB.createDB(); DB.seedMasters(db, { drivers: _driversSeed }); return DB.toDriversArray(db);
+});
 
 // 車両マスタ：ドライバーを持たない
 // 論点P：車両は複数拠点に所属できる（baseIds:[]）。主拠点は baseId として保持
 // 論点3：自社車両のみ。協力会社の車両は管理外
-const vehicles = (function(){
+const _vehiclesSeed = (function(){
   const TYPES = [
     {type:'平ボディ', cap:[2,4,10]}, {type:'ウィング', cap:[4,10]},
     {type:'冷蔵',     cap:[2,4]},    {type:'冷凍',     cap:[2,4]},
@@ -19787,6 +19792,10 @@ const vehicles = (function(){
     };
   });
 })();
+// 車両マスタも SSoT 派生（往復ロスレスなら LogipokeDB 由来、失敗時は seed フォールバック）。
+const vehicles = _ssotDerive(_vehiclesSeed, function (DB) {
+  var db = DB.createDB(); DB.seedMasters(db, { vehicles: _vehiclesSeed }); return DB.toVehiclesArray(db);
+});
 
 // マスタ参照ヘルパー（O(1)アクセス用のインデックス）
 const _driverById = Object.fromEntries(drivers.map(d => [d.id, d]));
