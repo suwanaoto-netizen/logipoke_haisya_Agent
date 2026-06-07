@@ -12005,9 +12005,10 @@ window.AI_WEIGHTS = {
 // 増車判定の調整パラメータ（設定画面と連動・docs/scale-out-judgement.md §11）。
 // LogipokeScaleOut.DEFAULT_CONFIG を基に、自社標準車格(FLEET_DEFAULT_KG)を加えて保持。
 window.SCALEOUT_CONFIG = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.DEFAULT_CONFIG)
-  ? Object.assign({ FLEET_DEFAULT_KG: 4000 }, JSON.parse(JSON.stringify(LogipokeScaleOut.DEFAULT_CONFIG)))
+  ? Object.assign({ FLEET_DEFAULT_KG: 4000, KAIZEN_DAILY_DRIVE_MIN: 540, AVG_SPEED_KMH: 55 }, JSON.parse(JSON.stringify(LogipokeScaleOut.DEFAULT_CONFIG)))
   : { SCALEOUT_THRESHOLD: 70, LOAD_RATE_TIGHT: 0.95, DEADLINE_MARGIN_MIN: 30, PROFIT_FLOOR_PCT: 10,
-      FLEET_DEFAULT_KG: 4000, weights: { tight: 30, law: 20, profit: 25, customer: 15, pattern: 10 } };
+      FLEET_DEFAULT_KG: 4000, KAIZEN_DAILY_DRIVE_MIN: 540, AVG_SPEED_KMH: 55,
+      weights: { tight: 30, law: 20, profit: 25, customer: 15, pattern: 10 } };
 
 // 各車両が持つ"素点"（0〜100）。重み付けを変えるとスコアが変動する
 const VEHICLE_RAW_SCORES = {
@@ -13735,18 +13736,40 @@ function getCaseScaleOut(c) {
     vehicles: c.vehicles, casePattern: c.casePattern, priority: c.priority,
     aiResult: c.aiResult
   };
+  // ── 実データの解決（距離・運転時間・最適1台積載）──
+  const _cfg = window.SCALEOUT_CONFIG || {};
+  const dailyCap = _cfg.KAIZEN_DAILY_DRIVE_MIN || 540;   // 改善基準: 1日運転上限(分)
+  const avgSpeed = _cfg.AVG_SPEED_KMH || 55;
+  const distanceKm = parseInt(String(c.distance || '').replace(/[^\d]/g, ''), 10)
+    || (typeof estimateDistance === 'function' ? estimateDistance(c.from || '', c.to || '') : 0);
+  const driveMin = distanceKm ? Math.round(distanceKm / avgSpeed * 60) : 0;
+  const maxKgVal = LogipokeScaleOut.capLabelToKg(c.aiResult && c.aiResult.vehicle)
+    || LogipokeScaleOut.capLabelToKg(c.vehicle)
+    || _cfg.FLEET_DEFAULT_KG || 4000;
+  const strict = LogipokeScaleOut.isStrictDeadline(c.deadline);
+
   const deps = {
     // 最適1台＝AI推奨車格 or 割当車格 or 自社標準（候補一覧の小型capは上限判定に使わない＝
     // 「もっと大きい車を使えば1台で済む」を誤って増車必要と判定しないため。画面間でも一貫）。
-    maxSingleLoadKg: function () {
-      return LogipokeScaleOut.capLabelToKg(c.aiResult && c.aiResult.vehicle)
-          || LogipokeScaleOut.capLabelToKg(c.vehicle)
-          || (window.SCALEOUT_CONFIG && window.SCALEOUT_CONFIG.FLEET_DEFAULT_KG) || 4000;
-    },
+    maxSingleLoadKg: function () { return maxKgVal; },
     // 単独運行の法令適合：候補1位の改善基準ステータスから（warn はソフト判定で加点）
     complianceSingle: function () {
       const st = c.vehicles && c.vehicles[0] && c.vehicles[0].law && c.vehicles[0].law.status;
       return (st === 'ng' || st === 'violation') ? 'violation' : (st === 'warn' ? 'warn' : 'ok');
+    },
+    // 時間超過(H3)：時間厳守 × 1日運転上限超の長距離 → 1台では当日完遂不可 → 中継必須
+    timeDeficitMin: function () {
+      return (strict && driveMin > dailyCap) ? (driveMin - dailyCap) : 0;
+    },
+    // 納期マージン(S1)：1日運転上限の残余(分)。残り少＝余裕薄 → 増車推奨
+    deadlineMarginMin: function () {
+      return strict ? Math.max(0, dailyCap - driveMin) : null;
+    },
+    // 採算(G3)：受注運賃が既知のときのみ、増車(2台)構成の粗利率を返す（スポット採算ガード）
+    profitPctIfScaledOut: function () {
+      if (typeof LogipokeRecommend === 'undefined' || !c.sales || c.sales <= 0) return null;
+      const cost2 = 2 * LogipokeRecommend.estimateLegCost(distanceKm, LogipokeRecommend.paramsForCapKg(maxKgVal)).total;
+      return Math.round((c.sales - cost2) / c.sales * 100);
     }
   };
   try { return LogipokeScaleOut.evaluateScaleOut(order, deps, (window.SCALEOUT_CONFIG || {})); }
