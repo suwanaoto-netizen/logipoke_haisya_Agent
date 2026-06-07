@@ -17713,9 +17713,15 @@ function confirmDispatch() {
 
   if (isMulti) {
     // 複数台: Leg別に処理済み案件を生成
+    // 増車プラン由来の運賃があれば按分（受注/自社原価を便数で配分）、無ければ従来値
+    const _sof = c.scaleOutFare || null;
+    const _partnerLegs = c.scaleOutPartnerLegs || [];
+    const _totalLegs = c.legs.length + _partnerLegs.length;
+    const _salesPerLeg = _sof ? Math.round(_sof.sales / _totalLegs) : Math.round(45000 / c.legs.length);
+    const _ownCostPerLeg = _sof ? Math.round(_sof.ownCost / Math.max(1, c.legs.length)) : Math.round(16000 / c.legs.length);
     c.legs.forEach((leg, li) => {
-      const legSales  = Math.round(45000 / c.legs.length);
-      const legFuel   = Math.round(16000 / c.legs.length);
+      const legSales  = _salesPerLeg;
+      const legFuel   = _ownCostPerLeg;
       const legProfit = legSales - legFuel;
       // 車両マスタからプレート・スペックを引く
       const rawId = leg.vehicleName || leg.vehicleId || '';
@@ -17742,6 +17748,42 @@ function confirmDispatch() {
         progress:50, truckTop:50, progressPct:50, remain:'—', eta:'—', donekm:0
       });
     });
+
+    // 協力会社便（増車枠）→ 発注書（PO）＋請求を生成
+    const _payDue = formatDateSlash(new Date(now.getTime() + 30 * 86400000));
+    _partnerLegs.forEach((leg, pi) => {
+      const charge = leg.charge || 0;
+      const legSales = _salesPerLeg;
+      const legProfit = legSales - charge;       // 傭車支払が原価＝粗利を圧縮
+      const seqNo = c.legs.length + pi + 1;
+      const poNo = 'PO-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random() * 90000) + 10000);
+      processedCases.unshift({
+        id: c.id + '-P' + (pi + 1), status: '完了', casePattern: c.casePattern || null,
+        partner: true, partnerName: leg.name || '協力会社',
+        client: c.client, from: c.from, to: c.to, goods: c.goods,
+        completion: now.toLocaleDateString('ja-JP') + ' 完了（増車・協力会社）',
+        distance: c.distance, delay: 'なし',
+        driver: '（協力会社手配）', vehicle: leg.name || '傭車',
+        legNo: seqNo, totalLegs: _totalLegs, multiCase: true, parentId: c.id,
+        legRole: 'partner', legReason: 'AI増車プラン（傭車）',
+        sales: legSales, fuel: 0, other: charge, profit: legProfit,
+        margin: legSales ? Math.round(legProfit / legSales * 100) : 0,
+        invoiceNo: invBase + '-P' + (pi + 1),
+        invoiceDate: formatDateSlash(now), due: _payDue, paid: false,
+        // ── 発注書（下請法対応）──
+        purchaseOrderNo: poNo, purchaseOrderTotal: charge,
+        purchaseOrderIssuedAt: now.toLocaleString('ja-JP'),
+        purchaseOrderMethod: '銀行振込（月末締め翌月末払い）',
+        purchaseOrderRoute: c.from + ' → ' + c.to,
+        purchaseOrderGoods: c.goods,
+        purchaseOrderReceipt: c.to + 'にて荷受け担当者へ',
+        purchaseOrderPayDue: _payDue,
+        progress: 50, truckTop: 50, progressPct: 50, remain: '—', eta: '—', donekm: 0
+      });
+    });
+    if (_partnerLegs.length) {
+      showToast('協力会社 ' + _partnerLegs.length + '社へ発注書（PO）を発行し、請求に連携しました', 'success');
+    }
   } else {
     // 1台: 従来ロジック
     processedCases.unshift({
