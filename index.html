@@ -10,6 +10,11 @@
 <!-- 理想7層データモデル（SSoT）。ローカル同梱なのでオフラインでも読み込める。
      本体マスタの一部（拠点 bases）はこの window.LogipokeDB から derive する（C1: 縦串） -->
 <script src="assets/logipoke-data-model.js"></script>
+<!-- 増車（scale-out）判定エンジン。docs/scale-out-judgement.md / assets/logipoke-scaleout.js。
+     window.LogipokeScaleOut.evaluateScaleOut(order, deps, config) を提供（純ロジック・決定的）。 -->
+<script src="assets/logipoke-scaleout.js"></script>
+<!-- 増車推薦エンジン（自社車両/協力会社/運賃/プラン合成）。assets/logipoke-recommend.js。 -->
+<script src="assets/logipoke-recommend.js"></script>
 <script>
 /* SSoT由来 derive 共通ヘルパー: derive結果が seed と lossless(JSON一致)なら採用、違えば seed にフォールバック。
    本体は常に正しいデータ（最悪 seed）を使い、lossless 性は migration/verify_model.mjs が判定する。 */
@@ -591,6 +596,42 @@ function _ssotDerive(seed, build){
   .case-meta { display: flex; gap: 8px; flex-wrap: wrap; }
   .case-meta-item { font-size: 10px; color: var(--text-muted); display: flex; align-items: center; gap: 3px; }
   .case-actions-mini { display: flex; gap: 6px; margin-top: 8px; }
+
+  /* ━━ 増車（scale-out）判定バッジ：グリーン基調・既存トークンのみ（docs/scale-out-judgement.md §9.2） ━━ */
+  .scaleout-badge { display:inline-flex; align-items:center; gap:5px; margin-top:7px; font-size:10px; font-weight:800; padding:3px 9px; border-radius:6px; }
+  .scaleout-badge .dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .so-required    { color:#9a3412; background:#fff7ed; border:1px solid #fed7aa; } .so-required .dot { background:#f97316; }   /* 要対応＝既存オレンジ */
+  .so-recommended { color:#0D4A3A; background:#EAF5F0; border:1px solid #b6e6d3; } .so-recommended .dot { background:#3BB888; } /* 推奨＝グリーン */
+  .so-negotiate   { color:#92400e; background:#fffbeb; border:1px solid #fde68a; } .so-negotiate .dot { background:#d97706; }  /* 要交渉＝アンバー */
+  .so-review      { color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; } .so-review .dot { background:#94a3b8; }    /* 要確認＝グレー */
+  /* 増車コメント（PR5・詳細パネル）。色は verdict トーン（so-* の背景/枠/文字）を流用 */
+  .scaleout-rationale { display:flex; align-items:flex-start; gap:7px; padding:9px 12px; border-radius:8px; font-size:11.5px; font-weight:600; line-height:1.55; border:1px solid var(--border); }
+  .scaleout-rationale.so-required    { color:#9a3412; background:#fff7ed; border-color:#fed7aa; }
+  .scaleout-rationale.so-recommended { color:#0D4A3A; background:#EAF5F0; border-color:#b6e6d3; }
+  .scaleout-rationale.so-negotiate   { color:#92400e; background:#fffbeb; border-color:#fde68a; }
+  .scaleout-rationale.so-review      { color:#475569; background:#f1f5f9; border-color:#cbd5e1; }
+  .so-rationale-ico { flex-shrink:0; }
+  /* 増車プランカード（PR7・自社＋協力会社＋利益影響）。グリーン基調／協力会社＝既存オレンジ */
+  .so-leg { display:flex; align-items:center; gap:8px; padding:6px 9px; border:1px solid var(--border); border-radius:7px; margin-bottom:5px; font-size:11px; background:#fff; }
+  .so-leg.own { border-color:#b6e6d3; } .so-leg.partner { border-color:#fde68a; background:#fffbeb; }
+  .so-leg-tag { width:18px; height:18px; border-radius:4px; background:#0D4A3A; color:#fff; font-size:10px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .so-leg.partner .so-leg-tag { background:#c2410c; }
+  .so-leg-name { font-weight:700; color:var(--text-primary); }
+  .so-leg-meta { margin-left:auto; font-size:9.5px; color:var(--text-secondary); font-weight:600; }
+  .so-profit { margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
+  .so-profit-row { display:flex; justify-content:space-between; font-size:11px; padding:2px 0; }
+  .so-profit-row b { font-family:'Inter',sans-serif; }
+  .so-profit-row.total { border-top:1px dashed var(--border); margin-top:4px; padding-top:6px; font-weight:800; }
+  /* 増車枠（協力会社トラック）：配車割当ボード末尾。既存オレンジ＝協力会社 */
+  .dnd-section-divider { font-size:10px; font-weight:800; color:#9a3412; background:#fff7ed; border:1px solid #fed7aa; border-radius:6px; padding:4px 10px; margin:8px 0 4px; display:inline-flex; align-items:center; gap:6px; }
+  .dnd-row-partner .dnd-driver-cell { background:#fffbeb; border-color:#fde68a; }
+  .dnd-partner-row-label { color:#c2410c !important; }
+  .dnd-block-partner-leg { background-color:#c2410c; background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.22), rgba(255,255,255,.22) 4px, transparent 4px, transparent 8px); cursor:pointer; }
+  .dnd-block-partner-leg.po-done { background-image:none; box-shadow:inset 0 0 0 2px rgba(255,255,255,.55); }
+  /* 増車枠バー上の「発注確定」ボタン（右上） */
+  .dnd-po-btn { position:absolute; top:2px; right:2px; z-index:4; font-size:8.5px; font-weight:800; line-height:1; padding:2px 6px; border-radius:4px; border:none; cursor:pointer; background:#fff; color:#c2410c; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+  .dnd-po-btn:hover { background:#fff7ed; }
+  .dnd-block-partner-leg.po-done .dnd-po-btn { background:#16a34a; color:#fff; }
 
   .btn { 
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -2893,6 +2934,10 @@ function _ssotDerive(seed, build){
   .sched-sum-stat.done .sched-sum-stat-num    { color:#3BB888; }
   .sched-sum-stat.alert .sched-sum-stat-num   { color:var(--red); }
   .sched-sum-spacer { flex:1; }
+  /* 増車要カウンタ（要対応＝既存オレンジ。docs/scale-out-judgement.md §9.3） */
+  .sched-sum-stat.scaleout { background:#fff7ed; border:1px solid #fed7aa; border-radius:14px; padding:2px 10px; }
+  .sched-sum-stat.scaleout .sched-sum-stat-num { color:#ea580c; }
+  .sched-sum-stat.scaleout .lbl { color:#9a3412; font-weight:700; }
   .sched-sum-legend {
     display:flex; align-items:center; gap:10px;
     font-size:10px; color:var(--text-muted);
@@ -9292,12 +9337,24 @@ function _ssotDerive(seed, build){
 
     // 協力会社
     const _partnerMasterSeed = [
-      { id:'PT-001', name:'北関東物流株式会社', area:'埼玉県熊谷市', contact:'安藤 清志', tel:'048-222-3333', email:'ando@kitatrans.co.jp', vehicleTypes:['4tウィング','2tトラック'], cases:['20240524100','20240521110'] },
-      { id:'PT-002', name:'東海急送株式会社', area:'静岡県浜松市', contact:'伊勢 誠一', tel:'053-444-5555', email:'ise@tokakyuso.co.jp', vehicleTypes:['10tトラック','4tウィング'], cases:['20240519055','20240515010'] },
-      { id:'PT-003', name:'九州ネット輸送株式会社', area:'福岡県北九州市', contact:'岡部 雄介', tel:'093-666-7777', email:'okabe@kyunet.co.jp', vehicleTypes:['4tウィング','冷蔵車'], cases:['20240524105'] },
-      { id:'PT-004', name:'中央フレート株式会社', area:'東京都江戸川区', contact:'桐島 和也', tel:'03-8888-9999', email:'kirishima@chuo-freight.co.jp', vehicleTypes:['軽バン','2tトラック'], cases:['20240522120','20240520080'] },
-      { id:'PT-005', name:'北海道運輸株式会社', area:'北海道札幌市', contact:'本間 浩二', tel:'011-000-1111', email:'honma@hokkaido-unyu.co.jp', vehicleTypes:['10tトラック','冷蔵車'], cases:['20240521095'] },
-      { id:'PT-006', name:'関西エクスプレス株式会社', area:'大阪府堺市', contact:'丸山 隆司', tel:'072-222-3333', email:'maruyama@kansai-ex.co.jp', vehicleTypes:['4tウィング','チャーター'], cases:['20240513002'] },
+      { id:'PT-001', name:'北関東物流株式会社', area:'埼玉県熊谷市', contact:'安藤 清志', tel:'048-222-3333', email:'ando@kitatrans.co.jp', vehicleTypes:['4tウィング','2tトラック'], cases:['20240524100','20240521110'],
+        partnerRates:[{vehicleType:'4tウィング',baseCharge:22000,perKm:130},{vehicleType:'2tトラック',baseCharge:15000,perKm:95}],
+        performance:{onTimeRate:0.98, qualityScore:90, avgCostRatio:0.95, jobCount:62} },
+      { id:'PT-002', name:'東海急送株式会社', area:'静岡県浜松市', contact:'伊勢 誠一', tel:'053-444-5555', email:'ise@tokakyuso.co.jp', vehicleTypes:['10tトラック','4tウィング'], cases:['20240519055','20240515010'],
+        partnerRates:[{vehicleType:'10tトラック',baseCharge:35000,perKm:220},{vehicleType:'4tウィング',baseCharge:24000,perKm:140}],
+        performance:{onTimeRate:0.95, qualityScore:84, avgCostRatio:1.02, jobCount:38} },
+      { id:'PT-003', name:'九州ネット輸送株式会社', area:'福岡県北九州市', contact:'岡部 雄介', tel:'093-666-7777', email:'okabe@kyunet.co.jp', vehicleTypes:['4tウィング','冷蔵車'], cases:['20240524105'],
+        partnerRates:[{vehicleType:'4tウィング',baseCharge:25000,perKm:150},{vehicleType:'冷蔵車',baseCharge:30000,perKm:180}],
+        performance:{onTimeRate:0.96, qualityScore:88, avgCostRatio:0.98, jobCount:27} },
+      { id:'PT-004', name:'中央フレート株式会社', area:'東京都江戸川区', contact:'桐島 和也', tel:'03-8888-9999', email:'kirishima@chuo-freight.co.jp', vehicleTypes:['軽バン','2tトラック'], cases:['20240522120','20240520080'],
+        partnerRates:[{vehicleType:'軽バン',baseCharge:8000,perKm:70},{vehicleType:'2tトラック',baseCharge:14000,perKm:90}],
+        performance:{onTimeRate:0.92, qualityScore:78, avgCostRatio:1.05, jobCount:51} },
+      { id:'PT-005', name:'北海道運輸株式会社', area:'北海道札幌市', contact:'本間 浩二', tel:'011-000-1111', email:'honma@hokkaido-unyu.co.jp', vehicleTypes:['10tトラック','冷蔵車'], cases:['20240521095'],
+        partnerRates:[{vehicleType:'10tトラック',baseCharge:38000,perKm:210},{vehicleType:'冷蔵車',baseCharge:33000,perKm:190}],
+        performance:{onTimeRate:0.90, qualityScore:80, avgCostRatio:1.00, jobCount:22} },
+      { id:'PT-006', name:'関西エクスプレス株式会社', area:'大阪府堺市', contact:'丸山 隆司', tel:'072-222-3333', email:'maruyama@kansai-ex.co.jp', vehicleTypes:['4tウィング','チャーター'], cases:['20240513002'],
+        partnerRates:[{vehicleType:'4tウィング',baseCharge:26000,perKm:160},{vehicleType:'チャーター',baseCharge:40000,perKm:230}],
+        performance:{onTimeRate:0.97, qualityScore:86, avgCostRatio:0.97, jobCount:33} },
     ];
     // (a) 協力会社マスタを SSoT から derive（不一致時は seed にフォールバック）
     const partnerMasterData = _ssotDerive(_partnerMasterSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { partners: _partnerMasterSeed }); return DB.toPartnerMaster(db); });
@@ -9583,6 +9640,22 @@ function _ssotDerive(seed, build){
           '<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;padding:4px 0">'
           +'<input type="checkbox" value="'+v+'" '+(c.vehicleTypes.includes(v)?'checked':'')+' style="accent-color:#1e40af;width:14px;height:14px"> '+v+'</label>'
         ).join('');
+        // 傭車レート（車格別）入力行
+        const rateRows = (c.vehicleTypes||[]).map(function(t){
+          const r = (c.partnerRates||[]).find(x=>x.vehicleType===t) || {};
+          return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px" data-rate-type="'+t+'">'
+            +'<span style="width:100px;font-size:11px;font-weight:600;flex-shrink:0">'+t+'</span>'
+            +'<input class="form-input pt-rate-base" type="number" placeholder="基本料金" value="'+(r.baseCharge!=null?r.baseCharge:'')+'" style="width:110px">'
+            +'<span style="font-size:10px;color:var(--text-muted)">円 ＋</span>'
+            +'<input class="form-input pt-rate-km" type="number" placeholder="km単価" value="'+(r.perKm!=null?r.perKm:'')+'" style="width:80px">'
+            +'<span style="font-size:10px;color:var(--text-muted)">円/km</span>'
+          +'</div>';
+        }).join('') || '<div style="font-size:11px;color:var(--text-muted)">対応車格を選択して保存すると入力欄が出ます</div>';
+        const _pf = c.performance || {};
+        const pOt = _pf.onTimeRate!=null ? Math.round(_pf.onTimeRate*100) : '';
+        const pQl = _pf.qualityScore!=null ? _pf.qualityScore : '';
+        const pCr = _pf.avgCostRatio!=null ? _pf.avgCostRatio : '';
+        const pJc = _pf.jobCount!=null ? _pf.jobCount : '';
         el.innerHTML = '<div class="detail-card" style="margin-bottom:16px">'
           +'<div class="detail-card-header" style="background:#1e3a8a;padding:14px 16px;border-radius:0">'
             +'<div style="width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,0.15);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;flex-shrink:0">'+initials+'</div>'
@@ -9606,6 +9679,13 @@ function _ssotDerive(seed, build){
             +'<div class="form-row full"><div class="form-group"><label class="form-label">メールアドレス</label><input class="form-input" id="edit-pt-email" value="'+c.email+'"></div></div>'
             +'<div class="form-row full"><div class="form-group"><label class="form-label">対応車格</label>'
             +'<div id="edit-pt-vtypes" style="display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:6px">'+vtChecks+'</div></div></div>'
+            +'<div class="form-row full"><div class="form-group"><label class="form-label">傭車レート（車格別）</label>'
+            +'<div id="edit-pt-rates" style="margin-top:6px">'+rateRows+'</div>'
+            +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">傭車見積＝基本料金＋km単価×距離。未入力の車格は原価から自動推定されます。</div></div></div>'
+            +'<div class="form-row"><div class="form-group"><label class="form-label">定時遵守率（%）</label><input class="form-input" type="number" id="edit-pt-ontime" value="'+pOt+'" placeholder="例:98"></div>'
+            +'<div class="form-group"><label class="form-label">品質スコア（0-100）</label><input class="form-input" type="number" id="edit-pt-quality" value="'+pQl+'" placeholder="例:90"></div></div>'
+            +'<div class="form-row"><div class="form-group"><label class="form-label">原価比（自社=1.0）</label><input class="form-input" type="number" step="0.01" id="edit-pt-costratio" value="'+pCr+'" placeholder="例:0.95"></div>'
+            +'<div class="form-group"><label class="form-label">実績件数</label><input class="form-input" type="number" id="edit-pt-jobcount" value="'+pJc+'" placeholder="例:62"></div></div>'
           +'</div>'
         +'</div>'
         +'<div class="detail-card">'
@@ -9635,6 +9715,16 @@ function _ssotDerive(seed, build){
             +'</div>'
             +'<div style="margin-top:12px"><div class="info-label" style="margin-bottom:6px">対応車格</div>'
             +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+c.vehicleTypes.map(v=>'<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe">'+v+'</span>').join('')+'</div></div>'
+            +((c.partnerRates&&c.partnerRates.length)?'<div style="margin-top:12px"><div class="info-label" style="margin-bottom:6px">傭車レート</div>'
+              +c.partnerRates.map(function(r){return '<div style="font-size:12px;color:var(--text-secondary)">'+r.vehicleType+'：¥'+(r.baseCharge||0).toLocaleString()+' ＋ '+(r.perKm||0)+'円/km</div>';}).join('')
+              +'</div>':'')
+            +(c.performance?'<div style="margin-top:12px"><div class="info-label" style="margin-bottom:6px">実績（推薦スコアに反映）</div>'
+              +'<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)">'
+              +'<span>定時遵守 '+(c.performance.onTimeRate!=null?Math.round(c.performance.onTimeRate*100)+'%':'—')+'</span>'
+              +'<span>品質 '+(c.performance.qualityScore!=null?c.performance.qualityScore:'—')+'</span>'
+              +'<span>原価比 '+(c.performance.avgCostRatio!=null?c.performance.avgCostRatio:'—')+'</span>'
+              +'<span>実績 '+(c.performance.jobCount!=null?c.performance.jobCount+'件':'—')+'</span>'
+              +'</div></div>':'')
           +'</div>'
         +'</div>'
         +'<div class="detail-card">'
@@ -9657,6 +9747,32 @@ function _ssotDerive(seed, build){
       const checked = document.querySelectorAll('#edit-pt-vtypes input[type=checkbox]:checked');
       c.vehicleTypes = Array.from(checked).map(cb=>cb.value);
       if(!c.vehicleTypes.length) c.vehicleTypes = ['未設定'];
+      // 傭車レート（車格別。解除された車格は除外、未入力車格はスキップ＝自動推定に委ねる）
+      const rateRows = document.querySelectorAll('#edit-pt-rates [data-rate-type]');
+      const rates = [];
+      rateRows.forEach(function(row){
+        const t = row.getAttribute('data-rate-type');
+        if(c.vehicleTypes.indexOf(t)<0) return;
+        const base = parseInt(row.querySelector('.pt-rate-base')?.value,10);
+        const km   = parseInt(row.querySelector('.pt-rate-km')?.value,10);
+        if(!isNaN(base)||!isNaN(km)) rates.push({vehicleType:t, baseCharge:isNaN(base)?0:base, perKm:isNaN(km)?0:km});
+      });
+      c.partnerRates = rates.length ? rates : undefined;
+      // 実績（performance）
+      const ot=parseFloat(document.getElementById('edit-pt-ontime')?.value);
+      const ql=parseInt(document.getElementById('edit-pt-quality')?.value,10);
+      const cr=parseFloat(document.getElementById('edit-pt-costratio')?.value);
+      const jc=parseInt(document.getElementById('edit-pt-jobcount')?.value,10);
+      if(!isNaN(ot)||!isNaN(ql)||!isNaN(cr)||!isNaN(jc)){
+        c.performance = {
+          onTimeRate:  isNaN(ot)?undefined:ot/100,
+          qualityScore:isNaN(ql)?undefined:ql,
+          avgCostRatio:isNaN(cr)?undefined:cr,
+          jobCount:    isNaN(jc)?undefined:jc
+        };
+      } else {
+        c.performance = undefined;
+      }
       renderCustPartnerList((document.getElementById('cust-search')?.value||'').toLowerCase());
       renderPartnerDetail(id);
       showToast('保存しました','success');
@@ -11945,6 +12061,14 @@ window.AI_WEIGHTS = {
   customer: 10,   // 顧客相性スコア
 };
 
+// 増車判定の調整パラメータ（設定画面と連動・docs/scale-out-judgement.md §11）。
+// LogipokeScaleOut.DEFAULT_CONFIG を基に、自社標準車格(FLEET_DEFAULT_KG)を加えて保持。
+window.SCALEOUT_CONFIG = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.DEFAULT_CONFIG)
+  ? Object.assign({ FLEET_DEFAULT_KG: 4000, KAIZEN_DAILY_DRIVE_MIN: 540, AVG_SPEED_KMH: 55 }, JSON.parse(JSON.stringify(LogipokeScaleOut.DEFAULT_CONFIG)))
+  : { SCALEOUT_THRESHOLD: 70, LOAD_RATE_TIGHT: 0.95, DEADLINE_MARGIN_MIN: 30, PROFIT_FLOOR_PCT: 10,
+      FLEET_DEFAULT_KG: 4000, KAIZEN_DAILY_DRIVE_MIN: 540, AVG_SPEED_KMH: 55,
+      weights: { tight: 30, law: 20, profit: 25, customer: 15, pattern: 10 } };
+
 // 各車両が持つ"素点"（0〜100）。重み付けを変えるとスコアが変動する
 const VEHICLE_RAW_SCORES = {
   '車両1245': { distance:98, load:95, driver:100, law:95, customer:90 },
@@ -12249,7 +12373,7 @@ const unprocessedCases = [
     casePattern: '特殊条件案件',
     vehicles:[ {rank:1,id:'車両0887',driver:'田中 四郎',base:'船橋市',avail:'空車',cap:'1,000kg',stars:4,score:78} ]
   },
-  { id:'20240524003', status:'未解析', client:'株式会社□□製作所', from:'茨城県つくば市', to:'愛知県名古屋市', goods:'機械部品 / 1200kg / 常温', deadline:'05/25 終日', ch:'tel', time:'09:42', analyzed:false,
+  { id:'20240524003', status:'未解析', client:'株式会社□□製作所', from:'茨城県つくば市', to:'愛知県名古屋市', goods:'機械部品 / 7,200kg / 常温', deadline:'05/25 終日', ch:'tel', time:'09:42', analyzed:false,
     casePattern: 'チャーター案件',
     vehicles:[]
   },
@@ -12418,7 +12542,7 @@ const processingCases = [
        ]}},
     ]
   },
-  { id:'20240524105', status:'処理中', priority:'通常', casePattern:'特殊条件案件', client:'九州青果株式会社', from:'福岡県福岡市', to:'東京都中央区', goods:'青果物 / 1,200kg / 冷蔵', deadline:'05/25 夕方', vehicle:'未割当', driver:'未割当', distance:'1,100km', selectedVehicleIdx:0,
+  { id:'20240524105', status:'処理中', priority:'通常', casePattern:'特殊条件案件', client:'九州青果株式会社', from:'福岡県福岡市', to:'東京都中央区', goods:'青果物 / 7,000kg / 冷蔵', deadline:'05/25 夕方', vehicle:'未割当', driver:'未割当', distance:'1,100km', selectedVehicleIdx:0,
     vehicleMode:'single', legs:[], multiReasons:[],
     vehicles:[
       {rank:1,id:'車両3301',driver:'山本 十三',base:'福岡市',avail:'空車',cap:'2,000kg',stars:5,score:89,
@@ -13658,6 +13782,288 @@ function setChFilter(ch) {
   renderUnprocessedList();
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  増車（scale-out）判定アダプタ ― 既存case → 判定エンジン
+//  PR2: 個別案件処理カードに verdict バッジを反映（最小の縦串）。
+//  本体データの薄い項目（時間超過/採算/空き）はこのPRでは未注入＝安全側。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function getCaseScaleOut(c) {
+  if (!c || typeof LogipokeScaleOut === 'undefined') return { verdict: 'none', reasons: [] };
+  const order = {
+    goods: c.goods, deadline: c.deadline,
+    vehicle: c.vehicle || (c.aiResult && c.aiResult.vehicle),
+    vehicles: c.vehicles, casePattern: c.casePattern, priority: c.priority,
+    aiResult: c.aiResult
+  };
+  // ── 実データの解決（距離・運転時間・最適1台積載）──
+  const _cfg = window.SCALEOUT_CONFIG || {};
+  const dailyCap = _cfg.KAIZEN_DAILY_DRIVE_MIN || 540;   // 改善基準: 1日運転上限(分)
+  const avgSpeed = _cfg.AVG_SPEED_KMH || 55;
+  const distanceKm = parseInt(String(c.distance || '').replace(/[^\d]/g, ''), 10)
+    || (typeof estimateDistance === 'function' ? estimateDistance(c.from || '', c.to || '') : 0);
+  const driveMin = distanceKm ? Math.round(distanceKm / avgSpeed * 60) : 0;
+  const maxKgVal = LogipokeScaleOut.capLabelToKg(c.aiResult && c.aiResult.vehicle)
+    || LogipokeScaleOut.capLabelToKg(c.vehicle)
+    || _cfg.FLEET_DEFAULT_KG || 4000;
+  const strict = LogipokeScaleOut.isStrictDeadline(c.deadline);
+
+  const deps = {
+    // 最適1台＝AI推奨車格 or 割当車格 or 自社標準（候補一覧の小型capは上限判定に使わない＝
+    // 「もっと大きい車を使えば1台で済む」を誤って増車必要と判定しないため。画面間でも一貫）。
+    maxSingleLoadKg: function () { return maxKgVal; },
+    // 単独運行の法令適合：候補1位の改善基準ステータスから（warn はソフト判定で加点）
+    complianceSingle: function () {
+      const st = c.vehicles && c.vehicles[0] && c.vehicles[0].law && c.vehicles[0].law.status;
+      return (st === 'ng' || st === 'violation') ? 'violation' : (st === 'warn' ? 'warn' : 'ok');
+    },
+    // 時間超過(H3)：時間厳守 × 1日運転上限超の長距離 → 1台では当日完遂不可 → 中継必須
+    timeDeficitMin: function () {
+      return (strict && driveMin > dailyCap) ? (driveMin - dailyCap) : 0;
+    },
+    // 納期マージン(S1)：1日運転上限の残余(分)。残り少＝余裕薄 → 増車推奨
+    deadlineMarginMin: function () {
+      return strict ? Math.max(0, dailyCap - driveMin) : null;
+    },
+    // 採算(G3)：受注運賃が既知のときのみ、増車(2台)構成の粗利率を返す（スポット採算ガード）
+    profitPctIfScaledOut: function () {
+      if (typeof LogipokeRecommend === 'undefined' || !c.sales || c.sales <= 0) return null;
+      const cost2 = 2 * LogipokeRecommend.estimateLegCost(distanceKm, LogipokeRecommend.paramsForCapKg(maxKgVal)).total;
+      return Math.round((c.sales - cost2) / c.sales * 100);
+    }
+  };
+  try { return LogipokeScaleOut.evaluateScaleOut(order, deps, (window.SCALEOUT_CONFIG || {})); }
+  catch (e) { return { verdict: 'none', reasons: [] }; }
+}
+
+// verdict → カードに差し込む増車バッジHTML（none は空文字）
+function scaleOutBadgeHtml(c) {
+  const v = getCaseScaleOut(c);
+  if (!v || v.verdict === 'none') return '';
+  const d = v.deficit || {};
+  const detail =
+    v.verdict === 'required'
+      ? (d.weightKg ? '（不足' + d.weightKg.toLocaleString() + 'kg）' : (d.minutes ? '（納期' + d.minutes + '分超過）' : (d.vehicles ? '（' + d.vehicles + '台）' : '')))
+      : v.verdict === 'recommended'
+        ? (v.score ? '（' + v.score + '点）' : '')
+        : '';
+  const map = {
+    required:    { cls: 'so-required',    txt: '⊕ 増車必要' + detail },
+    recommended: { cls: 'so-recommended', txt: '⊕ 増車推奨' + detail },
+    negotiate:   { cls: 'so-negotiate',   txt: '⚠ 要交渉（手配困難）' },
+    review:      { cls: 'so-review',      txt: '要確認（情報不足）' }
+  };
+  const m = map[v.verdict]; if (!m) return '';
+  // 決定的な理由文を title に（ホバーで即表示）。LLM強化はaiExplainScaleOut（任意・非同期）。
+  let tip = '';
+  try { tip = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.explainVerdict) ? LogipokeScaleOut.explainVerdict(v) : ''; } catch (e) {}
+  const titleAttr = tip ? ' title="' + tip.replace(/"/g, '&quot;') + '"' : '';
+  return '<div class="scaleout-badge ' + m.cls + '"' + titleAttr + '><span class="dot"></span>' + m.txt + '</div>';
+}
+
+// LLMによる増車理由文（calcFare と同じ Claude API パターン・失敗時は決定的フォールバック）。
+// 数値判定は決定的ロジックが権威。LLMは説明文の自然化のみ（docs/scale-out-judgement.md §8）。
+async function aiExplainScaleOut(caseObj) {
+  const v = getCaseScaleOut(caseObj);
+  const fallback = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.explainVerdict)
+    ? LogipokeScaleOut.explainVerdict(v) : '';
+  if (v.verdict !== 'required' && v.verdict !== 'recommended') return fallback;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514', max_tokens: 200,
+        messages: [{ role: 'user', content:
+          '配送案件の増車判定の根拠を、配車担当者向けに日本語60字以内の1文で。説明文のみ返す（前置き不要）。\n'
+          + '案件：' + (caseObj.from || '') + '→' + (caseObj.to || '') + ' / ' + (caseObj.goods || '') + ' / 納期' + (caseObj.deadline || '') + '\n'
+          + '判定：' + v.verdict + ' / 理由：' + (v.reasons || []).map(function (r) { return r.type; }).join(',')
+          + ' / 不足：' + JSON.stringify(v.deficit || {}) + ' / 分割：' + (v.shapeHint || '')
+        }]
+      })
+    });
+    const data = await res.json();
+    const text = data.content.map(function (b) { return b.text || ''; }).join('').trim();
+    return text || fallback;
+  } catch (e) { return fallback; }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  増車推薦（自社車両/協力会社/運賃）アダプタ ― 既存case → 推薦エンジン
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function getScaleOutPlan(c, verdict) {
+  if (!c || typeof LogipokeRecommend === 'undefined') return null;
+  verdict = verdict || getCaseScaleOut(c);
+  if (!verdict || (verdict.verdict !== 'required' && verdict.verdict !== 'recommended')) return null;
+  const distanceKm = parseInt(String(c.distance || '').replace(/[^\d]/g, ''), 10)
+    || (typeof estimateDistance === 'function' ? estimateDistance(c.from || '', c.to || '') : 0);
+  const weightKg = (typeof LogipokeScaleOut !== 'undefined') ? LogipokeScaleOut.parseWeightKg(c.goods) : 0;
+  const reqType = /冷凍/.test(c.goods || '') ? '冷凍車'
+    : /冷蔵/.test(c.goods || '') ? '冷蔵車'
+    : (c.aiResult && c.aiResult.vehicle) || (c.vehicle && c.vehicle !== '未割当' ? c.vehicle : '') || '4tウィング';
+  const candidates = (c.vehicles || []).map(function (v) {
+    return { id: v.id, driver: v.driver, cap: v.cap, score: v.score, avail: v.avail,
+      complianceOk: !v.law || v.law.status !== 'ng' };
+  });
+  const partners = (typeof partnerMasterData !== 'undefined' ? partnerMasterData : []).map(function (p) {
+    return { id: p.id, name: p.name, area: p.area, vehicleTypes: p.vehicleTypes, cases: p.cases, available: true,
+      partnerRates: p.partnerRates, performance: p.performance };
+  });
+  const order = {
+    weightKg: weightKg, distanceKm: distanceKm, from: c.from, vehicle: c.vehicle, aiResult: c.aiResult,
+    origin: { prefecture: (String(c.from || '').match(/^(.+?[都道府県])/) || [])[1] }
+  };
+  try {
+    return LogipokeRecommend.composeScaleOutPlan(order, verdict, {
+      distanceKm: distanceKm, requiredVehicleType: reqType, requiredKg: weightKg,
+      candidates: candidates, partners: partners, sales: (c.sales || null)
+    });
+  } catch (e) { return null; }
+}
+
+// 増車プランカード（自社①②＋協力会社＋利益影響）。required/recommended のみ。
+function buildScaleOutPlanCard(c, verdict, caseIdx) {
+  const plan = getScaleOutPlan(c, verdict);
+  if (!plan || !plan.legs.length) return '';
+  const ownN = plan.legs.filter(function (l) { return l.kind === 'own'; }).length;
+  const f = plan.fare;
+  const shapeLabel = { relay: '中継', parallel: '並走', co_split: '相積み分割' }[plan.shape] || plan.shape;
+  const tags = '①②③④⑤⑥⑦⑧';
+  const legsHtml = plan.legs.map(function (l) {
+    const isOwn = l.kind === 'own';
+    const tag = tags.charAt(l.seq - 1) || ('#' + l.seq);
+    const name = isOwn ? (l.driver || '') + '（' + l.id + '）' : l.name;
+    const meta = isOwn ? '自社 ' + (l.score || 0) + 'pt' : '協力 適合' + (l.score || 0) + ' ・ 傭車¥' + (l.charge || 0).toLocaleString();
+    return '<div class="so-leg ' + (isOwn ? 'own' : 'partner') + '">'
+      + '<span class="so-leg-tag">' + tag + '</span>'
+      + '<span class="so-leg-name">' + name + '</span>'
+      + '<span class="so-leg-meta">' + meta + '</span></div>';
+  }).join('');
+  const pColor = (f.grossProfit < 0 || f.status === 'ng') ? '#dc2626' : (f.status === 'warn' ? '#d97706' : '#16a34a');
+  return ''
+    + '<div class="detail-card so-plan-card" style="margin-bottom:14px">'
+    + '<div class="detail-card-header" style="background:#EAF5F0">'
+    + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D4A3A" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>'
+    + '<div class="detail-card-title" style="color:#0D4A3A">AI増車プラン（自社' + plan.ownCount + '＋協力' + plan.partnerCount + '）</div>'
+    + '<span style="margin-left:auto;font-size:10px;font-weight:700;color:#0D4A3A;background:#fff;border:1px solid #b6e6d3;padding:2px 8px;border-radius:10px">分割：' + shapeLabel + '</span>'
+    + '</div>'
+    + '<div style="padding:12px">' + legsHtml
+    + '<div class="so-profit">'
+    + '<div class="so-profit-row"><span>受注運賃</span><b>¥' + f.sales.toLocaleString() + '</b></div>'
+    + '<div class="so-profit-row"><span>自社原価（' + plan.ownCount + '台）</span><b>− ¥' + f.ownCost.toLocaleString() + '</b></div>'
+    + (f.partnerCharge > 0 ? '<div class="so-profit-row"><span>傭車支払（協力' + plan.partnerCount + '）</span><b>− ¥' + f.partnerCharge.toLocaleString() + '</b></div>' : '')
+    + '<div class="so-profit-row total"><span>粗利 / 粗利率</span><b style="color:' + pColor + '">¥' + f.grossProfit.toLocaleString() + ' ・ ' + f.marginPct + '%</b></div>'
+    + '</div>'
+    + (plan.satisfied ? '' : '<div style="font-size:10.5px;color:#9a3412;margin-top:6px">⚠ 候補が不足しています（手配先の追加が必要）</div>')
+    + ((caseIdx != null && ownN >= 1)
+      ? '<button class="btn btn-orange" style="width:100%;margin-top:10px;justify-content:center" onclick="applyScaleOutPlan(' + caseIdx + ')">'
+        + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+        + '⊕ この増車プランで配車（自社' + ownN + '台' + (plan.partnerCount ? '＋協力' + plan.partnerCount : '') + '）</button>'
+      : '')
+    + '</div></div>';
+}
+
+// 自動配車：AI増車プランを multi モード＋legs[] に流し込む（協力会社分は別途依頼へ誘導）。
+function applyScaleOutPlan(caseIdx) {
+  const c = processingCases[caseIdx];
+  if (!c) return;
+  const plan = getScaleOutPlan(c);
+  if (!plan || !plan.legs.length) { showToast('増車プランがありません', 'warn'); return; }
+  const ownLegs = plan.legs.filter(function (l) { return l.kind === 'own'; });
+  if (!ownLegs.length) { showToast('自社便の候補がありません。協力会社へ依頼してください', 'warn'); return; }
+
+  // 区間時間：並走（parallel）は同日帯で30分ずつスタッグ。長距離は当日内に収める。
+  const distKm = parseInt(String(c.distance || '').replace(/[^\d]/g, ''), 10) || (plan.legs[0] && plan.legs[0].distanceKm) || 60;
+  const durMin = Math.min(14 * 60, Math.max(120, Math.round(distKm / 60 * 60 + 90)));
+  function mmToHHMM(mm) { mm = Math.min(23 * 60 + 30, mm); return String(Math.floor(mm / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0'); }
+
+  c.vehicleMode = 'multi';
+  c.legs = ownLegs.slice(0, 3).map(function (l, idx) {
+    const vi = (c.vehicles || []).findIndex(function (v) { return v.id === l.id; });
+    const v = vi >= 0 ? c.vehicles[vi] : null;
+    const cap = v ? v.cap : (l.capKg ? l.capKg.toLocaleString() + 'kg' : '');
+    const startMin = 8 * 60 + idx * 30;
+    return {
+      legId: 'leg-' + Date.now() + '-' + idx, legNo: idx + 1,
+      vehicleId: l.id, vehicleName: l.id, driverName: l.driver || (v && v.driver) || '',
+      capacity: cap,
+      vehicleType: /2,000|2t/.test(cap) ? '2t車' : /1,500/.test(cap) ? '中型' : '小型',
+      role: idx === 0 ? 'main' : 'sub',
+      startTime: mmToHHMM(startMin), endTime: mmToHHMM(startMin + durMin),
+      reason: 'AI増車プラン', notes: 'AI増車プランで自動配車',
+      vehicleIdx: vi >= 0 ? vi : 0,
+      lawOk: v && v.law ? v.law.items.every(function (it) { return it.ok; }) : true
+    };
+  });
+  // 協力会社分は記録（多便UIは自社専用のため、配車割当では「増車枠」トラックに表示）。
+  // 区間時刻は自社便の続きでスタッグ付与（配車割当ボードのバー位置に使用）。
+  c.scaleOutPartnerLegs = plan.legs.filter(function (l) { return l.kind === 'partner'; }).map(function (l, idx) {
+    const startMin = 8 * 60 + (ownLegs.length + idx) * 30;
+    return Object.assign({}, l, { startTime: mmToHHMM(startMin), endTime: mmToHHMM(startMin + durMin) });
+  });
+  c.scaleOutFare = plan.fare;
+
+  if (typeof renderProcessingList === 'function') renderProcessingList();
+  if (typeof renderProcessingDetail === 'function') renderProcessingDetail(caseIdx);
+  if (typeof renderDnd === 'function') { try { renderDnd(); } catch (e) {} }
+  if (typeof renderSchedule === 'function') { try { renderSchedule(); } catch (e) {} }
+  const pc = c.scaleOutPartnerLegs.length;
+  showToast('自社' + c.legs.length + '台を複数台配車に流し込みました（配車割当にバー表示）'
+    + (pc ? '。協力' + pc + '社は増車枠バーから「発注確定」できます' : ''), 'success');
+}
+
+// 増車枠バーから協力会社便を直接「発注確定」（ボード上で完結・発注書PO発行）。
+// ここで発行したPO番号は確定(confirmDispatch)時の請求連携にそのまま引き継がれる。
+function confirmPartnerLegPO(caseId, legIdx) {
+  const c = (typeof processingCases !== 'undefined' ? processingCases : []).find(function (x) { return x.id === caseId; });
+  if (!c || !c.scaleOutPartnerLegs || !c.scaleOutPartnerLegs[legIdx]) return;
+  const leg = c.scaleOutPartnerLegs[legIdx];
+  if (leg.poConfirmed) {
+    showToast('発注確定済みです（' + leg.purchaseOrderNo + ' / ' + (leg.name || '協力会社') + '）', 'info');
+    return;
+  }
+  const charge = (leg.charge || 0).toLocaleString();
+  if (!confirm((leg.name || '協力会社') + ' へ 傭車¥' + charge + ' で発注確定します。\n発注書（PO）を発行し、確定時に請求へ連携します。よろしいですか？')) return;
+  const now = new Date();
+  const payDue = formatDateSlash(new Date(now.getTime() + 30 * 86400000));
+  leg.poConfirmed = true;
+  leg.purchaseOrderNo = 'PO-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random() * 90000) + 10000);
+  leg.purchaseOrderIssuedAt = now.toLocaleString('ja-JP');
+  leg.purchaseOrderTotal = leg.charge || 0;
+  leg.purchaseOrderMethod = '銀行振込（月末締め翌月末払い）';
+  leg.purchaseOrderRoute = c.from + ' → ' + c.to;
+  leg.purchaseOrderGoods = c.goods;
+  leg.purchaseOrderReceipt = c.to + 'にて荷受け担当者へ';
+  leg.purchaseOrderPayDue = payDue;
+  if (typeof renderDnd === 'function') { try { renderDnd(); } catch (e) {} }
+  if (typeof renderProcessingList === 'function') { try { renderProcessingList(); } catch (e) {} }
+  if (typeof renderProcessingDetail === 'function' && typeof selectedProcessing !== 'undefined') {
+    try { renderProcessingDetail(selectedProcessing); } catch (e) {}
+  }
+  showToast('✅ ' + (leg.name || '協力会社') + ' へ発注確定（' + leg.purchaseOrderNo + '）', 'success');
+  // 発注書プレビュー（PDF／送信）を開く
+  if (typeof openPOPreviewModal === 'function') {
+    const po = Object.assign({
+      partnerName: leg.name || '協力会社', from: c.from, to: c.to, goods: c.goods,
+      _partnerId: leg.id, _client: c.client, _caseId: c.id, _legIdx: legIdx
+    }, leg);
+    openPOPreviewModal(po);
+  }
+}
+
+// 増車が必要/推奨の案件件数（required + recommended）。運行スケジュールのサマリー集計用。
+function countScaleOutNeeded() {
+  if (typeof LogipokeScaleOut === 'undefined') return 0;
+  let n = 0;
+  function scan(arr) { (arr || []).forEach(function (c) { try { if (LogipokeScaleOut.countsAsScaleOut(getCaseScaleOut(c).verdict)) n++; } catch (e) {} }); }
+  if (typeof unprocessedCases !== 'undefined') scan(unprocessedCases);
+  if (typeof processingCases !== 'undefined') scan(processingCases);
+  return n;
+}
+function scaleOutSummaryStatHtml() {
+  const n = countScaleOutNeeded();
+  if (!n) return '';
+  return '<div class="sched-sum-stat scaleout" title="増車が必要/推奨の案件件数（個別案件処理）"><span class="lbl">⊕ 増車要</span><span class="sched-sum-stat-num">' + n + '</span><span class="lbl">件</span></div>';
+}
+
 function renderUnprocessedList() {
   const el = document.getElementById('unprocessed-list');
   let filtered = holdFilterUnprocessed ? unprocessedCases.filter(c => c.onHold) : unprocessedCases;
@@ -13719,6 +14125,7 @@ function renderUnprocessedList() {
         + '<div class="case-meta-item">📦 ' + c.goods + '</div>'
         + '<div class="case-meta-item">🕐 納品：' + c.deadline + '</div>'
       + '</div>'
+      + scaleOutBadgeHtml(c)
       + '<div class="case-actions-mini">'
         + actionBtn
         + '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();selectUnprocessed(\'' + cid + '\')">確認・編集</button>'
@@ -14234,6 +14641,7 @@ function renderProcessingList() {
         + '<div class="case-meta-item">🚛 ' + (c.vehicleMode==='multi' && c.legs && c.legs.length>0 ? c.legs.map(l=>l.driverName).join(' / ') + ' <span class="multi-badge">複数台 '+c.legs.length+'台</span>' : c.driver) + '</div>'
         + '<div class="case-meta-item">📅 納期：' + c.deadline + '</div>'
       + '</div>'
+      + scaleOutBadgeHtml(c)
       + '<div class="case-actions-mini">'
         + '<button class="btn btn-orange btn-sm" onclick="event.stopPropagation();openConfirmModal(' + i + ')">確定（ドライバーへ指示）</button>'
       + '</div>'
@@ -14247,6 +14655,16 @@ function selectProcessing(i) {
     el.classList.toggle('selected', idx===i);
   });
   renderProcessingDetail(i);
+  // PR5: 増車コメントをLLMで自然化（失敗時は決定的文のまま）。判定の数値は不変。
+  try {
+    const c = processingCases[i];
+    if (c && typeof aiExplainScaleOut === 'function') {
+      aiExplainScaleOut(c).then(function (text) {
+        const box = document.getElementById('so-rationale-' + c.id);
+        if (box && text) { const t = box.querySelector('.so-rationale-text'); if (t) t.textContent = text; }
+      }).catch(function () {});
+    }
+  } catch (e) {}
 }
 
 // ── ★配送スケジュール（縦タイムライン）ヘルパー ─────────────────
@@ -15040,6 +15458,16 @@ function renderProcessingDetail(i) {
   const selIdx = c.selectedVehicleIdx ?? 0;
   const selV = c.vehicles[selIdx];
 
+  // 増車コメント（PR5）：決定的な理由文を即表示。selectProcessingでLLM文に上書き（任意）。
+  const _so = (typeof getCaseScaleOut === 'function') ? getCaseScaleOut(c) : { verdict: 'none' };
+  const _soToneCls = { required: 'so-required', recommended: 'so-recommended', negotiate: 'so-negotiate', review: 'so-review' }[_so.verdict] || '';
+  const _soText = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.explainVerdict) ? LogipokeScaleOut.explainVerdict(_so) : '';
+  const _soBanner = (_so.verdict && _so.verdict !== 'none')
+    ? '<div id="so-rationale-' + c.id + '" class="scaleout-rationale ' + _soToneCls + '" style="margin-bottom:14px">'
+      + '<span class="so-rationale-ico">🤖</span>'
+      + '<span class="so-rationale-text">' + _soText + '</span></div>'
+    : '';
+
   const vcards = c.vehicles.map((v, ri) => {
     const isTop = ri === 0;
     const isSel = ri === selIdx;
@@ -15115,6 +15543,8 @@ function renderProcessingDetail(i) {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="8" stroke-width="3" stroke-linecap="round"/><line x1="12" y1="12" x2="12" y2="16"/></svg>
       </button>
     </div>
+    ${_soBanner}
+    ${(typeof buildScaleOutPlanCard === 'function') ? buildScaleOutPlanCard(c, _so, i) : ''}
 
     <!-- 案件パターン -->
     <div class="detail-card" style="margin-bottom:14px">
@@ -17422,9 +17852,15 @@ function confirmDispatch() {
 
   if (isMulti) {
     // 複数台: Leg別に処理済み案件を生成
+    // 増車プラン由来の運賃があれば按分（受注/自社原価を便数で配分）、無ければ従来値
+    const _sof = c.scaleOutFare || null;
+    const _partnerLegs = c.scaleOutPartnerLegs || [];
+    const _totalLegs = c.legs.length + _partnerLegs.length;
+    const _salesPerLeg = _sof ? Math.round(_sof.sales / _totalLegs) : Math.round(45000 / c.legs.length);
+    const _ownCostPerLeg = _sof ? Math.round(_sof.ownCost / Math.max(1, c.legs.length)) : Math.round(16000 / c.legs.length);
     c.legs.forEach((leg, li) => {
-      const legSales  = Math.round(45000 / c.legs.length);
-      const legFuel   = Math.round(16000 / c.legs.length);
+      const legSales  = _salesPerLeg;
+      const legFuel   = _ownCostPerLeg;
       const legProfit = legSales - legFuel;
       // 車両マスタからプレート・スペックを引く
       const rawId = leg.vehicleName || leg.vehicleId || '';
@@ -17451,6 +17887,43 @@ function confirmDispatch() {
         progress:50, truckTop:50, progressPct:50, remain:'—', eta:'—', donekm:0
       });
     });
+
+    // 協力会社便（増車枠）→ 発注書（PO）＋請求を生成
+    const _payDue = formatDateSlash(new Date(now.getTime() + 30 * 86400000));
+    _partnerLegs.forEach((leg, pi) => {
+      const charge = leg.charge || 0;
+      const legSales = _salesPerLeg;
+      const legProfit = legSales - charge;       // 傭車支払が原価＝粗利を圧縮
+      const seqNo = c.legs.length + pi + 1;
+      // ボードで先に「発注確定」済みなら、その発注書番号・発行時刻を引き継ぐ
+      const poNo = leg.purchaseOrderNo || ('PO-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random() * 90000) + 10000));
+      processedCases.unshift({
+        id: c.id + '-P' + (pi + 1), status: '完了', casePattern: c.casePattern || null,
+        partner: true, partnerName: leg.name || '協力会社',
+        client: c.client, from: c.from, to: c.to, goods: c.goods,
+        completion: now.toLocaleDateString('ja-JP') + ' 完了（増車・協力会社）',
+        distance: c.distance, delay: 'なし',
+        driver: '（協力会社手配）', vehicle: leg.name || '傭車',
+        legNo: seqNo, totalLegs: _totalLegs, multiCase: true, parentId: c.id,
+        legRole: 'partner', legReason: 'AI増車プラン（傭車）',
+        sales: legSales, fuel: 0, other: charge, profit: legProfit,
+        margin: legSales ? Math.round(legProfit / legSales * 100) : 0,
+        invoiceNo: invBase + '-P' + (pi + 1),
+        invoiceDate: formatDateSlash(now), due: _payDue, paid: false,
+        // ── 発注書（下請法対応）──
+        purchaseOrderNo: poNo, purchaseOrderTotal: charge,
+        purchaseOrderIssuedAt: leg.purchaseOrderIssuedAt || now.toLocaleString('ja-JP'),
+        purchaseOrderMethod: leg.purchaseOrderMethod || '銀行振込（月末締め翌月末払い）',
+        purchaseOrderRoute: leg.purchaseOrderRoute || (c.from + ' → ' + c.to),
+        purchaseOrderGoods: leg.purchaseOrderGoods || c.goods,
+        purchaseOrderReceipt: leg.purchaseOrderReceipt || (c.to + 'にて荷受け担当者へ'),
+        purchaseOrderPayDue: leg.purchaseOrderPayDue || _payDue,
+        progress: 50, truckTop: 50, progressPct: 50, remain: '—', eta: '—', donekm: 0
+      });
+    });
+    if (_partnerLegs.length) {
+      showToast('協力会社 ' + _partnerLegs.length + '社へ発注書（PO）を発行し、請求に連携しました', 'success');
+    }
   } else {
     // 1台: 従来ロジック
     processedCases.unshift({
@@ -18204,23 +18677,66 @@ function confirmRegisterCase() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // 距離の簡易推定（発地・着地キーワードベース）
+// 都道府県庁所在地の緯度経度（全47）。未知ペアもハバーサイン距離で推定できるようにする。
+const PREF_GEO = {
+  '北海道':[43.06,141.35],'青森県':[40.82,140.74],'岩手県':[39.70,141.15],'宮城県':[38.27,140.87],
+  '秋田県':[39.72,140.10],'山形県':[38.24,140.36],'福島県':[37.75,140.47],'茨城県':[36.34,140.45],
+  '栃木県':[36.57,139.88],'群馬県':[36.39,139.06],'埼玉県':[35.86,139.65],'千葉県':[35.61,140.12],
+  '東京都':[35.69,139.69],'神奈川県':[35.45,139.64],'新潟県':[37.90,139.02],'富山県':[36.70,137.21],
+  '石川県':[36.59,136.63],'福井県':[36.07,136.22],'山梨県':[35.66,138.57],'長野県':[36.65,138.18],
+  '岐阜県':[35.39,136.72],'静岡県':[34.98,138.38],'愛知県':[35.18,136.91],'三重県':[34.73,136.51],
+  '滋賀県':[35.00,135.87],'京都府':[35.02,135.76],'大阪府':[34.69,135.50],'兵庫県':[34.69,135.18],
+  '奈良県':[34.69,135.83],'和歌山県':[34.23,135.17],'鳥取県':[35.50,134.24],'島根県':[35.47,133.05],
+  '岡山県':[34.66,133.93],'広島県':[34.40,132.46],'山口県':[34.19,131.47],'徳島県':[34.07,134.56],
+  '香川県':[34.34,134.04],'愛媛県':[33.84,132.77],'高知県':[33.56,133.53],'福岡県':[33.59,130.40],
+  '佐賀県':[33.25,130.30],'長崎県':[32.74,129.87],'熊本県':[32.79,130.74],'大分県':[33.24,131.61],
+  '宮崎県':[31.91,131.42],'鹿児島県':[31.56,130.56],'沖縄県':[26.21,127.68]
+};
+// 県名なし表記（政令市等）→ 都道府県の補完
+const CITY_TO_PREF = {
+  '札幌':'北海道','仙台':'宮城県','名古屋':'愛知県','大阪':'大阪府','京都':'京都府','神戸':'兵庫県',
+  '横浜':'神奈川県','川崎':'神奈川県','福岡':'福岡県','北九州':'福岡県','広島':'広島県',
+  'さいたま':'埼玉県','千葉':'千葉県','静岡':'静岡県','浜松':'静岡県','新潟':'新潟県','金沢':'石川県'
+};
+function _extractPref(s) {
+  s = String(s || '');
+  for (const p in PREF_GEO) if (s.indexOf(p) >= 0) return p;
+  for (const c in CITY_TO_PREF) if (s.indexOf(c) >= 0) return CITY_TO_PREF[c];
+  return null;
+}
+function _haversineKm(a, b) {
+  const R = 6371, toR = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * toR, dLng = (b[1] - a[1]) * toR;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * toR) * Math.cos(b[0] * toR) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 function estimateDistance(from, to) {
-  const dist = {
-    '川口': {'横浜':35,'大田':30,'品川':28,'千葉':55,'さいたま':18,'名古屋':380,'大阪':550,'静岡':180},
+  from = String(from || ''); to = String(to || '');
+  // ① 市区レベルの実測寄り上書き（双方向。密な首都圏など重心法が不正確な区間）
+  const cityDist = {
+    '川口': {'横浜':35,'川崎':30,'大田':30,'品川':28,'千葉':55,'さいたま':18,'名古屋':380,'大阪':550,'静岡':180,'仙台':360},
     '船橋': {'大田':42,'品川':45,'横浜':60,'川口':55,'名古屋':350,'大阪':520},
     'つくば': {'名古屋':410,'横浜':120,'大田':70,'品川':72},
     '渋谷': {'大阪':540,'名古屋':380,'横浜':30,'川口':28},
-    '品川': {'さいたま':28,'横浜':22,'川口':26},
+    '品川': {'さいたま':28,'横浜':22,'川口':26,'浜松':230},
     '江東': {'千葉':45,'横浜':55,'川口':35},
+    '横浜': {'静岡':150,'名古屋':350,'大阪':520},
+    '名古屋': {'大阪':190,'東京':350,'横浜':350,'静岡':180},
+    '大田': {'浜松':230,'静岡':180},
   };
-  for (const [f, targets] of Object.entries(dist)) {
-    if (from.includes(f)) {
-      for (const [t, d] of Object.entries(targets)) {
-        if (to.includes(t)) return d;
-      }
-    }
+  for (const [f, targets] of Object.entries(cityDist)) {
+    if (from.includes(f)) for (const [t, d] of Object.entries(targets)) if (to.includes(t)) return d;
+    if (to.includes(f))   for (const [t, d] of Object.entries(targets)) if (from.includes(t)) return d;
   }
-  // デフォルト推定：都道府県間距離
+  // ② 都道府県 重心間ハバーサイン × 道路係数（任意の県ペアを推定）
+  const pf = _extractPref(from), pt = _extractPref(to);
+  if (pf && pt) {
+    if (pf === pt) return 30;   // 同一県内の代表値
+    const km = Math.round(_haversineKm(PREF_GEO[pf], PREF_GEO[pt]) * 1.25 / 5) * 5;
+    return Math.max(25, km);
+  }
+  // ③ 旧キーワード フォールバック
   if (from.includes('東京') && to.includes('大阪')) return 540;
   if (from.includes('東京') && to.includes('名古屋')) return 380;
   if (from.includes('東京') || from.includes('埼玉') || from.includes('千葉') || from.includes('神奈川')) {
@@ -20702,6 +21218,7 @@ function renderSchedule() {
            <div class="sched-sum-stat alert"><span>要対応</span><span class="sched-sum-stat-num">${cnt.alert}</span></div>
            <div class="sched-sum-stat"><span style="color:#94a3b8">休車</span><span class="sched-sum-stat-num" style="color:#94a3b8">${cnt.off}</span></div>`
       }
+      ${!isConf ? scaleOutSummaryStatHtml() : ''}
       <div class="sched-sum-spacer"></div>
       <div class="sched-sum-legend">
         ${isConf
@@ -22355,7 +22872,7 @@ const dndUnassignedCases = (function() {
   const base = [
     { id:'D-001', caseListId:'20240524001', originalPhase:'unprocessed', client:'株式会社○○商事',      status:'unprocessed', from:'埼玉県川口市',  to:'神奈川県横浜市', goods:'パレット/800kg/常温', durationH:3, preferredStart:'09:00', deadline:'05/25 AM指定',  urgent:true,  color:BLOCK_COLOR },
     { id:'D-002', caseListId:'20240524002', originalPhase:'unprocessed', client:'△△食品株式会社',      status:'unprocessed', from:'千葉県船橋市',  to:'東京都大田区',   goods:'ケース/500kg/冷蔵',   durationH:4, preferredStart:'10:00', deadline:'05/24 PM指定',  urgent:true,  color:BLOCK_COLOR },
-    { id:'D-003', caseListId:'20240524003', originalPhase:'unprocessed', client:'株式会社□□製作所',    status:'unprocessed', from:'茨城県つくば市',to:'愛知県名古屋市', goods:'機械部品/1200kg/常温',durationH:8, preferredStart:'07:00', deadline:'05/25 終日',     urgent:false, color:BLOCK_COLOR },
+    { id:'D-003', caseListId:'20240524003', originalPhase:'unprocessed', client:'株式会社□□製作所',    status:'unprocessed', from:'茨城県つくば市',to:'愛知県名古屋市', goods:'機械部品/7,200kg/常温',durationH:8, preferredStart:'07:00', deadline:'05/25 終日',     urgent:false, color:BLOCK_COLOR },
     { id:'D-004', caseListId:'20240524004', originalPhase:'unprocessed', client:'◇◇アパレル株式会社', status:'unprocessed', from:'東京都渋谷区',  to:'大阪府大阪市',   goods:'アパレル/300kg/常温', durationH:9, preferredStart:'08:00', deadline:'05/26 AM指定',  urgent:false, color:BLOCK_COLOR },
     { id:'D-005', caseListId:'20240524101', originalPhase:'processing',  client:'株式会社○○商事',      status:'processing',  from:'埼玉県川口市',  to:'神奈川県横浜市', goods:'パレット/800kg/常温', durationH:3, preferredStart:'09:00', deadline:'05/25 AM',      urgent:false, color:BLOCK_COLOR },
     { id:'D-006', caseListId:'20240524102', originalPhase:'processing',  client:'南関東物流株式会社',   status:'processing',  from:'神奈川県川崎市',to:'静岡県静岡市',   goods:'電子部品/400kg/精密', durationH:5, preferredStart:'11:00', deadline:'05/24 夕方',    urgent:true,  color:BLOCK_COLOR },
@@ -25586,6 +26103,7 @@ function renderDndList() {
           ${dvc('time') ? `<span class="dnd-card-chip time">⏱ ${c.preferredStart}〜 / ${c.durationH}h</span>` : ''}
           ${dvc('deadline') ? (c.urgent && dvc('urgent') ? `<span class="dnd-card-chip urgent">⚡ ${c.deadline}</span>` : `<span class="dnd-card-chip">${c.deadline}</span>`) : (c.urgent && dvc('urgent') ? `<span class="dnd-card-chip urgent">⚡ 緊急</span>` : '')}
         </div>` : ''}
+        ${(!assigned && !processed) ? scaleOutBadgeHtml(c) : ''}
         ${recInfo}
         ${assignedInfo}
         ${partnerBtn}
@@ -26222,6 +26740,35 @@ function renderDndTimeline() {
       });
     }
 
+    // 【複数台（増車）】計画中タブで、このドライバーが担当する自社便をバーとして注入
+    if (!isConfirmedTab && typeof processingCases !== 'undefined') {
+      const driverFirstNameM = (d.name || '').split(' ')[0];
+      processingCases.forEach(c => {
+        if (c.vehicleMode !== 'multi' || !c.legs) return;
+        c.legs.forEach(leg => {
+          if (!leg.driverName) return;
+          if (leg.driverName.split(' ')[0] !== driverFirstNameM) return;
+          if (assigned.some(a => a._multiLegId === leg.legId)) return;
+          assigned.push({
+            id: 'multi-' + leg.legId,
+            _multiLegId: leg.legId,
+            _multiCaseId: c.id,
+            _multiLegNo: leg.legNo,
+            _multiTotalLegs: c.legs.length,
+            start: leg.startTime || '08:00',
+            end: leg.endTime || '12:00',
+            client: c.client, from: c.from, to: c.to,
+            goods: c.goods, deadline: c.deadline,
+            color: '#1a7a5e',
+            label: c.client + ` (増車${leg.legNo}/${c.legs.length}台)`,
+            locked: true,   // 増車便は配車割当からは編集不可（個別案件処理で操作）
+            _isMultiLeg: true
+          });
+        });
+      });
+      assigned.sort((a, b) => timeToPercent(a.start) - timeToPercent(b.start));
+    }
+
     // 改善基準告示：この日のこのドライバーのステータス（計画中タブのみ）
     let kaizenStatus = null;
     if (!isConfirmedTab) {
@@ -26405,6 +26952,54 @@ function renderDndTimeline() {
     }).join('');
   }
 
+  // 【増車枠（協力会社）】multi 案件の協力会社便を、末尾の「増車枠」セクションにバーで表示
+  let scaleOutPartnerRowsHtml = '';
+  if (!isConfirmedTab && typeof processingCases !== 'undefined') {
+    const soCases = processingCases.filter(c =>
+      c.vehicleMode === 'multi' && c.scaleOutPartnerLegs && c.scaleOutPartnerLegs.length > 0);
+    let pRows = '';
+    soCases.forEach(c => {
+      const clientShort = (c.client || '').length > 8 ? c.client.substring(0, 7) + '…' : c.client;
+      c.scaleOutPartnerLegs.forEach((leg, plegIdx) => {
+        const start = leg.startTime || '09:00', end = leg.endTime || '13:00';
+        const left = timeToPercent(start), width = durationToPercent(start, end);
+        const charge = (leg.charge || 0).toLocaleString();
+        const done = !!leg.poConfirmed;
+        const tip = done
+          ? `${c.client} / 協力会社：${leg.name} / 発注済 ${leg.purchaseOrderNo} / 傭車¥${charge}`
+          : `${c.client} / 協力会社：${leg.name} / 傭車¥${charge} / クリックで発注確定`;
+        const rowStatus = done
+          ? '<span class="dnd-driver-status dnd-partner-row-label">✓ 発注済</span>'
+          : '<span class="dnd-driver-status dnd-partner-row-label">協力会社</span>';
+        pRows += `<div class="dnd-row dnd-row-partner">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1">
+              <span class="dnd-driver-name" title="${(leg.name || '協力会社').replace(/"/g, '&quot;')}">🤝 ${leg.name || '協力会社'}</span>
+              <span class="dnd-driver-vehicle">傭車</span>
+            </div>
+            <div class="dnd-driver-line2">
+              ${rowStatus}
+              <span class="dnd-driver-capacity" title="${(c.client || '').replace(/"/g, '&quot;')} 増車">${clientShort} 増車</span>
+            </div>
+          </div>
+          <div class="dnd-track dnd-track-partner">
+            ${isToday ? `<div class="dnd-now-line" style="left:${nowPct}%"></div>` : ''}
+            <div class="dnd-block dnd-block-partner-leg${done ? ' po-done' : ''}" style="left:${left}%;width:${width}%"
+                 title="${tip.replace(/"/g, '&quot;')}"
+                 onclick="confirmPartnerLegPO('${c.id}',${plegIdx})">
+              <button class="dnd-po-btn" onclick="event.stopPropagation();confirmPartnerLegPO('${c.id}',${plegIdx})" title="${done ? '発注書を確認' : 'この内容で発注確定（発注書を発行）'}">${done ? '✓ 発注済' : '発注確定'}</button>
+              <div class="dnd-block-title">${done ? '✓ ' : ''}${leg.name || '協力会社'}</div>
+              <div class="dnd-block-sub">${done ? leg.purchaseOrderNo : '傭車¥' + charge}</div>
+            </div>
+          </div>
+        </div>`;
+      });
+    });
+    if (pRows) {
+      scaleOutPartnerRowsHtml = `<div class="dnd-section-divider">⊕ 増車枠（協力会社 / 傭車）</div>` + pRows;
+    }
+  }
+
   wrap.innerHTML = `
     <div class="dnd-time-header">
       <div class="dnd-time-header-label">ドライバー / 車両</div>
@@ -26414,7 +27009,8 @@ function renderDndTimeline() {
       </div>
     </div>
     ${rowsHtml}
-    ${relayRowsHtml}`;
+    ${relayRowsHtml}
+    ${scaleOutPartnerRowsHtml}`;
 }
 
 function updateDndStats() {
@@ -35215,23 +35811,17 @@ async function downloadInvoicePDF() {
   }
 }
 
-// 処理済み画面から発注書PDFを再ダウンロード
-function redownloadPurchaseOrderPDF(i) {
-  const c = processedCases[i];
-  if (!c || !c.purchaseOrderNo) { showToast('発注書データが見つかりません', 'error'); return; }
-
-  // 案件データから印刷エリアを再構築して _downloadPurchaseOrderPDF を呼ぶ
-  const area = document.getElementById('po-print-area');
-  if (!area) { showToast('印刷エリアが初期化されていません', 'error'); return; }
-
-  const poNum    = c.purchaseOrderNo;
+// 発注書の印刷用HTMLを生成（再DL／ボード発注確定プレビューで共用）
+function buildPOPrintHTML(c, opts) {
+  opts = opts || {};
+  const poNum    = c.purchaseOrderNo || '—';
   const issuedAt = c.purchaseOrderIssuedAt || '—';
   const total    = c.purchaseOrderTotal ? '¥' + c.purchaseOrderTotal.toLocaleString() : '—';
   const subtotalVal = c.purchaseOrderTotal ? Math.round(c.purchaseOrderTotal / 1.1) : 0;
   const taxVal      = c.purchaseOrderTotal ? c.purchaseOrderTotal - subtotalVal : 0;
-  const now = new Date().toLocaleString('ja-JP');
-
-  area.innerHTML = `
+  const extraLine = opts.redownloadAt
+    ? `<div style="font-size:10px;color:#9ca3af">再ダウンロード：${opts.redownloadAt}</div>` : '';
+  return `
     <div style="border-bottom:3px solid #0D4A3A;padding-bottom:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-end">
       <div>
         <div style="font-size:22px;font-weight:700;color:#0D4A3A;letter-spacing:0.05em">発 注 書</div>
@@ -35240,7 +35830,7 @@ function redownloadPurchaseOrderPDF(i) {
       <div style="text-align:right;font-size:12px;color:#374151">
         <div><b>発注書番号：</b>${poNum}</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px">交付日時：${issuedAt}</div>
-        <div style="font-size:10px;color:#9ca3af">再ダウンロード：${now}</div>
+        ${extraLine}
       </div>
     </div>
 
@@ -35284,7 +35874,14 @@ function redownloadPurchaseOrderPDF(i) {
       <span>発行：東日本物流株式会社</span>
     </div>
   `;
+}
 
+// 発注書オブジェクト → 印刷エリアへ展開し PDF 保存（共用）
+function downloadPOPDF(c, opts) {
+  const area = document.getElementById('po-print-area');
+  if (!area) { showToast('印刷エリアが初期化されていません', 'error'); return; }
+  if (!window.html2canvas || !window.jspdf) { showToast('PDFライブラリが読み込まれていません', 'error'); return; }
+  area.innerHTML = buildPOPrintHTML(c, opts);
   html2canvas(area, { scale:2, useCORS:true, backgroundColor:'#ffffff', logging:false })
     .then(canvas => {
       const { jsPDF } = window.jspdf;
@@ -35304,10 +35901,87 @@ function redownloadPurchaseOrderPDF(i) {
           yOffset += pageH;
         }
       }
-      pdf.save('発注書_' + poNum + '.pdf');
+      pdf.save('発注書_' + (c.purchaseOrderNo || 'PO') + '.pdf');
       showToast('発注書PDFをダウンロードしました', 'success');
     })
     .catch(e => { showToast('PDF生成エラー: ' + e.message, 'error'); });
+}
+
+// 処理済み画面から発注書PDFを再ダウンロード
+function redownloadPurchaseOrderPDF(i) {
+  const c = processedCases[i];
+  if (!c || !c.purchaseOrderNo) { showToast('発注書データが見つかりません', 'error'); return; }
+  downloadPOPDF(c, { redownloadAt: new Date().toLocaleString('ja-JP') });
+}
+
+// ━━ 発注書プレビュー（ボード発注確定から：プレビュー＋PDF＋送信） ━━
+let _previewPO = null;
+function openPOPreviewModal(po) {
+  _previewPO = po;
+  let ov = document.getElementById('so-po-preview');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'so-po-preview';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:24px';
+    ov.onclick = function (e) { if (e.target === ov) closePOPreviewModal(); };
+    document.body.appendChild(ov);
+  }
+  // 送信先（協力会社マスタから連絡先を解決）
+  const pm = (typeof partnerMasterData !== 'undefined' ? partnerMasterData : []).find(function (p) { return p.id === po._partnerId || p.name === po.partnerName; });
+  const email = (pm && pm.email) || '';
+  const tel = (pm && pm.tel) || '';
+  ov.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:#fff;z-index:2">
+        <span style="font-size:15px;font-weight:800;color:#0D4A3A">📄 発注書プレビュー</span>
+        <span style="font-size:11px;color:var(--text-muted)">${po.purchaseOrderNo}</span>
+        <button onclick="closePOPreviewModal()" style="margin-left:auto;width:28px;height:28px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;font-size:16px">✕</button>
+      </div>
+      <div style="padding:18px">
+        <div style="border:1px solid var(--border);border-radius:8px;padding:18px 22px;background:#fff">${buildPOPrintHTML(po, {})}</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;padding:14px 18px;border-top:1px solid var(--border);position:sticky;bottom:0;background:#fafbfc">
+        <button class="btn btn-secondary btn-sm" onclick="downloadPOPDF(_previewPO,{})">⬇ PDFダウンロード</button>
+        <div style="flex:1"></div>
+        <button id="sopo-send-email" class="btn btn-sm" style="background:#0D4A3A;color:#fff" onclick="sendPOFromPreview('email','${email.replace(/'/g, '')}')">📧 メール送信</button>
+        <button id="sopo-send-slack" class="btn btn-sm" style="background:#4A154B;color:#fff" onclick="sendPOFromPreview('slack','#partner-${(po._partnerId || '').toLowerCase()}')">💬 Slack送信</button>
+        <button id="sopo-send-sms" class="btn btn-sm" style="background:#1a7a5e;color:#fff" onclick="sendPOFromPreview('sms','${tel.replace(/'/g, '')}')">📱 SMS送信</button>
+      </div>
+      <div id="sopo-send-status" style="display:none;margin:0 18px 16px;padding:8px 12px;border-radius:8px;font-size:11px"></div>
+    </div>`;
+  ov.style.display = 'flex';
+}
+function closePOPreviewModal() {
+  const ov = document.getElementById('so-po-preview');
+  if (ov) ov.style.display = 'none';
+}
+async function sendPOFromPreview(method, to) {
+  const po = _previewPO; if (!po) return;
+  const labels = { email: 'メール', slack: 'Slack', sms: 'SMS' };
+  const icons = { email: '📧', slack: '💬', sms: '📱' };
+  if ((method === 'email' || method === 'sms') && !to) {
+    to = prompt(method === 'email' ? '送信先メールアドレス' : '送信先電話番号', '') || '';
+    if (!to) { showToast('送信先を入力してください', 'error'); return; }
+  }
+  const btn = document.getElementById('sopo-send-' + method);
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = '送信中...'; }
+  await new Promise(function (r) { setTimeout(r, 1000); });
+  const sentAt = new Date().toLocaleString('ja-JP');
+  // 既存の送信ログ(poSentLog)にも記録して整合
+  if (typeof poSentLog !== 'undefined' && Array.isArray(poSentLog)) poSentLog.push({ method: method, to: to, sentAt: sentAt });
+  // 協力会社便に送信履歴を残す（確定後も追跡可能）
+  if (po._caseId != null && po._legIdx != null && typeof processingCases !== 'undefined') {
+    const c = processingCases.find(function (x) { return x.id === po._caseId; });
+    const leg = c && c.scaleOutPartnerLegs && c.scaleOutPartnerLegs[po._legIdx];
+    if (leg) { leg.poSentLog = leg.poSentLog || []; leg.poSentLog.push({ method: method, to: to, sentAt: sentAt }); }
+  }
+  const st = document.getElementById('sopo-send-status');
+  if (st) {
+    st.style.display = 'block'; st.style.background = '#f0fdf4'; st.style.border = '1px solid #a7f3d0'; st.style.color = '#065f46';
+    st.innerHTML = (st.innerHTML || '') + `<div style="display:flex;align-items:center;gap:6px"><span>${icons[method]}</span><b>${labels[method]}</b>で送信完了（${sentAt}）→ ${to}</div>`;
+  }
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerHTML = '✓ 送信済'; }
+  showToast('発注書 ' + po.purchaseOrderNo + ' を' + labels[method] + 'で送信しました', 'success');
 }
 
 // 処理済み移動時に請求管理ページへ連動させる
@@ -41919,7 +42593,10 @@ var _settingsPanelContents = {
         // ── 優先車両設定 ──
         +'<div class="settings-section-title" style="margin-top:22px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>優先車両設定</div>'
         +'<div class="settings-form-group"><label class="settings-form-label">優先車両ナンバー（カンマ区切り）</label><input class="settings-form-input" placeholder="例：品川 100 あ 1234, 品川 200 い 5678" /></div>'
-        +'<div class="settings-form-group"><label class="settings-form-label">推薦候補数（上位N台を表示）</label><select class="settings-form-select"><option>3台</option><option>5台</option><option>10台</option></select></div>';
+        +'<div class="settings-form-group"><label class="settings-form-label">推薦候補数（上位N台を表示）</label><select class="settings-form-select"><option>3台</option><option>5台</option><option>10台</option></select></div>'
+
+        // ── 増車判定（scale-out）チューニング ──
+        + buildScaleOutSettings();
     }
   },
   api: {
@@ -41940,6 +42617,48 @@ var _settingsPanelContents = {
     }
   }
 };
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  増車判定（scale-out）チューニング設定（docs/scale-out-judgement.md §11）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function buildScaleOutSettings() {
+  var cfg = window.SCALEOUT_CONFIG || {};
+  var th = cfg.SCALEOUT_THRESHOLD != null ? cfg.SCALEOUT_THRESHOLD : 70;
+  var lr = Math.round((cfg.LOAD_RATE_TIGHT != null ? cfg.LOAD_RATE_TIGHT : 0.95) * 100);
+  var pf = cfg.PROFIT_FLOOR_PCT != null ? cfg.PROFIT_FLOOR_PCT : 10;
+  function row(label, id, min, max, val, unit, key, scale) {
+    return '<div class="sp-slider-row" style="margin-bottom:12px">'
+      + '<div class="sp-slider-label" style="width:150px;font-size:12px;font-weight:600;color:#374151">' + label + '</div>'
+      + '<div style="flex:1;display:flex;align-items:center;gap:10px">'
+      + '<input type="range" class="sp-slider" min="' + min + '" max="' + max + '" value="' + val + '" style="flex:1" oninput="scaleOutConfigInput(\'' + key + '\',this.value,' + (scale || 1) + ')">'
+      + '<span id="so-cfg-' + id + '" style="min-width:44px;text-align:right;font-size:13px;font-weight:700;font-family:Inter,sans-serif;color:var(--sidebar-bg)">' + val + unit + '</span>'
+      + '</div></div>';
+  }
+  return ''
+    + '<div class="settings-section-title" style="margin-top:22px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>増車判定（scale-out）</div>'
+    + '<p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">「増車必要/推奨」を出す基準。変更すると個別案件処理・配車計画表のバッジ／件数へ即時反映されます（判定エンジン：assets/logipoke-scaleout.js）。</p>'
+    + row('💡 増車推奨スコア閾値', 'TH', 40, 95, th, '点', 'SCALEOUT_THRESHOLD', 1)
+    + row('📦 余裕薄とみなす積載率', 'LR', 70, 100, lr, '%', 'LOAD_RATE_TIGHT', 100)
+    + row('💰 採算下限（粗利率）', 'PF', 0, 30, pf, '%', 'PROFIT_FLOOR_PCT', 1)
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;line-height:1.6">'
+    + '・積載率がこの値以上 → 1台可能でも<b>増車推奨</b>。閾値を下げるほど推奨が増えます。<br>'
+    + '・採算下限を下回る増車構成は推奨しません（スポット採算ガード）。</div>';
+}
+
+// 設定変更 → window.SCALEOUT_CONFIG を更新し、関連ビューを即時再描画
+function scaleOutConfigInput(key, val, scale) {
+  val = parseFloat(val); scale = scale || 1;
+  if (!window.SCALEOUT_CONFIG) window.SCALEOUT_CONFIG = {};
+  window.SCALEOUT_CONFIG[key] = (scale === 100) ? (val / 100) : val;
+  // 値ラベル更新
+  var idMap = { SCALEOUT_THRESHOLD: ['TH', '点'], LOAD_RATE_TIGHT: ['LR', '%'], PROFIT_FLOOR_PCT: ['PF', '%'] };
+  var info = idMap[key];
+  if (info) { var el = document.getElementById('so-cfg-' + info[0]); if (el) el.textContent = val + info[1]; }
+  // 関連ビューの再描画（存在する画面のみ）
+  ['renderUnprocessedList', 'renderProcessingList', 'renderDnd', 'renderSchedule'].forEach(function (fn) {
+    try { if (typeof window[fn] === 'function') window[fn](); } catch (e) {}
+  });
+}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  設定パネル AI重み付けリアルタイム処理

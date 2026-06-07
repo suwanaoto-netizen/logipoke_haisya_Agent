@@ -9,6 +9,7 @@
 | --- | --- |
 | `index.html` | 配車管理画面（メイン）|
 | `ai-phone-reception.html` | AI 電話受付画面 |
+| `review.html` | レビュー入口（各画面・増車モック・設計ドキュメントへのリンク集）|
 
 両ページは `localStorage` 経由でデータを連携しています（AI 電話受付で取り込んだ案件が配車管理側の「未処理 / 未割当」に自動反映）。
 
@@ -69,12 +70,32 @@ python3 -m http.server 8000
 
 ## GitHub Pages で公開する
 
-1. このリポジトリを GitHub に push します。
-2. リポジトリの **Settings → Pages** を開きます。
-3. **Source** を `Deploy from a branch` にし、ブランチを `main`(または公開したいブランチ)、フォルダを `/ (root)` に設定して保存します。
-4. 数十秒待つと `https://<ユーザー名>.github.io/<リポジトリ名>/` で公開されます。
+公開後の入口:
 
-`.nojekyll` を含めているため、Jekyll による処理は行われず、ファイルがそのまま配信されます。
+- `/` … 配車管理（メイン, `index.html`）
+- **`/review.html` … レビュー入口**（各画面・増車UIモック・設計ドキュメントへのリンク集）
+
+### A. マージ後に Actions で自動公開（推奨・本番）
+
+`.github/workflows/pages.yml` を同梱。**`main` への push（PRマージ）で自動デプロイ**されます。初回のみ:
+
+1. **Settings → Pages** で **Source = `GitHub Actions`** に設定。
+2. PR をマージ（or Actions タブから `Deploy to GitHub Pages` を手動実行）。
+3. 数分で `https://<ユーザー名>.github.io/<リポジトリ名>/` に公開。
+
+> `github-pages` 環境は既定で **デフォルトブランチ(main)のみ**デプロイ許可のため、
+> feature ブランチからの自動デプロイはブロックされます（これは仕様です）。
+
+### B. マージ前に feature ブランチをプレビューしたい場合
+
+次のいずれか:
+
+- **classic 方式**: Settings → Pages → Source = `Deploy from a branch` → ブランチ
+  `claude/gallant-gauss-UsC5y`・フォルダ `/ (root)`。環境制限を受けず即時公開。
+- または Settings → Environments → `github-pages` → Deployment branches に当該ブランチを追加後、
+  Actions タブから手動実行。
+
+`.nojekyll` を同梱しているため Jekyll 処理は行われず、ファイルがそのまま配信されます。
 
 ## ライセンス
 

@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>個別案件処理 ― 増車判定 反映UIモック（Step 3-4）</title>
+<style>
+  :root {
+    --sidebar-bg:#1A6B56; --accent:#3BB888; --accent-pale:#EAF5F0;
+    --text-primary:#1a1a1a; --text-secondary:#6b7280; --text-muted:#9ca3af;
+    --border:#e5e7eb; --bg:#f4f6f8; --card-bg:#fff; --red:#dc2626;
+    --orange:#f97316; --orange-light:#fff7ed; --green:#16a34a; --green-light:#f0fdf4;
+    --grp:#0D4A3A; --grp-bg:#EAF5F0; --partner:#c2410c; --partner-bg:#fff7ed;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Noto Sans JP','Inter',sans-serif; background:var(--bg); color:var(--text-primary); font-size:13px; padding:16px; }
+  .wrap { max-width:1180px; margin:0 auto; }
+  .mock-note { font-size:11px; color:var(--text-secondary); background:#fff; border:1px dashed var(--border); border-radius:8px; padding:8px 12px; margin-bottom:12px; line-height:1.6; }
+  .mock-note b { color:var(--sidebar-bg); }
+
+  /* ヘッダー */
+  .page-header { background:var(--card-bg); border:1px solid var(--border); border-bottom:none; border-radius:10px 10px 0 0; padding:12px 18px; display:flex; align-items:center; gap:12px; }
+  .page-title { font-size:16px; font-weight:800; }
+
+  /* フェーズタブ */
+  .phase-tabs { display:flex; gap:8px; background:var(--card-bg); border-left:1px solid var(--border); border-right:1px solid var(--border); padding:8px 18px; }
+  .phase-tab { padding:8px 16px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text-secondary); cursor:pointer; display:flex; align-items:center; gap:7px; }
+  .phase-tab .tab-count { font-size:10px; font-weight:800; font-family:'Inter',sans-serif; padding:1px 7px; border-radius:10px; background:#e5e7eb; color:var(--text-secondary); }
+  .phase-tab.unprocessed.active { border-color:#0D4A3A; color:#0D4A3A; background:#eef7f3; }
+  .phase-tab.processing.active { border-color:#1a7a5e; color:#1a7a5e; background:#eaf6f1; }
+  .phase-tab.processing.active .tab-count, .phase-tab.unprocessed.active .tab-count { background:var(--red); color:#fff; }
+  .phase-tab.processed.active { border-color:#3BB888; color:#3BB888; }
+
+  /* 2ペイン */
+  .proc-body { display:flex; border:1px solid var(--border); border-top:none; border-radius:0 0 10px 10px; overflow:hidden; height:680px; background:var(--bg); }
+
+  /* 左：案件リスト */
+  .panel-list { width:330px; flex-shrink:0; background:var(--card-bg); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
+  .panel-list-head { padding:10px 14px; border-bottom:1px solid var(--border); font-size:12px; font-weight:800; display:flex; align-items:center; gap:8px; }
+  .panel-list-head .badge { font-size:10px; font-weight:800; font-family:'Inter',sans-serif; padding:1px 8px; border-radius:10px; background:var(--orange); color:#fff; }
+  .scaleout-summary { margin-left:auto; font-size:9.5px; font-weight:700; color:#9a3412; background:var(--orange-light); border:1px solid #fed7aa; border-radius:10px; padding:2px 9px; }
+  .panel-cases { overflow-y:auto; flex:1; }
+
+  .case-card { padding:12px 14px; border-bottom:1px solid var(--border); cursor:pointer; position:relative; transition:background .1s; }
+  .case-card:hover { background:#f9fafb; }
+  .case-card.selected { background:var(--accent-pale); border-left:3px solid var(--accent); }
+  .case-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:5px; }
+  .case-no { font-family:'Inter',sans-serif; font-size:10.5px; color:var(--text-muted); }
+  .case-badges { display:flex; gap:4px; flex-shrink:0; }
+  .case-status-badge { font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:10px; white-space:nowrap; }
+  .badge-urgent { background:#fee2e2; color:#dc2626; }
+  .badge-processing { background:#fed7aa; color:#c2410c; }
+  .case-client { font-size:13px; font-weight:700; margin-bottom:3px; }
+  .case-route { font-size:11px; color:var(--text-secondary); margin-bottom:3px; display:flex; align-items:center; gap:4px; }
+  .case-goods { font-size:10.5px; color:var(--text-muted); }
+
+  /* ★ 増車判定バッジ（verdict 4状態） */
+  .scaleout-badge { display:inline-flex; align-items:center; gap:5px; margin-top:8px; font-size:9.5px; font-weight:800; padding:3px 9px; border-radius:6px; }
+  .scaleout-badge .dot { width:6px; height:6px; border-radius:50%; }
+  .so-required    { color:#9a3412; background:var(--orange-light); border:1px solid #fed7aa; }
+  .so-required .dot { background:var(--orange); }
+  .so-recommended { color:#0D4A3A; background:var(--grp-bg); border:1px solid #b6e6d3; }
+  .so-recommended .dot { background:var(--grp); }
+  .so-negotiate   { color:#92400e; background:#fff7ed; border:1px solid #fde68a; }
+  .so-negotiate .dot { background:#d97706; }
+  .so-review      { color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; }
+  .so-review .dot { background:#94a3b8; }
+
+  /* 右：詳細パネル */
+  .panel-detail { flex:1; background:var(--card-bg); display:flex; flex-direction:column; overflow:hidden; min-width:0; }
+  .detail-head { padding:14px 18px; border-bottom:1px solid var(--border); }
+  .detail-client { font-size:16px; font-weight:800; }
+  .detail-route { font-size:12px; color:var(--text-secondary); margin-top:3px; }
+  .detail-meta { display:flex; gap:10px; margin-top:6px; flex-wrap:wrap; }
+  .detail-chip { font-size:10px; font-weight:600; color:var(--text-secondary); background:#f3f4f6; border-radius:5px; padding:2px 8px; }
+  .detail-body { flex:1; overflow-y:auto; padding:16px 18px; }
+
+  /* 増車判定バナー */
+  .verdict-banner { border-radius:10px; padding:12px 14px; margin-bottom:14px; display:flex; align-items:flex-start; gap:12px; }
+  .verdict-banner.required { background:var(--orange-light); border:1px solid #fed7aa; }
+  .verdict-banner.recommended { background:var(--grp-bg); border:1px solid #b6e6d3; }
+  .verdict-banner.review { background:#f1f5f9; border:1px solid #cbd5e1; }
+  .verdict-banner.negotiate { background:#fff7ed; border:1px solid #fde68a; }
+  .verdict-ico { font-size:22px; flex-shrink:0; line-height:1.2; }
+  .verdict-title { font-size:13px; font-weight:800; }
+  .verdict-title.required { color:#9a3412; }
+  .verdict-title.recommended { color:#0D4A3A; }
+  .verdict-title.review { color:#475569; }
+  .verdict-title.negotiate { color:#92400e; }
+  .verdict-desc { font-size:11px; color:var(--text-secondary); margin-top:3px; line-height:1.5; }
+  .verdict-reasons { display:flex; gap:5px; flex-wrap:wrap; margin-top:6px; }
+  .verdict-reason { font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:5px; background:#fff; border:1px solid var(--border); color:var(--text-secondary); }
+
+  .section-label { font-size:11px; font-weight:800; color:var(--text-secondary); margin:14px 0 8px; display:flex; align-items:center; gap:7px; }
+
+  /* 複数台モードトグル */
+  .multi-mode-toggle { display:flex; gap:8px; margin-bottom:12px; }
+  .multi-mode-btn { flex:1; padding:8px; border:1.5px solid var(--border); border-radius:8px; background:#fff; color:var(--text-secondary); font-size:11px; font-weight:700; cursor:pointer; text-align:center; }
+  .multi-mode-btn.active { border-color:var(--grp); color:var(--grp); background:var(--grp-bg); }
+
+  /* 車両候補カード（vcard） */
+  .vcard-list { display:flex; flex-direction:column; gap:8px; }
+  .vcard { display:flex; align-items:center; gap:12px; border:2px solid var(--border); border-radius:10px; padding:11px 13px; background:#fff; position:relative; }
+  .vcard.vcard-top { border-color:var(--grp); background:linear-gradient(135deg,#f0fdf9 0%,#EAF5F0 100%); box-shadow:0 2px 10px rgba(13,74,58,.12); }
+  .vcard.partner { border-color:#fde68a; background:linear-gradient(135deg,#fffdf5 0%,#fff7ed 100%); }
+  .vcard-grp-tag { width:24px; height:24px; border-radius:6px; background:var(--grp); color:#fff; font-size:12px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .vcard.partner .vcard-grp-tag { background:var(--partner); }
+  .vcard-info { flex:1; min-width:0; }
+  .vcard-driver { font-size:13.5px; font-weight:700; }
+  .vcard-vehicle { font-size:10.5px; color:var(--text-muted); font-family:'Inter',sans-serif; margin-top:1px; }
+  .vcard-tags { display:flex; gap:5px; margin-top:5px; flex-wrap:wrap; }
+  .vcard-tag { font-size:9.5px; padding:2px 7px; border-radius:6px; font-weight:600; }
+  .vcard-tag-self { background:#d4f0e4; color:#0D4A3A; }
+  .vcard-tag-partner { background:#fde68a; color:#92400e; }
+  .vcard-tag-base { background:#f1f5f9; color:#475569; }
+  .vcard-tag-cap { background:#dbeafe; color:#1e40af; }
+  .vcard-tag-avail { background:#d1fae5; color:#065f46; }
+  .vcard-tag-charge { background:#fff7ed; color:#9a3412; }
+  .vcard-right { display:flex; flex-direction:column; align-items:flex-end; gap:2px; flex-shrink:0; }
+  .vcard-score { font-size:20px; font-weight:800; font-family:'Inter',sans-serif; color:var(--grp); line-height:1; }
+  .vcard.partner .vcard-score { color:var(--partner); }
+  .vcard-score-label { font-size:9px; color:var(--text-muted); }
+  .vcard-state { font-size:9px; font-weight:800; padding:2px 7px; border-radius:8px; margin-top:3px; }
+  .vcard-state.assigned { background:#ecfdf5; color:var(--green); border:1px solid #a7f3d0; }
+  .vcard-state.pending { background:#f1f5f9; color:var(--text-muted); }
+
+  /* 利益影響パネル */
+  .profit-panel { margin-top:14px; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  .profit-head { padding:8px 12px; background:#f8fafc; font-size:11px; font-weight:800; border-bottom:1px solid var(--border); }
+  .profit-rows { padding:10px 12px; }
+  .profit-row { display:flex; justify-content:space-between; font-size:11px; padding:3px 0; }
+  .profit-row .v { font-family:'Inter',sans-serif; font-weight:700; }
+  .profit-row.total { border-top:1px solid var(--border); margin-top:5px; padding-top:7px; font-weight:800; }
+  .profit-row.total .v { color:var(--red); font-size:14px; }
+  .profit-row .arrow { color:var(--text-muted); font-weight:600; font-size:10px; }
+
+  .detail-actions { padding:12px 18px; border-top:1px solid var(--border); display:flex; gap:8px; }
+  .btn { padding:9px 16px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; border:none; display:inline-flex; align-items:center; gap:6px; }
+  .btn-grp { background:var(--grp); color:#fff; flex:1; justify-content:center; }
+  .btn-partner { background:var(--partner-bg); color:var(--partner); border:1px solid #fde68a; }
+  .btn-secondary { background:#f3f4f6; color:var(--text-primary); border:1px solid var(--border); }
+
+  .empty-prompt { text-align:center; color:var(--text-muted); font-size:12px; padding:40px 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="mock-note">
+    <b>個別案件処理 ― 増車判定の反映UIモック（実装手順 Step 3-4）</b><br>
+    判定エンジン <code>evaluateScaleOut(order)</code> の <b>verdict</b> を、左の案件カードに<b>4状態バッジ</b>（必須／推奨／要交渉／要確認）として反映し、
+    右の詳細パネルに増車プラン（車両候補 vcard ①②③＋協力会社＋利益影響）を出します。
+    左のカードをクリックすると、verdict に応じて右の詳細が切り替わります。
+  </div>
+
+  <div class="page-header"><div class="page-title">個別案件処理</div></div>
+  <div class="phase-tabs">
+    <button class="phase-tab unprocessed">未処理 <span class="tab-count">8</span></button>
+    <button class="phase-tab processing active">処理中 <span class="tab-count">6</span></button>
+    <button class="phase-tab processed">処理済 <span class="tab-count">12</span></button>
+  </div>
+
+  <div class="proc-body">
+
+    <!-- 左：案件リスト -->
+    <div class="panel-list">
+      <div class="panel-list-head">📋 案件 <span class="badge">6</span><span class="scaleout-summary">⊕ 増車要 4件</span></div>
+      <div class="panel-cases" id="caseList">
+
+        <!-- A: required（積載超過） -->
+        <div class="case-card selected" data-v="required" onclick="selectCase(this)">
+          <div class="case-card-header"><span class="case-no">#20240524101</span>
+            <div class="case-badges"><span class="case-status-badge badge-urgent">緊急</span><span class="case-status-badge badge-processing">処理中</span></div></div>
+          <div class="case-client">▲▲製作所</div>
+          <div class="case-route">📍 川口 → 仙台</div>
+          <div class="case-goods">精密機器 6,800kg</div>
+          <span class="scaleout-badge so-required"><span class="dot"></span>⊕ 増車必要（不足2,800kg・2台）</span>
+        </div>
+
+        <!-- B: required（時間制約） -->
+        <div class="case-card" data-v="required2" onclick="selectCase(this)">
+          <div class="case-card-header"><span class="case-no">#20240524102</span>
+            <div class="case-badges"><span class="case-status-badge badge-processing">処理中</span></div></div>
+          <div class="case-client">◇◇商店</div>
+          <div class="case-route">📍 さいたま → 名古屋</div>
+          <div class="case-goods">飲料ケース 5,200kg</div>
+          <span class="scaleout-badge so-required"><span class="dot"></span>⊕ 増車必要（納期超過・2台/中継）</span>
+        </div>
+
+        <!-- C: recommended -->
+        <div class="case-card" data-v="recommended" onclick="selectCase(this)">
+          <div class="case-card-header"><span class="case-no">#20240524103</span>
+            <div class="case-badges"><span class="case-status-badge badge-processing">処理中</span></div></div>
+          <div class="case-client">○○商事</div>
+          <div class="case-route">📍 川口 → 横浜</div>
+          <div class="case-goods">建材 3,800kg（積載率95%）</div>
+          <span class="scaleout-badge so-recommended"><span class="dot"></span>⊕ 増車推奨（余裕薄・78点）</span>
+        </div>
+
+        <!-- D: none -->
+        <div class="case-card" data-v="none" onclick="selectCase(this)">
+          <div class="case-card-header"><span class="case-no">#20240524104</span>
+            <div class="case-badges"><span class="case-status-badge badge-processing">処理中</span></div></div>
+          <div class="case-client">関東物流</div>
+          <div class="case-route">📍 江東 → 千葉</div>
+          <div class="case-goods">パレット 1,800kg</div>
+        </div>
+
+        <!-- E: review -->
+        <div class="case-card" data-v="review" onclick="selectCase(this)">
+          <div class="case-card-header"><span class="case-no">#20240524105</span>
+            <div class="case-badges"><span class="case-status-badge badge-processing">処理中</span></div></div>
+          <div class="case-client">□□産業</div>
+          <div class="case-route">📍 川口 → 大阪</div>
+          <div class="case-goods">荷量・時間 情報不足</div>
+          <span class="scaleout-badge so-review"><span class="dot"></span>要確認（情報不足で判定保留）</span>
+        </div>
+
+        <!-- F: negotiate -->
+        <div class="case-card" data-v="negotiate" onclick="selectCase(this)">
+          <div class="case-card-header"><span class="case-no">#20240524106</span>
+            <div class="case-badges"><span class="case-status-badge badge-urgent">緊急</span></div></div>
+          <div class="case-client">福山急配</div>
+          <div class="case-route">📍 大田 → 札幌</div>
+          <div class="case-goods">冷凍 2,000kg / 時間厳守</div>
+          <span class="scaleout-badge so-negotiate"><span class="dot"></span>⚠ 要交渉（手配困難・空き0）</span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 右：詳細パネル -->
+    <div class="panel-detail" id="detail"><!-- JSで描画 --></div>
+  </div>
+
+  <div class="mock-note" style="margin-top:12px">
+    <b>反映ポイント（Step 3-4）</b>：<br>
+    ・<b>カードの4状態バッジ</b>＝<code>verdict</code>（required/recommended/negotiate/review）を <code>renderUnprocessedList</code>/<code>renderProcessingList</code> に1ブロック追加<br>
+    ・<b>詳細の増車プラン</b>＝<code>renderProcessingDetail</code> の <code>vcard-list</code> を①②③＋協力会社に拡張（既存 <code>multi-mode-btn</code>／<code>vcard</code> を流用）<br>
+    ・<b>利益影響</b>＝<code>calcFare()</code> の原価・粗利を増車後構成で再計算<br>
+    ・左上の <b>「⊕ 増車要 N件」</b>＝<code>verdict in {required, recommended}</code> の件数集計
+  </div>
+</div>
+
+<script>
+  // verdict ごとの詳細パネル テンプレート
+  const T = {
+    required: `
+      <div class="detail-head">
+        <div class="detail-client">▲▲製作所</div>
+        <div class="detail-route">📍 川口 → 仙台 ・ 精密機器 6,800kg</div>
+        <div class="detail-meta"><span class="detail-chip">緊急</span><span class="detail-chip">05/26 AM厳守</span><span class="detail-chip">距離 365km</span></div>
+      </div>
+      <div class="detail-body">
+        <div class="verdict-banner required">
+          <div class="verdict-ico">⊕</div>
+          <div>
+            <div class="verdict-title required">増車必要 ― 4t車では積載超過</div>
+            <div class="verdict-desc">必要積載 6,800kg に対し最適1台（4t/4,000kg）では <b>不足2,800kg</b>。推定 <b>2台＋協力1</b> での編成を推奨します。</div>
+            <div class="verdict-reasons"><span class="verdict-reason">overload 不足2,800kg</span><span class="verdict-reason">推定3台</span><span class="verdict-reason">分割形態：parallel</span></div>
+          </div>
+        </div>
+
+        <div class="section-label">🚚 配車モード</div>
+        <div class="multi-mode-toggle">
+          <div class="multi-mode-btn">単一便</div>
+          <div class="multi-mode-btn active">複数台（増車）</div>
+          <div class="multi-mode-btn">中継</div>
+        </div>
+
+        <div class="section-label">🤖 AI増車プラン ― 車両候補（自社2＋協力1）</div>
+        <div class="vcard-list">
+          <div class="vcard vcard-top">
+            <div class="vcard-grp-tag">①</div>
+            <div class="vcard-info"><div class="vcard-driver">山田 一郎</div><div class="vcard-vehicle">車両1245</div>
+              <div class="vcard-tags"><span class="vcard-tag vcard-tag-self">自社</span><span class="vcard-tag vcard-tag-base">川口</span><span class="vcard-tag vcard-tag-cap">4t 4,000kg</span><span class="vcard-tag vcard-tag-avail">空車</span></div></div>
+            <div class="vcard-right"><div class="vcard-score">95</div><div class="vcard-score-label">AIスコア</div><div class="vcard-state assigned">✓割当</div></div>
+          </div>
+          <div class="vcard vcard-top">
+            <div class="vcard-grp-tag">②</div>
+            <div class="vcard-info"><div class="vcard-driver">佐藤 健太</div><div class="vcard-vehicle">車両2580</div>
+              <div class="vcard-tags"><span class="vcard-tag vcard-tag-self">自社</span><span class="vcard-tag vcard-tag-base">品川</span><span class="vcard-tag vcard-tag-cap">4t 4,000kg</span><span class="vcard-tag vcard-tag-avail">空車</span></div></div>
+            <div class="vcard-right"><div class="vcard-score">88</div><div class="vcard-score-label">AIスコア</div><div class="vcard-state pending">未配置</div></div>
+          </div>
+          <div class="vcard partner">
+            <div class="vcard-grp-tag">③</div>
+            <div class="vcard-info"><div class="vcard-driver">北関東物流</div><div class="vcard-vehicle">4tウィング ・ 傭車</div>
+              <div class="vcard-tags"><span class="vcard-tag vcard-tag-partner">協力会社</span><span class="vcard-tag vcard-tag-base">熊谷</span><span class="vcard-tag vcard-tag-charge">傭車 ¥38,000</span><span class="vcard-tag vcard-tag-avail">即時可</span></div></div>
+            <div class="vcard-right"><div class="vcard-score">84</div><div class="vcard-score-label">適合度</div><div class="vcard-state pending">未配置</div></div>
+          </div>
+        </div>
+
+        <div class="profit-panel">
+          <div class="profit-head">💰 利益影響（増車前後）</div>
+          <div class="profit-rows">
+            <div class="profit-row"><span>受注運賃</span><span class="v">¥120,000</span></div>
+            <div class="profit-row"><span>自社原価（①②）</span><span class="v">− ¥60,000</span></div>
+            <div class="profit-row"><span>傭車支払（③北関東物流）</span><span class="v">− ¥38,000</span></div>
+            <div class="profit-row total"><span>粗利 / 粗利率</span><span class="v">¥22,000 ・ 18% <span class="arrow">◂ 単一車前提なら28%</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-actions">
+        <button class="btn btn-grp">⊕ この増車プランで配車確定（3台）</button>
+        <button class="btn btn-partner">協力会社を変更</button>
+      </div>`,
+
+    required2: `
+      <div class="detail-head"><div class="detail-client">◇◇商店</div><div class="detail-route">📍 さいたま → 名古屋 ・ 飲料ケース 5,200kg</div>
+        <div class="detail-meta"><span class="detail-chip">翌日午前厳守</span><span class="detail-chip">距離 360km</span></div></div>
+      <div class="detail-body">
+        <div class="verdict-banner required"><div class="verdict-ico">⊕</div><div>
+          <div class="verdict-title required">増車必要 ― 1台では納期超過</div>
+          <div class="verdict-desc">単独運行だと改善基準・納期の両面で成立せず。<b>中継（relay）または2台並走</b>を推奨。</div>
+          <div class="verdict-reasons"><span class="verdict-reason">time_window 40分超過</span><span class="verdict-reason">推定2台</span><span class="verdict-reason">分割形態：relay</span></div>
+        </div></div>
+        <div class="section-label">🚚 配車モード</div>
+        <div class="multi-mode-toggle"><div class="multi-mode-btn">単一便</div><div class="multi-mode-btn">複数台</div><div class="multi-mode-btn active">中継</div></div>
+        <div class="empty-prompt">（中継区間の車両候補①②をここに表示）</div>
+      </div>
+      <div class="detail-actions"><button class="btn btn-grp">⊕ 中継プランで配車確定</button></div>`,
+
+    recommended: `
+      <div class="detail-head"><div class="detail-client">○○商事</div><div class="detail-route">📍 川口 → 横浜 ・ 建材 3,800kg</div>
+        <div class="detail-meta"><span class="detail-chip">05/25 AM</span><span class="detail-chip">距離 35km</span><span class="detail-chip">積載率 95%</span></div></div>
+      <div class="detail-body">
+        <div class="verdict-banner recommended"><div class="verdict-ico">💡</div><div>
+          <div class="verdict-title recommended">増車推奨 ― 1台でも可能だが余裕が薄い</div>
+          <div class="verdict-desc">積載率95%・納期マージン小。確実性重視なら増車、コスト重視なら単一便。<b>増車推奨度 78点</b>。</div>
+          <div class="verdict-reasons"><span class="verdict-reason">余裕薄 積載率95%</span><span class="verdict-reason">採算改善余地 小</span></div>
+        </div></div>
+        <div class="section-label">🚚 配車モード</div>
+        <div class="multi-mode-toggle"><div class="multi-mode-btn active">単一便</div><div class="multi-mode-btn">複数台（推奨）</div><div class="multi-mode-btn">中継</div></div>
+        <div class="empty-prompt">（推奨は任意。単一便のまま確定も可）</div>
+      </div>
+      <div class="detail-actions"><button class="btn btn-secondary">単一便で確定</button><button class="btn btn-grp">⊕ 増車プランを見る</button></div>`,
+
+    none: `
+      <div class="detail-head"><div class="detail-client">関東物流</div><div class="detail-route">📍 江東 → 千葉 ・ パレット 1,800kg</div>
+        <div class="detail-meta"><span class="detail-chip">14:00</span><span class="detail-chip">距離 45km</span></div></div>
+      <div class="detail-body">
+        <div class="section-label">🤖 AI推奨車両（通常配車・増車不要）</div>
+        <div class="vcard-list">
+          <div class="vcard vcard-top" style="border-color:var(--accent);background:linear-gradient(135deg,#f0fdf9,#e8f8f2)">
+            <div class="vcard-grp-tag" style="background:var(--sidebar-bg)">1</div>
+            <div class="vcard-info"><div class="vcard-driver">鈴木 三郎</div><div class="vcard-vehicle">車両1356</div>
+              <div class="vcard-tags"><span class="vcard-tag vcard-tag-base">川口</span><span class="vcard-tag vcard-tag-cap">2t 2,000kg</span><span class="vcard-tag vcard-tag-avail">空車</span></div></div>
+            <div class="vcard-right"><div class="vcard-score" style="color:var(--sidebar-bg)">91</div><div class="vcard-score-label">AIスコア</div></div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:12px">1台で積載・時間・法令とも余裕。増車バッジは出ません。</div>
+      </div>
+      <div class="detail-actions"><button class="btn btn-grp" style="background:var(--sidebar-bg)">この車両で配車確定</button></div>`,
+
+    review: `
+      <div class="detail-head"><div class="detail-client">□□産業</div><div class="detail-route">📍 川口 → 大阪 ・ 荷量/時間 不明</div>
+        <div class="detail-meta"><span class="detail-chip">終日</span></div></div>
+      <div class="detail-body">
+        <div class="verdict-banner review"><div class="verdict-ico">❓</div><div>
+          <div class="verdict-title review">要確認 ― 情報不足で増車判定を保留</div>
+          <div class="verdict-desc">荷量(kg)・時間窓が取得できず（AI信頼度 low）。誤手配防止のため<b>自動で増車必須にはしません</b>。案件情報を補完してください。</div>
+          <div class="verdict-reasons"><span class="verdict-reason">weightKg 不明</span><span class="verdict-reason">confidence: low</span></div>
+        </div></div>
+        <div class="section-label">📝 補完が必要な項目</div>
+        <div style="font-size:11px;color:var(--text-secondary);line-height:1.8">・荷量（kg / 容積）<br>・指定時間（納期・厳守の有無）</div>
+      </div>
+      <div class="detail-actions"><button class="btn btn-secondary">案件情報を編集</button><button class="btn btn-grp">補完後に再判定</button></div>`,
+
+    negotiate: `
+      <div class="detail-head"><div class="detail-client">福山急配</div><div class="detail-route">📍 大田 → 札幌 ・ 冷凍 2,000kg</div>
+        <div class="detail-meta"><span class="detail-chip">緊急</span><span class="detail-chip">時間厳守</span><span class="detail-chip">冷凍車</span></div></div>
+      <div class="detail-body">
+        <div class="verdict-banner negotiate"><div class="verdict-ico">⚠</div><div>
+          <div class="verdict-title negotiate">要交渉 ― 増車必要だが手配先が見つからない</div>
+          <div class="verdict-desc">増車は必須だが、自社・協力会社とも当該時間帯・車格（冷凍）の<b>空きが0</b>。納期/条件の交渉、または広域の協力会社打診が必要です。</div>
+          <div class="verdict-reasons"><span class="verdict-reason">required だが feasible=0</span><span class="verdict-reason">冷凍車 空き無し</span></div>
+        </div></div>
+        <div class="section-label">📞 取りうるアクション</div>
+        <div style="font-size:11px;color:var(--text-secondary);line-height:1.8">・荷主と納期/集荷時間を再交渉<br>・広域協力会社へスポット打診<br>・温度帯条件の見直し可否を確認</div>
+      </div>
+      <div class="detail-actions"><button class="btn btn-partner">広域協力会社へ打診</button><button class="btn btn-secondary">荷主へ交渉メモ</button></div>`,
+  };
+
+  function selectCase(el) {
+    document.querySelectorAll('.case-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('detail').innerHTML = T[el.dataset.v] || '<div class="empty-prompt">案件を選択してください</div>';
+  }
+  // 初期表示
+  document.getElementById('detail').innerHTML = T.required;
+</script>
+</body>
+</html>

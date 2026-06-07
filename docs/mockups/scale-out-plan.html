@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>配車計画表 ― 増車対応UIモック</title>
+<style>
+  /* ── index.html と同じカラートークン ── */
+  :root {
+    --sidebar-bg: #1A6B56;
+    --accent: #3BB888;
+    --text-primary: #1a1a1a;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --border: #e5e7eb;
+    --bg: #f4f6f8;
+    --card-bg: #ffffff;
+    --red: #dc2626;
+    /* 増車（scale-out）用に追加するトークン */
+    --grp: #0D4A3A;          /* 増車グループの基調色（既存ダークグリーン・新規色は持ち込まない） */
+    --grp-bg: #EAF5F0;
+    --partner: #c2410c;      /* 協力会社（傭車）アクセント */
+    --partner-bg: #fff7ed;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:'Noto Sans JP','Inter',sans-serif;
+    background:var(--bg); color:var(--text-primary);
+    padding:18px; font-size:13px;
+  }
+  .wrap { max-width:1160px; margin:0 auto; }
+  .mock-note {
+    font-size:11px; color:var(--text-secondary);
+    background:#fff; border:1px dashed var(--border); border-radius:8px;
+    padding:8px 12px; margin-bottom:12px; line-height:1.6;
+  }
+  .mock-note b { color:var(--sidebar-bg); }
+
+  /* ── ヘッダー / タブ ── */
+  .dispatch-header {
+    background:var(--card-bg); border:1px solid var(--border);
+    border-bottom:none; border-radius:10px 10px 0 0;
+    padding:0 18px; display:flex; align-items:stretch; min-height:52px;
+  }
+  .page-title { font-size:16px; font-weight:800; display:flex; align-items:center; }
+  .dispatch-tabs { display:flex; margin-left:16px; align-items:stretch; border-left:1px solid var(--border); }
+  .dispatch-tab {
+    padding:0 22px; font-size:13px; font-weight:600; cursor:pointer;
+    border:none; background:transparent; color:var(--text-secondary);
+    border-bottom:3px solid transparent; border-top:3px solid transparent;
+    border-right:1px solid var(--border);
+    display:flex; align-items:center; gap:7px;
+  }
+  .dispatch-tab.active { color:#1a7a5e; background:#eaf6f1; border-bottom-color:#1a7a5e; }
+  .tab-count { font-size:10px; font-weight:800; font-family:'Inter',sans-serif; padding:2px 8px; border-radius:20px; background:#e5e7eb; color:var(--text-secondary); }
+  .header-spacer { flex:1; }
+  .ai-toggle {
+    align-self:center; display:flex; align-items:center; gap:7px;
+    font-size:12px; font-weight:700; color:#fff;
+    background:var(--sidebar-bg); border:none; border-radius:8px;
+    padding:8px 14px; cursor:pointer; transition:filter .15s;
+  }
+  .ai-toggle:hover { filter:brightness(1.08); }
+  .ai-toggle.on { background:var(--grp); }
+
+  /* ── 未割当ストリップ（増車アラート） ── */
+  .unassigned-strip {
+    background:#fff; border-left:1px solid var(--border); border-right:1px solid var(--border);
+    padding:10px 18px; display:flex; align-items:center; gap:12px;
+  }
+  .strip-label { font-size:11px; font-weight:700; color:var(--text-secondary); flex-shrink:0; }
+  .case-card {
+    border:1px solid var(--border); border-radius:9px; padding:9px 12px;
+    min-width:280px; background:#fff; position:relative;
+  }
+  .case-card.selected { border-color:var(--grp); box-shadow:0 0 0 3px rgba(13,74,58,.16); }
+  .case-card-client { font-size:12.5px; font-weight:700; }
+  .case-card-route { font-size:11px; color:var(--text-secondary); margin-top:2px; display:flex; align-items:center; gap:5px; }
+  .scaleout-badge {
+    display:inline-flex; align-items:center; gap:5px;
+    margin-top:7px; font-size:10px; font-weight:800;
+    color:#9a3412; background:#fff7ed; border:1px solid #fed7aa;
+    padding:3px 8px; border-radius:6px;
+  }
+  .scaleout-badge .dot { width:6px; height:6px; border-radius:50%; background:#f97316; }
+  .case-card-actions { margin-top:8px; }
+  .btn-ai-scaleout {
+    font-size:10.5px; font-weight:700; color:#fff; background:var(--grp);
+    border:none; border-radius:6px; padding:5px 11px; cursor:pointer;
+  }
+  .strip-hint { font-size:10.5px; color:var(--text-muted); }
+
+  /* ── サマリーバー ── */
+  .sched-summary {
+    display:flex; align-items:center; gap:12px;
+    padding:6px 14px; background:#fff;
+    border-left:1px solid var(--border); border-right:1px solid var(--border);
+    border-top:1px solid var(--border);
+  }
+  .sched-sum-date { font-size:12px; font-weight:700; display:flex; align-items:center; gap:6px; }
+  .sched-sum-divider { width:1px; height:16px; background:var(--border); }
+  .sched-sum-stat { display:flex; align-items:center; gap:4px; font-size:10.5px; color:var(--text-secondary); }
+  .sched-sum-stat-num { font-size:13px; font-weight:800; font-family:'Inter',sans-serif; color:var(--text-primary); }
+  .sched-sum-stat.running .sched-sum-stat-num { color:#1a7a5e; }
+  .sched-sum-stat.waiting .sched-sum-stat-num { color:#94a3b8; }
+  .sched-sum-stat.alert .sched-sum-stat-num { color:var(--red); }
+  /* 増車要カウンタ（新規） */
+  .sched-sum-stat.scaleout {
+    background:#fff7ed; border:1px solid #fed7aa; border-radius:14px;
+    padding:2px 10px; cursor:pointer;
+  }
+  .sched-sum-stat.scaleout .sched-sum-stat-num { color:#ea580c; }
+  .sched-sum-stat.scaleout .lbl { color:#9a3412; font-weight:700; }
+  .sched-sum-spacer { flex:1; }
+  .sched-sum-legend { display:flex; align-items:center; gap:12px; font-size:10px; color:var(--text-muted); flex-wrap:wrap; }
+  .sched-sum-legend-item { display:flex; align-items:center; gap:4px; }
+  .sched-sum-legend-swatch { width:11px; height:11px; border-radius:2px; }
+  .swatch-striped {
+    background-image:repeating-linear-gradient(45deg,#fed7aa,#fed7aa 3px,#c2410c 3px,#c2410c 6px);
+  }
+  .swatch-ghost { border:1.5px dashed var(--accent); background:rgba(59,184,136,.18); }
+
+  /* ── タイムラインボード ── */
+  .sched-board {
+    background:#fff; border:1px solid var(--border);
+    border-radius:0 0 10px 10px;
+    display:flex; flex-direction:column; overflow:hidden; position:relative;
+  }
+  .sched-time-header {
+    display:grid; grid-template-columns:188px 1fr;
+    border-bottom:1px solid var(--border); background:#fafbfc; height:22px;
+  }
+  .sched-time-header-label {
+    display:flex; align-items:center; padding:0 10px;
+    font-size:10px; font-weight:600; color:var(--text-muted);
+    border-right:1px solid var(--border);
+  }
+  .sched-time-axis { position:relative; }
+  .sched-time-tick {
+    position:absolute; top:0; bottom:0; transform:translateX(-50%);
+    font-size:9px; font-weight:600; color:var(--text-muted); font-family:'Inter',sans-serif;
+    display:flex; align-items:center;
+  }
+
+  /* セクション見出し（自社 / 増車枠） */
+  .sched-section-head {
+    display:flex; align-items:center; gap:8px;
+    padding:5px 12px; font-size:10.5px; font-weight:800;
+    color:var(--text-secondary); background:#f8fafc;
+    border-bottom:1px solid var(--border); border-top:1px solid var(--border);
+  }
+  .sched-section-head.partner { color:var(--partner); background:var(--partner-bg); }
+  .sched-section-head .pill {
+    font-size:9px; font-weight:700; padding:1px 7px; border-radius:10px;
+    background:#e5e7eb; color:var(--text-secondary);
+  }
+  .sched-section-head.partner .pill { background:#fde68a; color:#92400e; }
+
+  /* 各行（モック用に26px・実機は18pxの高密度ビュー） */
+  .sched-row {
+    display:grid; grid-template-columns:188px 1fr;
+    height:30px; border-bottom:1px solid #f3f4f6; position:relative;
+  }
+  .sched-row:hover { background:#fafdfc; }
+  /* 増車グループのハイライト（ホバー連動） */
+  .sched-row.grp-hi { background:var(--grp-bg); }
+
+  .sched-driver {
+    display:flex; align-items:center; gap:5px; padding:0 8px;
+    border-right:1px solid var(--border); background:#fff; overflow:hidden;
+  }
+  .sched-row.grp-hi .sched-driver { background:var(--grp-bg); }
+  .sched-driver-status-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .sched-driver-status-dot.running { background:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.15); }
+  .sched-driver-status-dot.waiting { background:#94a3b8; }
+  .sched-driver-status-dot.alert { background:#dc2626; }
+  .sched-driver-status-dot.off { background:#e5e7eb; }
+  .sched-driver-name { font-size:11px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* 拠点 / 協力会社バッジ */
+  .sched-base-badge {
+    font-size:8.5px; font-weight:700; padding:1px 5px; border-radius:4px;
+    background:#47556922; color:#475569; flex-shrink:0;
+  }
+  .sched-base-partner { background:#fde68a; color:#92400e; }
+
+  /* ⊕N台（増車）行頭マーク（新規・crossと同位置の流儀） */
+  .sched-scaleout-mark {
+    display:inline-flex; align-items:center; gap:2px;
+    font-size:8.5px; font-weight:800; color:#fff; background:var(--grp);
+    padding:1px 5px; border-radius:4px; flex-shrink:0; cursor:help;
+  }
+  .sched-driver-vehicle {
+    font-size:9.5px; color:var(--text-muted); font-family:'Inter',sans-serif;
+    margin-left:auto; flex-shrink:0; padding:2px 5px; border-radius:4px; border:1px dashed transparent;
+  }
+
+  .sched-bar-wrap {
+    position:relative; height:100%; background-color:#fcfcfd;
+    background-image:linear-gradient(90deg, transparent calc(100%/24 - 1px), #eef0f3 calc(100%/24 - 1px), #eef0f3 calc(100%/24));
+    background-size:calc(100%/1) 100%;
+  }
+  .sched-bar-wrap::before {
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background-image:linear-gradient(90deg, transparent calc(25% - 1px), #e0e4e8 calc(25% - 1px), #e0e4e8 25%,
+      transparent 25%, transparent calc(50% - 1px), #e0e4e8 calc(50% - 1px), #e0e4e8 50%,
+      transparent 50%, transparent calc(75% - 1px), #e0e4e8 calc(75% - 1px), #e0e4e8 75%);
+  }
+
+  /* 運行ブロック（バー） */
+  .sched-block {
+    position:absolute; top:4px; bottom:4px; border-radius:3px; padding:0 5px;
+    display:flex; align-items:center; gap:4px; overflow:hidden; cursor:pointer;
+    z-index:2; transition:filter .12s, transform .12s;
+  }
+  .sched-block:hover { filter:brightness(1.06); transform:scaleY(1.08); z-index:5; }
+  .sched-block-label { font-size:9px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* 増車グループのバー（共通色＋便番号タグ） */
+  .sched-block.grp { background:var(--grp); box-shadow:0 0 0 1px rgba(255,255,255,.6) inset; }
+  .sched-grp-tag {
+    font-size:9px; font-weight:900; color:var(--grp); background:#fff;
+    border-radius:3px; width:13px; height:13px; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  /* 協力会社バー＝斜線塗り */
+  .sched-block.grp.partner {
+    background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.28), rgba(255,255,255,.28) 4px, transparent 4px, transparent 8px);
+    background-color:var(--partner);
+  }
+
+  /* 増車グループ縦連結線（行をまたいで束ねる） */
+  .sched-grp-bracket {
+    position:absolute; z-index:6; pointer-events:none;
+    border-left:2px dashed var(--grp); border-radius:2px;
+  }
+  .sched-grp-bracket::before, .sched-grp-bracket::after {
+    content:''; position:absolute; left:-2px; width:7px; height:2px; background:var(--grp);
+  }
+  .sched-grp-bracket::before { top:0; }
+  .sched-grp-bracket::after { bottom:0; }
+
+  /* 粗利チップ（グループ先頭バーの右側に表示） */
+  .sched-profit-chip {
+    position:absolute; z-index:7; font-size:8.5px; font-weight:800; font-family:'Inter',sans-serif;
+    background:#fff; border:1px solid var(--border); border-radius:5px; padding:1px 6px;
+    color:#16a34a; white-space:nowrap; box-shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  .sched-profit-chip .down { color:var(--red); }
+  .sched-profit-chip .arrow { color:var(--text-muted); font-weight:600; }
+
+  /* ── AIおすすめ増車枠（ゴースト・index.html の dnd-rec-slot を踏襲） ── */
+  .sched-rec-slot {
+    position:absolute; top:3px; bottom:3px; border-radius:6px; pointer-events:none; z-index:9;
+    border:2px dashed var(--accent);
+    background:repeating-linear-gradient(45deg, rgba(59,184,136,.14), rgba(59,184,136,.14) 7px, rgba(59,184,136,.26) 7px, rgba(59,184,136,.26) 14px);
+    box-shadow:0 0 0 2px rgba(255,255,255,.65), 0 4px 12px rgba(26,122,94,.28);
+    display:none; animation:recPulse 1.25s ease-in-out infinite;
+  }
+  .sched-rec-slot.alt { border-color:var(--partner); background:repeating-linear-gradient(45deg, rgba(194,65,12,.12), rgba(194,65,12,.12) 7px, rgba(194,65,12,.24) 7px, rgba(194,65,12,.24) 14px); box-shadow:0 0 0 2px rgba(255,255,255,.65), 0 4px 12px rgba(194,65,12,.22); }
+  .show-ai .sched-rec-slot { display:flex; }
+  @keyframes recPulse { 0%,100%{opacity:1} 50%{opacity:.58} }
+  .sched-rec-tag {
+    position:absolute; left:50%; top:-19px; transform:translateX(-50%);
+    font-size:9px; font-weight:800; color:#fff; background:var(--accent);
+    padding:2px 8px; border-radius:5px; white-space:nowrap;
+    font-family:'Inter','Noto Sans JP',sans-serif; box-shadow:0 2px 6px rgba(0,0,0,.22);
+  }
+  .sched-rec-slot.alt .sched-rec-tag { background:var(--partner); }
+  .sched-rec-tag::after { content:''; position:absolute; left:50%; bottom:-4px; transform:translateX(-50%); border-left:4px solid transparent; border-right:4px solid transparent; border-top:4px solid var(--accent); }
+  .sched-rec-slot.alt .sched-rec-tag::after { border-top-color:var(--partner); }
+
+  /* 現在時刻ライン */
+  .sched-now-line { position:absolute; top:22px; bottom:0; width:2px; background:var(--red); z-index:8; pointer-events:none; }
+  .sched-now-line .now-dot { position:absolute; top:-4px; left:-3px; width:8px; height:8px; background:var(--red); border-radius:50%; box-shadow:0 0 0 2px rgba(220,38,38,.2); }
+
+  /* ヒント注釈の吹き出し（モック解説用、実機には無い） */
+  .annot { position:relative; }
+  .annot-tag {
+    position:absolute; font-size:9.5px; font-weight:700; color:var(--grp);
+    background:#fff; border:1px solid #b6e6d3; border-radius:6px; padding:2px 7px;
+    z-index:20; white-space:nowrap; box-shadow:0 2px 6px rgba(0,0,0,.08);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="mock-note">
+    <b>配車計画表 ― 増車対応UIモック（静的）</b><br>
+    既存の <code>sched-board</code>（ドライバー/車両 × 24時間軸ガント）の語彙の上に、増車対応を載せた表現です。
+    右上の「<b>🤖 AI増車提案を表示</b>」を押すと、未割当案件 <b>▲▲製作所</b> に対するAIの増車提案（緑＝自社／橙＝協力会社のゴースト枠）が計画表に重なります。
+    上段の <b>○○商事</b> は確定済みの3台増車グループ（束ね表示の例）。バーにマウスを乗せるとグループ全体がハイライトします。
+  </div>
+
+  <!-- ヘッダー -->
+  <div class="dispatch-header">
+    <div class="page-title">配車計画表</div>
+    <div class="dispatch-tabs">
+      <button class="dispatch-tab active">計画中 <span class="tab-count">12</span></button>
+      <button class="dispatch-tab">請求確定済み <span class="tab-count">3</span></button>
+    </div>
+    <div class="header-spacer"></div>
+    <button class="ai-toggle" id="aiToggle" onclick="toggleAI()">🤖 AI増車提案を表示</button>
+  </div>
+
+  <!-- 未割当ストリップ（増車アラート付きカード） -->
+  <div class="unassigned-strip">
+    <span class="strip-label">未割当</span>
+    <div class="case-card" id="caseCard" onclick="toggleAI()">
+      <div class="case-card-client">▲▲製作所</div>
+      <div class="case-card-route">川口 → 仙台 ・ 精密機器 6,800kg</div>
+      <div class="scaleout-badge"><span class="dot"></span>増車必要：4t車では積載超過（不足 2,800kg／推定3台）</div>
+      <div class="case-card-actions">
+        <button class="btn-ai-scaleout">⊕ AIで増車プランを見る</button>
+      </div>
+    </div>
+    <span class="strip-hint">← クリックでAI増車提案を計画表に重ねて表示</span>
+  </div>
+
+  <!-- サマリーバー -->
+  <div class="sched-summary">
+    <div class="sched-sum-date">📅 6月6日(金)　運行計画</div>
+    <div class="sched-sum-divider"></div>
+    <div class="sched-sum-stat"><span>表示</span><span class="sched-sum-stat-num">8</span><span style="color:var(--text-muted)">/ 50台</span></div>
+    <div class="sched-sum-stat running"><span>運行中</span><span class="sched-sum-stat-num">3</span></div>
+    <div class="sched-sum-stat waiting"><span>待機</span><span class="sched-sum-stat-num">3</span></div>
+    <div class="sched-sum-stat alert"><span>要対応</span><span class="sched-sum-stat-num">1</span></div>
+    <!-- 増車要カウンタ（新規） -->
+    <div class="sched-sum-stat scaleout" title="増車が必要な未対応案件にスクロール"><span class="lbl">⊕ 増車要</span><span class="sched-sum-stat-num">2</span><span class="lbl">件</span></div>
+    <div class="sched-sum-spacer"></div>
+    <div class="sched-sum-legend">
+      <div class="sched-sum-legend-item"><span class="sched-sum-legend-swatch" style="background:#1a7a5e"></span>通常運行</div>
+      <div class="sched-sum-legend-item"><span class="sched-sum-legend-swatch" style="background:var(--grp)"></span>増車グループ</div>
+      <div class="sched-sum-legend-item"><span class="sched-sum-legend-swatch swatch-striped"></span>協力会社(傭車)</div>
+      <div class="sched-sum-legend-item"><span class="sched-sum-legend-swatch swatch-ghost"></span>AI増車提案</div>
+    </div>
+  </div>
+
+  <!-- タイムラインボード -->
+  <div class="sched-board" id="board">
+    <div class="sched-time-header">
+      <div class="sched-time-header-label">ドライバー / 車両（8台）</div>
+      <div class="sched-time-axis">
+        <div class="sched-time-tick" style="left:16.67%">04:00</div>
+        <div class="sched-time-tick" style="left:33.33%">08:00</div>
+        <div class="sched-time-tick" style="left:50%">12:00</div>
+        <div class="sched-time-tick" style="left:66.67%">16:00</div>
+        <div class="sched-time-tick" style="left:83.33%">20:00</div>
+      </div>
+    </div>
+
+    <!-- 現在時刻ライン（13:00相当 → 188px列の右側 54.17%付近） -->
+    <div class="sched-now-line" style="left:calc(188px + (100% - 188px) * 0.5417)"><div class="now-dot"></div></div>
+
+    <!-- ───── 自社車両 ───── -->
+    <div class="sched-section-head">自社車両 <span class="pill">6台</span></div>
+
+    <!-- 増車グループ① ○○商事 -->
+    <div class="sched-row" data-grp="g1" onmouseenter="hiGroup('g1',true)" onmouseleave="hiGroup('g1',false)">
+      <div class="sched-driver">
+        <span class="sched-driver-status-dot running"></span>
+        <span class="sched-driver-name">山田 一郎</span>
+        <span class="sched-base-badge">川口</span>
+        <span class="sched-scaleout-mark" title="この案件は3台編成の増車グループです">⊕3台</span>
+        <span class="sched-driver-vehicle">1245</span>
+      </div>
+      <div class="sched-bar-wrap">
+        <div class="sched-block grp" style="left:33.33%;width:16.67%" title="○○商事 川口→横浜（増車①／自社）">
+          <span class="sched-grp-tag">①</span><span class="sched-block-label">○○商事 川口→横浜</span>
+        </div>
+        <!-- 粗利チップ：増車前後の比較（グループ先頭バーの直後） -->
+        <div class="sched-profit-chip" style="left:50.5%;top:6px">粗利 ¥22,000 <span class="down">(18%)</span> <span class="arrow">◂ 増車前 28%</span></div>
+      </div>
+    </div>
+
+    <!-- 増車グループ② ○○商事 -->
+    <div class="sched-row" data-grp="g1" onmouseenter="hiGroup('g1',true)" onmouseleave="hiGroup('g1',false)">
+      <div class="sched-driver">
+        <span class="sched-driver-status-dot waiting"></span>
+        <span class="sched-driver-name">佐藤 健太</span>
+        <span class="sched-base-badge">品川</span>
+        <span class="sched-driver-vehicle">2580</span>
+      </div>
+      <div class="sched-bar-wrap">
+        <div class="sched-block grp" style="left:35.42%;width:16.67%" title="○○商事 川口→横浜（増車②／自社）">
+          <span class="sched-grp-tag">②</span><span class="sched-block-label">○○商事（2台目）</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通常運行（別案件） -->
+    <div class="sched-row">
+      <div class="sched-driver">
+        <span class="sched-driver-status-dot running"></span>
+        <span class="sched-driver-name">鈴木 三郎</span>
+        <span class="sched-base-badge">川口</span>
+        <span class="sched-driver-vehicle">1356</span>
+      </div>
+      <div class="sched-bar-wrap">
+        <div class="sched-block" style="left:25%;width:16.67%;background:#1a7a5e" title="△△梱包 06:00-10:00">
+          <span class="sched-block-label">△△梱包 さいたま→大田</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通常運行（別案件） -->
+    <div class="sched-row">
+      <div class="sched-driver">
+        <span class="sched-driver-status-dot waiting"></span>
+        <span class="sched-driver-name">田中 四郎</span>
+        <span class="sched-base-badge">横浜</span>
+        <span class="sched-driver-vehicle">0887</span>
+      </div>
+      <div class="sched-bar-wrap">
+        <div class="sched-block" style="left:58.33%;width:16.67%;background:#1a7a5e" title="◇◇運輸 14:00-18:00">
+          <span class="sched-block-label">◇◇運輸 横浜→品川</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 法令アラート行 -->
+    <div class="sched-row">
+      <div class="sched-driver">
+        <span class="sched-driver-status-dot alert"></span>
+        <span class="sched-driver-name">高橋 五郎</span>
+        <span class="sched-base-badge">川口</span>
+        <span class="sched-driver-vehicle">2201</span>
+      </div>
+      <div class="sched-bar-wrap">
+        <div class="sched-block" style="left:33.33%;width:43.75%;background:#dc2626" title="□□物産 拘束超過の恐れ">
+          <span class="sched-block-label">□□物産 川口→名古屋 ⚠拘束超過</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI増車候補（自社・空き車両）→ ゴースト枠が出る行 -->
+    <div class="sched-row">
+      <div class="sched-driver">
+        <span class="sched-driver-status-dot waiting"></span>
+        <span class="sched-driver-name">中村 六太</span>
+        <span class="sched-base-badge">横浜</span>
+        <span class="sched-driver-vehicle">3312</span>
+      </div>
+      <div class="sched-bar-wrap">
+        <div class="sched-rec-slot" style="left:33.33%;width:20.83%">
+          <div class="sched-rec-tag">推奨① 自社 92pt ・ 粗利¥34k</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───── 増車枠（協力会社 / スポット） ───── -->
+    <div class="sched-section-head partner">⊕ 増車枠（協力会社 / スポット） <span class="pill">不足分のみ表示</span></div>
+
+    <!-- 増車グループ③（協力会社・確定済み） -->
+    <div class="sched-row" data-grp="g1" onmouseenter="hiGroup('g1',true)" onmouseleave="hiGroup('g1',false)">
+      <div class="sched-driver">
+        <span class="sched-driver-status-dot running"></span>
+        <span class="sched-driver-name">北関東物流</span>
+        <span class="sched-base-badge sched-base-partner">協力</span>
+        <span class="sched-driver-vehicle">傭車</span>
+      </div>
+      <div class="sched-bar-wrap">
+        <div class="sched-block grp partner" style="left:37.5%;width:16.67%" title="○○商事 川口→横浜（増車③／協力会社・傭車¥38k）">
+          <span class="sched-grp-tag">③</span><span class="sched-block-label">○○商事（傭車）</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI増車候補（協力会社・代替）→ ゴースト枠が出る行 -->
+    <div class="sched-row">
+      <div class="sched-driver">
+        <span class="sched-driver-status-dot waiting"></span>
+        <span class="sched-driver-name">東海急送</span>
+        <span class="sched-base-badge sched-base-partner">協力</span>
+        <span class="sched-driver-vehicle">空き</span>
+      </div>
+      <div class="sched-bar-wrap">
+        <div class="sched-rec-slot alt" style="left:37.5%;width:20.83%">
+          <div class="sched-rec-tag">代替 協力 ・ 傭車¥38k ・ 粗利¥10k</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 増車グループの縦連結ブラケット（①②③を束ねる。左端＝バー開始付近） -->
+    <div class="sched-grp-bracket" id="bracket" style="display:none"></div>
+  </div>
+
+  <div class="mock-note" style="margin-top:12px">
+    <b>このモックで使っている新規パーツ（すべて既存クラスの拡張）</b><br>
+    ・<b>増車グループ束ね</b>：<code>.sched-block.grp</code>＋便番号タグ <code>.sched-grp-tag</code>（①②③）＋同色＋ホバー連動ハイライト（<code>data-grp</code>）<br>
+    ・<b>協力会社バー</b>：<code>.sched-block.grp.partner</code>（斜線塗り）＋既存の協力会社バッジ <code>.sched-base-partner</code><br>
+    ・<b>行頭 ⊕N台マーク</b>：<code>.sched-scaleout-mark</code>（クロス配車インジケータと同じ位置の流儀）<br>
+    ・<b>AI増車提案ゴースト</b>：<code>.sched-rec-slot</code>（index.html の <code>dnd-rec-slot</code> をそのまま踏襲。緑＝自社／橙＝協力会社）<br>
+    ・<b>増車要カウンタ</b>：サマリーバーに <code>.sched-sum-stat.scaleout</code> を追加<br>
+    ・<b>利益影響</b>：<code>.sched-profit-chip</code>（増車前後の粗利率を先頭バー脇に表示）
+  </div>
+
+</div>
+
+<script>
+  var aiOn = false;
+  function toggleAI() {
+    aiOn = !aiOn;
+    document.getElementById('board').classList.toggle('show-ai', aiOn);
+    document.getElementById('aiToggle').classList.toggle('on', aiOn);
+    document.getElementById('aiToggle').textContent = aiOn ? '🤖 AI増車提案を非表示' : '🤖 AI増車提案を表示';
+    document.getElementById('caseCard').classList.toggle('selected', aiOn);
+  }
+  // 増車グループのホバー連動ハイライト＋縦連結ブラケット表示
+  function hiGroup(grp, on) {
+    var rows = document.querySelectorAll('[data-grp="'+grp+'"]');
+    rows.forEach(function(r){ r.classList.toggle('grp-hi', on); });
+    var bracket = document.getElementById('bracket');
+    if (!on) { bracket.style.display='none'; return; }
+    // グループ行の範囲を計算してブラケットを描く
+    var board = document.getElementById('board');
+    var bRect = board.getBoundingClientRect();
+    var first = rows[0].getBoundingClientRect();
+    var last  = rows[rows.length-1].getBoundingClientRect();
+    bracket.style.display = 'block';
+    bracket.style.left = '184px';
+    bracket.style.top  = (first.top - bRect.top + 4) + 'px';
+    bracket.style.height = (last.bottom - first.top - 8) + 'px';
+  }
+</script>
+</body>
+</html>

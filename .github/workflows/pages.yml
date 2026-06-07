@@ -1,0 +1,40 @@
+name: Deploy to GitHub Pages
+
+# 配車Agent（静的HTML）を GitHub Pages へ公開する。
+# Pages の Source を「GitHub Actions」に設定すると、main への push（マージ）で自動デプロイされる。
+# 注意: github-pages 環境は既定で「デフォルトブランチ(main)のみ」デプロイ許可のため、
+#       feature ブランチからの自動デプロイはブロックされる（手動実行 workflow_dispatch は可）。
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時実行は1つに集約（進行中のデプロイはキャンセルしない）
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload site (static, repo root)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
