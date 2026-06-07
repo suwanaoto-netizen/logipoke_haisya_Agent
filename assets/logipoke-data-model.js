@@ -464,6 +464,45 @@
     return out.sort(function (a, b) { return String(a.id).localeCompare(String(b.id)); });
   }
 
+  /* ───────────────────────── ④ 運行層 書込・不変条件（課題C6・第4段）─────────
+   *  SSoT を「書込先（権威）」にする。I1/I2（同一ドライバー/車両が同一 service_date で
+   *  時間重複する区間を持てない＝schema.sql の EXCLUDE 制約相当）を正規化レイヤーで強制。
+   *  I6 積載量/I7 免許は車両マスタ参照のためアプリ層に残す（deep-dive §2）。
+   * ------------------------------------------------------------------------- */
+  function _hhmmMin(t) {
+    if (t == null) return null;
+    var p = String(t).split(':'); var h = parseInt(p[0], 10), m = parseInt(p[1] || '0', 10);
+    return isNaN(h) ? null : h * 60 + (isNaN(m) ? 0 : m);
+  }
+  // I1/I2：対象 Leg と時間重複する「同一ドライバー / 同一車両」の Leg id を返す。
+  function checkLegConflicts(db, legId) {
+    var out = { driver: [], vehicle: [] };
+    var leg = db.legs.get(legId); if (!leg || leg.active === false) return out;
+    var date = (db.trips.get(leg.tripId) || {}).serviceDate || null;
+    var s = _hhmmMin(leg.startTime), e = _hhmmMin(leg.endTime);
+    if (s == null || e == null) return out;
+    db.legs.forEach(function (o) {
+      if (o.id === leg.id || o.active === false) return;
+      if (((db.trips.get(o.tripId) || {}).serviceDate || null) !== date) return;
+      var os = _hhmmMin(o.startTime), oe = _hhmmMin(o.endTime);
+      if (os == null || oe == null) return;
+      if (!(s < oe && os < e)) return;                         // 重複なし
+      if (o.driverId != null && o.driverId === leg.driverId) out.driver.push(o.id);
+      if (o.vehicleId != null && o.vehicleId === leg.vehicleId) out.vehicle.push(o.id);
+    });
+    return out;
+  }
+  // 書込：Leg のドライバー/車両を差し替え（SSoT が書込先）、I1/I2 判定を併せて返す。
+  function reassignLeg(db, legId, change) {
+    var leg = db.legs.get(legId);
+    if (!leg) return { ok: false, reason: 'leg not found', conflicts: { driver: [], vehicle: [] } };
+    change = change || {};
+    if (change.driverId != null) leg.driverId = change.driverId;
+    if (change.vehicleId != null) leg.vehicleId = change.vehicleId;
+    var conflicts = checkLegConflicts(db, legId);
+    return { ok: conflicts.driver.length === 0 && conflicts.vehicle.length === 0, conflicts: conflicts, legId: legId };
+  }
+
   /* ───────────────────────── 公開API ─────────────────────────────────────── */
   return {
     // helpers / value objects
@@ -483,6 +522,8 @@
     // ④ operation：旧 case.legs[] → SSoT 取込 と SSoT → 3画面 派生（課題C6）
     ingestCaseLegs: ingestCaseLegs, toScheduleBlocks: toScheduleBlocks, toDndBoard: toDndBoard, toCaseTimeline: toCaseTimeline,
     // ④ operation：旧 assignments[]（ガント/DnD正準層）の SSoT ロスレス往復（課題C6・第3段）
-    ingestAssignments: ingestAssignments, toAssignments: toAssignments
+    ingestAssignments: ingestAssignments, toAssignments: toAssignments,
+    // ④ operation：書込先SSoT化＋不変条件 I1/I2 の強制（課題C6・第4段）
+    checkLegConflicts: checkLegConflicts, reassignLeg: reassignLeg
   };
 });

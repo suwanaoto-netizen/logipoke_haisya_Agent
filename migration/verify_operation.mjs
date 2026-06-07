@@ -231,6 +231,69 @@ check('assignments 往復は決定的（同入力で同出力）', () => {
   assert.equal(build(), build());
 });
 
+// ── 書込先SSoT化＋不変条件 I1/I2（第4段 / d） ──
+// 同一 service_date の planning 2件。初期は重複なし（別driver/別vehicle/別時間帯）。
+const writeSample = [
+  { id: 'A00001', tab: 'planning', date: '2026-05-27', driverId: 'D001', vehicleId: 'V0001',
+    start: '06:00', end: '10:00', status: '稼動中', client: 'A社', from: '川口', to: '横浜',
+    goods: 'x/100kg/常温', deadline: '本日中', label: 'A', color: '#1' },
+  { id: 'A00002', tab: 'planning', date: '2026-05-27', driverId: 'D009', vehicleId: 'V0009',
+    start: '09:00', end: '12:00', status: '稼動中', client: 'B社', from: '大田', to: '船橋',
+    goods: 'y/100kg/常温', deadline: '夕方', label: 'B', color: '#2' }
+];
+
+check('不変条件 I1：別driverなら時間が重なっても衝突なし', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, writeSample);
+  const c = DB.checkLegConflicts(db, 'A00002');
+  assert.equal(c.driver.length, 0);
+  assert.equal(c.vehicle.length, 0);
+});
+
+check('書込(reassignLeg)：同driverへ移すと時間重複を I1 で検出', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, writeSample);
+  // A00002(09:00-12:00) を D001 へ → A00001(06:00-10:00) と重複
+  const r = DB.reassignLeg(db, 'A00002', { driverId: 'D001' });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.conflicts.driver, ['A00001']);
+});
+
+check('書込(reassignLeg)：同vehicleへ移すと時間重複を I2 で検出', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, writeSample);
+  const r = DB.reassignLeg(db, 'A00002', { vehicleId: 'V0001' });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.conflicts.vehicle, ['A00001']);
+});
+
+check('書込→射影：reassignLeg 後の toAssignments に新driverIdが反映（他は不変）', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, writeSample);
+  DB.reassignLeg(db, 'A00002', { driverId: 'D001' }); // 重複でも適用（UIが衝突を提示）
+  const out = DB.toAssignments(db);
+  const a2 = out.find(a => a.id === 'A00002');
+  assert.equal(a2.driverId, 'D001');
+  assert.equal(a2.client, 'B社');         // 他フィールドは不変
+  assert.equal(a2.from, '大田');
+  assert.equal(a2.end, '12:00');
+});
+
+check('書込：重ならない時間帯への差し替えは衝突なし', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestAssignments(db, [
+    writeSample[0],
+    Object.assign({}, writeSample[1], { start: '10:30', end: '12:00' }) // A00001 と重ならない
+  ]);
+  const r = DB.reassignLeg(db, 'A00002', { driverId: 'D001' });
+  assert.equal(r.ok, true);
+});
+
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {
   function build() {
     DB.resetSeq();

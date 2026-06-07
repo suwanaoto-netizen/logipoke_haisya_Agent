@@ -20687,12 +20687,28 @@ function _overlaps(a, b) {
 // バリデーション：同じドライバー/車両の時間衝突を検出
 function validateAssignment(target) {
   const conflicts = { driver: [], vehicle: [], capacity: null, license: null };
-  assignments.forEach(a => {
-    if (a.id === target.id) return;
-    if (a.driverId === target.driverId && _overlaps(a, target)) conflicts.driver.push(a);
-    if (a.vehicleId === target.vehicleId && _overlaps(a, target)) conflicts.vehicle.push(a);
-  });
-  // 積載量チェック（goodsから重量を抽出）
+  // I1/I2（同一ドライバー/車両の時間重複）の判定権威：フラグON時は 正規化SSoT、既定は従来の素判定。
+  let _usedSSoT = false;
+  if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined') {
+    try {
+      LogipokeDB.resetSeq();
+      const _db = LogipokeDB.createDB();
+      LogipokeDB.ingestAssignments(_db, assignments);
+      if (!getAssignmentById(target.id)) LogipokeDB.ingestAssignments(_db, [target]); // 新規候補は一時投入
+      const _c = LogipokeDB.checkLegConflicts(_db, target.id);
+      conflicts.driver = _c.driver.map(id => getAssignmentById(id)).filter(Boolean);
+      conflicts.vehicle = _c.vehicle.map(id => getAssignmentById(id)).filter(Boolean);
+      _usedSSoT = true;
+    } catch (e) { _usedSSoT = false; }
+  }
+  if (!_usedSSoT) {
+    assignments.forEach(a => {
+      if (a.id === target.id) return;
+      if (a.driverId === target.driverId && _overlaps(a, target)) conflicts.driver.push(a);
+      if (a.vehicleId === target.vehicleId && _overlaps(a, target)) conflicts.vehicle.push(a);
+    });
+  }
+  // 積載量チェック（goodsから重量を抽出）。I6 は車両マスタ参照のためアプリ層（SSoT切替後も共通）。
   const v = getVehicleById(target.vehicleId);
   if (v && target.goods) {
     const m = String(target.goods).match(/([\d,]+)\s*kg/);
@@ -20707,12 +20723,43 @@ function validateAssignment(target) {
   };
 }
 
+// 書込先SSoT化（課題C6・第4段）：フラグON時、差し替えは 正規化SSoT へ適用し、
+// フラット層 assignments[] を SSoT から再導出（フラット層を派生に降格）。失敗時はレガシーへ縮退。
+// I6 積載量は反映後の対象でアプリ層チェックを補完（reassignLeg は I1/I2 のみ）。
+function _reassignViaSSoT(assignmentId, change) {
+  LogipokeDB.resetSeq();
+  const db = LogipokeDB.createDB();
+  LogipokeDB.ingestAssignments(db, assignments);
+  const r = LogipokeDB.reassignLeg(db, assignmentId, change);
+  if (r.reason) return { ok: false, reason: r.reason };
+  const round = LogipokeDB.toAssignments(db);            // SSoT → フラット層へ射影
+  assignments.length = 0; round.forEach(a => assignments.push(a));
+  rebuildAssignmentIndex();
+  const tgt = getAssignmentById(assignmentId);
+  const validation = {
+    ok: r.ok, conflicts: {
+      driver: r.conflicts.driver.map(id => getAssignmentById(id)).filter(Boolean),
+      vehicle: r.conflicts.vehicle.map(id => getAssignmentById(id)).filter(Boolean),
+      capacity: null, license: null
+    }
+  };
+  // I6（積載量）はアプリ層で補完
+  const v = tgt && getVehicleById(tgt.vehicleId);
+  if (v && tgt.goods) { const m = String(tgt.goods).match(/([\d,]+)\s*kg/);
+    if (m) { const kg = parseInt(m[1].replace(/,/g, ''), 10); if (kg > v.maxLoad) { validation.capacity = { needed: kg, max: v.maxLoad }; validation.ok = false; } } }
+  return { ok: true, validation };
+}
 // 更新系API：ドライバーだけ差し替え / 車両だけ差し替え / 両方
 function reassignDriver(assignmentId, newDriverId) {
   const a = getAssignmentById(assignmentId);
   if (!a) return { ok: false, reason: 'assignment not found' };
   if (!getDriverById(newDriverId)) return { ok: false, reason: 'driver not found' };
   const before = a.driverId;
+  if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined') {
+    try { const s = _reassignViaSSoT(assignmentId, { driverId: newDriverId });
+      if (s.ok) return { ok: true, before, after: newDriverId, validation: s.validation, via: 'ssot' };
+    } catch (e) { /* レガシーへ縮退 */ }
+  }
   a.driverId = newDriverId;
   const r = validateAssignment(a);
   rebuildAssignmentIndex();
@@ -20723,6 +20770,11 @@ function reassignVehicle(assignmentId, newVehicleId) {
   if (!a) return { ok: false, reason: 'assignment not found' };
   if (!getVehicleById(newVehicleId)) return { ok: false, reason: 'vehicle not found' };
   const before = a.vehicleId;
+  if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined') {
+    try { const s = _reassignViaSSoT(assignmentId, { vehicleId: newVehicleId });
+      if (s.ok) return { ok: true, before, after: newVehicleId, validation: s.validation, via: 'ssot' };
+    } catch (e) { /* レガシーへ縮退 */ }
+  }
   a.vehicleId = newVehicleId;
   const r = validateAssignment(a);
   rebuildAssignmentIndex();

@@ -69,12 +69,19 @@ SSoT 未接続のままでした）。
   往復ビュー**を使うよう接続（往復失敗時は素の `assignments` に縮退）。往復の無損失性は
   `verify_operation.mjs`（計14件）で保証。これで正規化モデルが **中継案件(c.legs) と ガント(assignments)
   の両方を読取側で表現可能**になり、C6の読取側基盤がほぼ揃った。
+- ✅ **運行層SSoT 書込先化＋不変条件強制（課題C6・第4段）**: `LogipokeDB.checkLegConflicts` /
+  `reassignLeg` を追加し、**I1/I2（同一ドライバー/車両が同一 service_date で時間重複する区間を持てない＝
+  schema.sql の EXCLUDE 制約相当）を正規化レイヤーで強制**。本体は (1) `validateAssignment` の I1/I2 判定を
+  フラグON時に**SSoTへ委譲**（全書込経路の検証権威が正規化モデルに集約）、(2) `reassignDriver` /
+  `reassignVehicle` をフラグON時に**SSoTへ書込→`toAssignments` でフラット層を再導出**（フラット層を
+  派生に降格）。I6 積載量は車両マスタ参照のためアプリ層に残置（deep-dive §2）。失敗時はレガシーへ縮退。
+  `verify_operation.mjs`（計19件）で I1/I2 検出・書込後の射影・非重複時OK を検証。
 - 🔜 **本体ではまだ未接続（順次対応）**: 他マスタ（取引先 / 協力会社 / ユーザー / 定期便）、
-  受付（本体は今も旧 `logipoke_ai_intake_queue` を使用。`logipoke_db_receptions_v1` への切替は未）、
-  案件（`unprocessed` / `processing` / `processed` の4分割）。**DnDの通常行**は `dndAssignments`（ドラッグ&
-  ドロップで書込まれる可変ストア）が源で純粋な読取投影ではないため、「SSoTを書込先にする」フェーズで対応
-  （読取はSSoT派生／書込面は据え置き、の原則に従う）。`vehicleMasterData` は固有データを持つ独立
-  レジストリのため、物理統合はデータ判断を要します。
+  受付（旧 `logipoke_ai_intake_queue` → `logipoke_db_receptions_v1` 未切替）、案件4分割
+  （`unprocessed` / `processing` / `processed`）。運行層の書込は `reassign*` を SSoT 権威化したが、
+  **DnDのドラッグ&ドロップ（`dndTrackDrop` / `dndAssignments`）と中継編集（`renderRelayList` → `c.legs`）の
+  書込**はまだレガシー直書きで、これらを `reassignLeg` 同様にSSoT経由へ寄せれば書込側の一本化が完了する。
+  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）
