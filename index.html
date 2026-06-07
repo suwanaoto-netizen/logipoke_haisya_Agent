@@ -12353,9 +12353,76 @@ function renderFinalRecommendCard(caseObj) {
     </div>`;
 }
 
-function calcAIScore(vehicleId) {
-  const raw = VEHICLE_RAW_SCORES[vehicleId];
-  if (!raw) return 75;
+function clampScore(n){ return Math.max(0, Math.min(100, Math.round(n))); }
+
+// 案件×候補 から5軸の素点(0-100)を算出。caseObj/vehicle が無ければ静的表(VEHICLE_RAW_SCORES)に
+// フォールバックするため、案件コンテキストの無い呼び出し（設定プレビュー等）は従来挙動のまま。
+function calcAIScoreBreakdown(vehicleId, caseObj, vehicle) {
+  const fb = VEHICLE_RAW_SCORES[vehicleId] || { distance:75, load:75, driver:75, law:75, customer:75 };
+  if (!caseObj || !vehicle) return Object.assign({}, fb, { _static:true });
+  const SO = window.LogipokeScaleOut;
+
+  // ① 距離効率：候補拠点→集荷地の回送(空車)距離が短いほど高い（50km毎に約30点減）
+  // 第2段：拠点ID解決→拠点間距離マスタ(getBaseDistance)を優先し、解決不能時のみ estimateDistance に縮退。
+  let distance = fb.distance;
+  let deadheadKm = null;
+  if (typeof window.resolveBaseIdByAlias === 'function' && typeof getBaseDistance === 'function') {
+    const vBaseId = window.resolveBaseIdByAlias(vehicle.base);
+    const cBaseId = window.resolveBaseIdByAlias(caseObj.from);
+    if (vBaseId && cBaseId) { const d = getBaseDistance(vBaseId, cBaseId); if (d != null) deadheadKm = d; }
+  }
+  if (deadheadKm == null && typeof estimateDistance === 'function' && vehicle.base && caseObj.from) {
+    deadheadKm = estimateDistance(vehicle.base, caseObj.from);
+  }
+  if (deadheadKm != null) distance = clampScore(100 - deadheadKm * 0.6);
+
+  // ② 積載量適合度：積載率を 0.85 頂点の山型で評価。容量不足は0（＝増車判定の対象）
+  let load = fb.load;
+  const weightKg = SO ? SO.parseWeightKg(caseObj.goods) : 0;
+  const capKg    = SO ? SO.capLabelToKg(vehicle.cap)    : 0;
+  if (weightKg > 0 && capKg > 0) {
+    load = weightKg > capKg ? 0 : clampScore(100 - Math.abs(weightKg/capKg - 0.85) * 130);
+  }
+  // 温度帯適合：冷凍/冷蔵荷で要求車格が冷蔵系でなければ大幅減点（候補にボディ情報が無いため要求車格で代替）
+  const zones = SO ? SO.parseTempZones(caseObj.goods) : [];
+  const reqType = (caseObj.aiResult && caseObj.aiResult.vehicle) || caseObj.vehicle || '';
+  if ((zones.indexOf('frozen') >= 0 || zones.indexOf('chilled') >= 0) && reqType && !/冷凍|冷蔵|リーファー/.test(reqType)) {
+    load = Math.min(load, 30);
+  }
+
+  // ③ ドライバー実績：stars 主体。過去粗利実績(VEHICLE_PROFIT)があれば4割ブレンド
+  let driver = fb.driver;
+  if (typeof vehicle.stars === 'number') {
+    driver = clampScore(vehicle.stars / 5 * 100);
+    const prof = VEHICLE_PROFIT[vehicleId];
+    if (prof) driver = clampScore(driver * 0.6 + prof.marginPct * 0.4);
+  }
+
+  // ④ 拘束時間余裕：候補の law.status と適合項目比率から算出
+  let law = fb.law;
+  if (vehicle.law && Array.isArray(vehicle.law.items)) {
+    const items = vehicle.law.items;
+    const okRatio = items.length ? items.filter(it => it.ok).length / items.length : 1;
+    const base = vehicle.law.status === 'ng' ? 0 : vehicle.law.status === 'warn' ? 55 : 100;
+    law = clampScore(base * 0.6 + okRatio * 100 * 0.4);
+  }
+
+  // ⑤ 顧客相性：実データ(担当×荷主の取引履歴)が未整備。注入フックを残し、無ければ即応性で代替
+  let customer = fb.customer;
+  if (typeof window.customerAffinity === 'function') {
+    const a = window.customerAffinity(vehicleId, caseObj.client);
+    if (typeof a === 'number') customer = clampScore(a);
+  } else {
+    const availFull = /空車|可/.test(String(vehicle.avail || '')) ? 100 : 60;
+    const urgentFit = (caseObj.priority === '緊急' || caseObj.priority === 'urgent') ? availFull : 80;
+    customer = clampScore(availFull * 0.5 + urgentFit * 0.5);
+  }
+
+  return { distance, load, driver, law, customer, _static:false };
+}
+
+function calcAIScore(vehicleId, caseObj, vehicle) {
+  const raw = calcAIScoreBreakdown(vehicleId, caseObj, vehicle);
   const w = window.AI_WEIGHTS;
   const total = w.distance + w.load + w.driver + w.law + w.customer;
   if (total === 0) return 0;
@@ -12374,7 +12441,7 @@ function recalcAllScores() {
   allCases.forEach(c => {
     if (!c.vehicles) return;
     c.vehicles.forEach(v => {
-      v.score = calcAIScore(v.id);
+      v.score = calcAIScore(v.id, c, v);
     });
     // スコア降順で rank を振り直す
     c.vehicles.sort((a,b) => b.score - a.score);
@@ -12687,6 +12754,202 @@ const processedCases = [
     billingConfirmed: true, billingConfirmedAt: '2024/05/24 18:30', billingConfirmedBy: '配車 太郎'
   },
 ];
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  顧客相性（customerAffinity）― 完了案件の実績から荷主×車両の相性を実データ算出
+//  calcAIScoreBreakdown の ⑤顧客相性 が参照する注入フック。未定義なら即応性で代替される。
+// ===== AI-AFFINITY-START =====
+const _customerAffinityIndex = (function () {
+  const idx = {};   // clientName → { vehDigits → { jobs, onTime, marginSum } }
+  function digits(s) { const m = String(s == null ? '' : s).match(/(\d{3,})/); return m ? m[1] : null; }
+  try {
+    (typeof processedCases !== 'undefined' ? processedCases : []).forEach(function (c) {
+      if (!c.client) return;
+      const vd = digits(c.vehicle);
+      if (!vd) return;
+      const cm = (idx[c.client] = idx[c.client] || {});
+      const e = (cm[vd] = cm[vd] || { jobs: 0, onTime: 0, marginSum: 0 });
+      e.jobs += 1;
+      if (!c.delay || /なし/.test(String(c.delay))) e.onTime += 1;
+      if (typeof c.margin === 'number') e.marginSum += c.margin;
+    });
+  } catch (e) { /* 履歴なしは空インデックス */ }
+  return idx;
+})();
+
+// 荷主タイプ→関係性の基礎点（定期/チャーター＝継続関係が強い）
+const _clientTierScore = { '定期': 70, 'チャーター': 65, '特殊': 55, '冷蔵': 55, 'スポット': 45 };
+
+// window.customerAffinity(vehicleId, clientName) → 0..100。荷主タイプ＋（あれば）取引実績で算出。
+window.customerAffinity = function (vehicleId, clientName, _deps) {
+  const D = _deps || {};
+  const clamp = D.clampScore || (typeof clampScore === 'function' ? clampScore : function (n) { return Math.max(0, Math.min(100, Math.round(n))); });
+  const clients = D.clientMasterData || (typeof clientMasterData !== 'undefined' ? clientMasterData : []);
+  const index = D.index || _customerAffinityIndex;
+  if (!clientName) return 50;
+  // ① 荷主タイプの基礎点
+  let tier = 50;
+  const cm = (clients || []).find(function (x) { return x.name === clientName; });
+  if (cm && _clientTierScore[cm.type] != null) tier = _clientTierScore[cm.type];
+  // ② 取引実績（リピート×定時遵守×粗利）。実績が無ければ荷主タイプのみ。
+  const vd = (String(vehicleId == null ? '' : vehicleId).match(/(\d{3,})/) || [])[1];
+  const hist = (vd && index[clientName]) ? index[clientName][vd] : null;
+  if (!hist || !hist.jobs) return clamp(tier);
+  const repeat = Math.min(30, hist.jobs * 12);                       // リピート 最大+30
+  const onTimeRate = hist.onTime / hist.jobs;                        // 0..1
+  const avgMargin = hist.marginSum / hist.jobs;                      // %
+  const quality = onTimeRate * 10 + Math.max(0, avgMargin - 50) * 0.4; // 定時遵守＋粗利の上振れ
+  return clamp(tier * 0.6 + repeat + quality);
+};
+// ===== AI-AFFINITY-END =====
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  運行層SSoT 描画ブリッジ（課題C6・第2段：読取専用ビューの切替）
+//  読取専用の投影（DnD盤の中継行など）を SSoT 派生に、書込の不変条件判定を SSoT 権威に切替えるフラグ。
+//  ONにすると c.legs を LogipokeDB.ingestCaseLegs → toCaseTimeline 経由で再構成して描画し、
+//  assignments の I1/I2 検証・中継編集の I9 検証を正規化SSoTで行う。
+//  ※書込面（中継編集UI c.legs / リッチな assignments レコード）は据え置き。差し替えるのは読取投影と検証経路のみ。
+//  ※派生/検証失敗時は必ずレガシーにフォールバック（描画は決して壊さない）。
+//  ※既定ON（jsdom実機相当でロスレス往復・全描画経路の無例外を検証済み）。無効化は事前に
+//    window.__useOperationSSoT=false; を設定すれば従来挙動に戻せる。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if (typeof window.__useOperationSSoT === 'undefined') window.__useOperationSSoT = true;
+function deriveRelayLegsView(c) {
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined' || !c) return (c && c.legs) || [];
+  try {
+    LogipokeDB.resetSeq();
+    const db = LogipokeDB.createDB();
+    LogipokeDB.ingestCaseLegs(db, c);
+    const tl = LogipokeDB.toCaseTimeline(db, c.id);
+    if (!tl.length) return c.legs || [];
+    // SSoT 派生行 → 旧 leg 形。構造（誰/どこ/いつ/順序/引継ぎ）は SSoT 由来、
+    // 表示用の付帯情報（車格ラベル/積載/法令バッジ等＝運行SSoTの構造外）は順序対応で原データから引継ぐ。
+    return tl.map(function (r, i) {
+      var src = (c.legs && c.legs[i]) || {};
+      return { legId: r.legId, legNo: r.sequenceNo, driverName: r.driverName,
+        vehicleId: r.vehicleLabel, vehicleName: src.vehicleName || r.vehicleLabel,
+        startTime: r.start, endTime: r.end, relayFrom: r.from, relayTo: r.to, role: r.role,
+        vehicleType: src.vehicleType, capacity: src.capacity, lawOk: src.lawOk, vehicleIdx: src.vehicleIdx };
+    });
+  } catch (e) { return c.legs || []; }
+}
+window.deriveRelayLegsView = deriveRelayLegsView;
+
+// 正準フラット層 assignments[] を 正規化SSoT(Trip>Leg>Stop) 経由でロスレス往復した結果を返す。
+// フラグON時、ガント(buildScheduleViewFromAssignments)はこの「SSoTに裏付けられた」配列を使う。
+// 往復は欠損なし（verify_operation の assignments パリティで保証）。失敗時は素の assignments に縮退。
+function deriveAssignmentsView(tab) {
+  const raw = (typeof assignments !== 'undefined' ? assignments : []).filter(a => !tab || a.tab === tab);
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined') return raw;
+  try {
+    LogipokeDB.resetSeq();
+    const db = LogipokeDB.createDB();
+    LogipokeDB.ingestAssignments(db, raw);
+    const round = LogipokeDB.toAssignments(db);
+    return round.length === raw.length ? round : raw;
+  } catch (e) { return raw; }
+}
+window.deriveAssignmentsView = deriveAssignmentsView;
+
+// 【書込先一本化の実行ヘルパー・C6第12段】store を書込先にして mutate→assignments[] 再導出。
+// 手順：現在値で store を最新化 → mutate（add/remove/update）→ store から assignments[] を
+// in-place 再導出（const 参照保持・完全ロスレス）→ index 再構築。成功時 true、不可/失敗時 false（呼び元が legacy 実行）。
+function _opStoreWrite(mutateFn) {
+  if (!window.__useOperationSSoT || !window.__opStore || typeof LogipokeDB === 'undefined') return false;
+  try {
+    window.__opStore.syncFromAssignments(assignments);   // store を現在値に最新化
+    mutateFn();                                           // store を書込先として変更
+    const d = window.__opStore.getAssignments();          // store から再導出（完全ロスレス）
+    assignments.length = 0; d.forEach(x => assignments.push(x));
+    rebuildAssignmentIndex();
+    return true;
+  } catch (e) { return false; }
+}
+window._opStoreWrite = _opStoreWrite;
+
+// 【唯一ストアの読取ファサード・C6第11段】正準ストア(__opStore)を単一情報源として公開する getter API。
+// const 配列(assignments[]) は当面、書込先一本化のための「射影」として残置（物理的な getter 置換は
+// 全 reader/writer のブラウザQAを要するため別ラウンド）。本ファサードは store 由来の値を返す。
+window.OpStore = {
+  get ready() { return !!(window.__opStore && window.__opStore.getAssignments); },
+  // store 由来の assignments（tab 省略可）。reader はこれを単一情報源として参照できる。
+  assignments: function (tab) {
+    return window.__opStore && window.__opStore.getAssignments ? window.__opStore.getAssignments(tab) : [];
+  },
+  conflicts: function (id) {
+    return window.__opStore && window.__opStore.checkConflicts ? window.__opStore.checkConflicts(id) : { driver: [], vehicle: [] };
+  }
+};
+// 整合不変条件：store 由来の assignments と レガシー配列 assignments[] が常に一致することを検証。
+// 開発時の保証（jsdom/コンソールで __opStoreConsistent() を実行）。射影が崩れていれば false。
+window.__opStoreConsistent = function () {
+  try {
+    if (!window.__opStore || !window.__opStore.getAssignments) return null;  // ストア未生成
+    const fromStore = window.__opStore.getAssignments();
+    if (fromStore.length !== assignments.length) return false;
+    const byId = {}; fromStore.forEach(a => { byId[a.id] = a; });
+    return assignments.every(a => {
+      const s = byId[a.id];
+      return s && s.driverId === a.driverId && s.vehicleId === a.vehicleId
+        && s.start === a.start && s.end === a.end && s.client === a.client
+        && s.from === a.from && s.to === a.to;
+    });
+  } catch (e) { return null; }
+};
+
+// 中継編集(c.legs)の書込検証を 正規化SSoT に委譲（課題C6・第5段）。書込面 c.legs は据え置き、
+// I9（引き継ぎ連続性）・同一ドライバーの時間重複を SSoT(validateRelayLegs) で判定しUIへ提示。
+// フラグON時のみ。これで残る書込経路（中継編集）の不変条件もSSoT権威下に入る。
+// DnDボード通常行(dndAssignments のブロック)の reader を SSoT ライブ派生へ（課題C6・第9段）。
+// live配列を ingestDndBlocks→toDndBlocks でロスレス往復し、その結果を live配列へ in-place 反映する。
+// 往復は無損失（verify_operation で保証）＝表示・永続semanticsは不変だが、reader が正規化SSoTを経由する。
+// 失敗/件数不一致時は live配列を一切触らず従来動作に縮退。
+function applyDndBlocksViaSSoT(driverId, dateKey, liveArr) {
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined'
+      || !LogipokeDB.ingestDndBlocks || !Array.isArray(liveArr) || liveArr.length === 0) return false;
+  try {
+    const db = LogipokeDB.createDB();
+    LogipokeDB.ingestDndBlocks(db, driverId, dateKey, liveArr);
+    const view = LogipokeDB.toDndBlocks(db, driverId, dateKey);
+    if (view.length !== liveArr.length) return false;     // 不一致なら触らない
+    liveArr.length = 0; view.forEach(b => liveArr.push(b)); // ロスレス往復を live に反映（配列identity保持）
+    return true;
+  } catch (e) { return false; /* 縮退：live配列はそのまま */ }
+}
+window.applyDndBlocksViaSSoT = applyDndBlocksViaSSoT;
+
+function _ssotValidateRelay(c) {
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined'
+      || !c || c.vehicleMode !== 'relay' || !LogipokeDB.validateRelayLegs) return;
+  try {
+    const r = LogipokeDB.validateRelayLegs(c.legs || []);
+    if (!r.ok && typeof showToast === 'function') {
+      const f = r.issues[0];
+      const msg = f.type === 'handoff_gap'
+        ? '中継の引き継ぎ地点が不連続です（区間' + f.seq + '：' + f.detail + '）'
+        : '同一ドライバーが時間重複する区間を担当しています（' + f.detail + '）';
+      showToast('⚠ ' + msg, 'warn');
+    }
+  } catch (e) { /* 検証失敗は黙ってスキップ（描画は壊さない） */ }
+}
+window._ssotValidateRelay = _ssotValidateRelay;
+
+// 【書込先一本化・C6第13段】中継編集(c.legs)の writer を store-first 化。
+// 編集後の c.legs を ingestCaseLegs→toCaseLegs でロスレス往復し、結果を c.legs へ in-place 反映
+// （正規化モデルが当該案件の区間構造を再構成＝store が書込先の権威）。件数不一致/失敗時は c.legs を触らず縮退。
+function _opStoreWriteCaseLegs(c) {
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined'
+      || !c || !Array.isArray(c.legs) || c.legs.length === 0 || !LogipokeDB.toCaseLegs) return false;
+  try {
+    const db = LogipokeDB.createDB();
+    LogipokeDB.ingestCaseLegs(db, c);
+    const derived = LogipokeDB.toCaseLegs(db, c.id);
+    if (derived.length !== c.legs.length) return false;     // 不一致なら触らない
+    c.legs.length = 0; derived.forEach(l => c.legs.push(l)); // 配列identity保持で in-place 反映
+    return true;
+  } catch (e) { return false; }
+}
+window._opStoreWriteCaseLegs = _opStoreWriteCaseLegs;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  ページ・フェーズ切替
@@ -15655,6 +15918,8 @@ function renderProcessingDetail(i) {
   const el = document.getElementById('processing-detail');
   const selIdx = c.selectedVehicleIdx ?? 0;
   const selV = c.vehicles[selIdx];
+  // 複数台サマリー（読取専用）の表示元：SSoT派生（フラグON時）or レガシー c.legs（既定）。
+  const _legsView = (typeof deriveRelayLegsView === 'function') ? deriveRelayLegsView(c) : (c.legs || []);
 
   // 増車コメント（PR5）：決定的な理由文を即表示。selectProcessingでLLM文に上書き（任意）。
   const _so = (typeof getCaseScaleOut === 'function') ? getCaseScaleOut(c) : { verdict: 'none' };
@@ -15874,10 +16139,10 @@ function renderProcessingDetail(i) {
     <div id="multi-summary-block-${i}" style="background:var(--accent-pale);border:1.5px solid var(--sidebar-bg);border-radius:10px;padding:12px 16px;margin-bottom:16px;display:${(c.vehicleMode||'single')==='multi'&&(c.legs||[]).length>0?'block':'none'}">
       <div style="font-size:10px;color:var(--sidebar-bg);font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 4v3h-7V8z"/></svg>
-        複数台配車構成（${(c.legs||[]).length}台）
+        複数台配車構成（${_legsView.length}台）
       </div>
-      ${(c.legs||[]).map((leg,li) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;${li<(c.legs||[]).length-1?'border-bottom:1px solid #d1fae5':''}">
+      ${_legsView.map((leg,li) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;${li<_legsView.length-1?'border-bottom:1px solid #d1fae5':''}">
           <span style="font-size:10px;font-weight:700;color:#6DD5A8;background:var(--sidebar-bg);padding:2px 6px;border-radius:10px;flex-shrink:0">第${li+1}便</span>
           <span style="font-size:12px;font-weight:600;color:var(--sidebar-bg)">${leg.driverName}（${leg.vehicleName}）</span>
           <span style="font-size:10px;color:var(--text-muted);margin-left:auto">${leg.vehicleType} · ${leg.capacity}</span>
@@ -16718,6 +16983,8 @@ function addRelayLeg(caseIdx) {
   if (lastLeg) {
     lastLeg.relayTo = lastLeg.relayTo === c.to ? '中継地点（未設定）' : lastLeg.relayTo;
   }
+  _opStoreWriteCaseLegs(c);
+  _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
 
@@ -16731,6 +16998,8 @@ function removeRelayLeg(caseIdx, legIdx) {
   c.legs.splice(legIdx, 1);
   // legNo を振り直し
   c.legs.forEach((l, i) => l.legNo = i + 1);
+  _opStoreWriteCaseLegs(c);
+  _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
 
@@ -16746,6 +17015,8 @@ function updateRelayLeg(caseIdx, legIdx, field, value) {
   } else if (field === 'relayFrom' && legIdx > 0) {
     c.legs[legIdx - 1].relayTo = value;
   }
+  _opStoreWriteCaseLegs(c);
+  _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
 
@@ -16761,6 +17032,8 @@ function setRelayLegVehicle(caseIdx, legIdx, vehicleIdx) {
   leg.driverName = v.driver;
   leg.capacity = v.cap;
   leg.lawOk = v.law ? v.law.items.every(it=>it.ok) : true;
+  _opStoreWriteCaseLegs(c);
+  _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
 
@@ -20482,6 +20755,23 @@ function _scheduleRowToAssignments(row, tab) {
 }
 
 // 初期アサインメントを生成
+// 【物理getter化・C6第15段】assignments[] を Proxy で包む。
+// 設計上 assignments[] は永続ストア(__opStore)の「射影」であり、書込は store-first を通る。
+// この Proxy は read を素通し（get トラップ無し＝ネイティブ速度・identity/Array.isArray 不変）、
+// write（index/length 設定＝push/splice/length=0）のみ計測して「直接変異の有無」を観測可能にする。
+// 挙動は完全に不変（pass-through）。Proxy 非対応環境では素の配列にフォールバック。
+window.__assignmentsWrites = 0;
+function _makeAssignmentsProxy(backing) {
+  if (typeof Proxy === 'undefined') return backing;
+  return new Proxy(backing, {
+    set(target, prop, value) {
+      if (window.__useOperationSSoT && (prop === 'length' || (typeof prop === 'string' && /^\d+$/.test(prop)))) {
+        window.__assignmentsWrites = (window.__assignmentsWrites || 0) + 1;
+      }
+      target[prop] = value; return true;
+    }
+  });
+}
 const assignments = (function(){
   const out = [];
   ['planning', 'confirmed'].forEach(tab => {
@@ -20489,7 +20779,7 @@ const assignments = (function(){
       _scheduleRowToAssignments(row, tab).forEach(a => out.push(a));
     });
   });
-  return out;
+  return _makeAssignmentsProxy(out);
 })();
 
 // 検索用インデックス（必要に応じて再構築）
@@ -20502,6 +20792,14 @@ function rebuildAssignmentIndex() {
     (_assignByDriver[a.driverId] = _assignByDriver[a.driverId] || []).push(a);
     (_assignByVehicle[a.vehicleId] = _assignByVehicle[a.vehicleId] || []).push(a);
   });
+  // 物理統合（C6・第8段）：全 assignments 変更はここを通るため、単一同期点として
+  // 永続SSoTストアを再構築（完全ロスレス）。reader はこのストアからライブ派生する。
+  if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined' && LogipokeDB.createOperationStore) {
+    try {
+      if (!window.__opStore) window.__opStore = LogipokeDB.createOperationStore();
+      window.__opStore.syncFromAssignments(assignments);
+    } catch (e) { window.__opStore = null; /* 失敗時はストア無効化＝レガシー読取に縮退 */ }
+  }
 }
 let _assignByDriver = {}, _assignByVehicle = {}, _assignById = {};
 rebuildAssignmentIndex();
@@ -20525,12 +20823,28 @@ function _overlaps(a, b) {
 // バリデーション：同じドライバー/車両の時間衝突を検出
 function validateAssignment(target) {
   const conflicts = { driver: [], vehicle: [], capacity: null, license: null };
-  assignments.forEach(a => {
-    if (a.id === target.id) return;
-    if (a.driverId === target.driverId && _overlaps(a, target)) conflicts.driver.push(a);
-    if (a.vehicleId === target.vehicleId && _overlaps(a, target)) conflicts.vehicle.push(a);
-  });
-  // 積載量チェック（goodsから重量を抽出）
+  // I1/I2（同一ドライバー/車両の時間重複）の判定権威：フラグON時は 正規化SSoT、既定は従来の素判定。
+  let _usedSSoT = false;
+  if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined') {
+    try {
+      LogipokeDB.resetSeq();
+      const _db = LogipokeDB.createDB();
+      LogipokeDB.ingestAssignments(_db, assignments);
+      if (!getAssignmentById(target.id)) LogipokeDB.ingestAssignments(_db, [target]); // 新規候補は一時投入
+      const _c = LogipokeDB.checkLegConflicts(_db, target.id);
+      conflicts.driver = _c.driver.map(id => getAssignmentById(id)).filter(Boolean);
+      conflicts.vehicle = _c.vehicle.map(id => getAssignmentById(id)).filter(Boolean);
+      _usedSSoT = true;
+    } catch (e) { _usedSSoT = false; }
+  }
+  if (!_usedSSoT) {
+    assignments.forEach(a => {
+      if (a.id === target.id) return;
+      if (a.driverId === target.driverId && _overlaps(a, target)) conflicts.driver.push(a);
+      if (a.vehicleId === target.vehicleId && _overlaps(a, target)) conflicts.vehicle.push(a);
+    });
+  }
+  // 積載量チェック（goodsから重量を抽出）。I6 は車両マスタ参照のためアプリ層（SSoT切替後も共通）。
   const v = getVehicleById(target.vehicleId);
   if (v && target.goods) {
     const m = String(target.goods).match(/([\d,]+)\s*kg/);
@@ -20545,13 +20859,37 @@ function validateAssignment(target) {
   };
 }
 
-// 更新系API：ドライバーだけ差し替え / 車両だけ差し替え / 両方
+// 更新系API：ドライバー/車両の差し替え。
+// 【書込先一本化・C6第11段】フラグON時は「永続ストア(__opStore)へ書込 → assignments[] を
+//  store から再導出（in-place・ロスレス）」＝store が書込先（権威）、assignments[] は射影。
+//  失敗時は従来の in-place 変更＋SSoT検証へ縮退（I1/I2 は validateAssignment が SSoT 権威）。
+function _reassignViaOpStore(assignmentId, change) {
+  if (!window.__useOperationSSoT || !window.__opStore || typeof LogipokeDB === 'undefined') return null;
+  try {
+    window.__opStore.syncFromAssignments(assignments);          // 現在値で store を確実に最新化
+    const r = window.__opStore.reassign(assignmentId, change);  // 書込先＝store（I1/I2 判定付き）
+    const derived = window.__opStore.getAssignments();           // store から再導出（完全ロスレス）
+    assignments.length = 0; derived.forEach(x => assignments.push(x));  // const 参照を保持して射影
+    rebuildAssignmentIndex();
+    const tgt = getAssignmentById(assignmentId);
+    const validation = { ok: r.ok, conflicts: {
+      driver: r.conflicts.driver.map(id => getAssignmentById(id)).filter(Boolean),
+      vehicle: r.conflicts.vehicle.map(id => getAssignmentById(id)).filter(Boolean),
+      capacity: null, license: null } };
+    const v = tgt && getVehicleById(tgt.vehicleId);   // I6 積載量はアプリ層で補完
+    if (v && tgt.goods) { const m = String(tgt.goods).match(/([\d,]+)\s*kg/);
+      if (m) { const kg = parseInt(m[1].replace(/,/g, ''), 10); if (kg > v.maxLoad) { validation.capacity = { needed: kg, max: v.maxLoad }; validation.ok = false; } } }
+    return { ok: true, validation };
+  } catch (e) { return null; }
+}
 function reassignDriver(assignmentId, newDriverId) {
   const a = getAssignmentById(assignmentId);
   if (!a) return { ok: false, reason: 'assignment not found' };
   if (!getDriverById(newDriverId)) return { ok: false, reason: 'driver not found' };
   const before = a.driverId;
-  a.driverId = newDriverId;
+  const viaStore = _reassignViaOpStore(assignmentId, { driverId: newDriverId });
+  if (viaStore) return { ok: true, before, after: newDriverId, validation: viaStore.validation, via: 'opstore' };
+  a.driverId = newDriverId;                          // 縮退：in-place ＋ SSoT検証
   const r = validateAssignment(a);
   rebuildAssignmentIndex();
   return { ok: true, before, after: newDriverId, validation: r };
@@ -20561,7 +20899,9 @@ function reassignVehicle(assignmentId, newVehicleId) {
   if (!a) return { ok: false, reason: 'assignment not found' };
   if (!getVehicleById(newVehicleId)) return { ok: false, reason: 'vehicle not found' };
   const before = a.vehicleId;
-  a.vehicleId = newVehicleId;
+  const viaStore = _reassignViaOpStore(assignmentId, { vehicleId: newVehicleId });
+  if (viaStore) return { ok: true, before, after: newVehicleId, validation: viaStore.validation, via: 'opstore' };
+  a.vehicleId = newVehicleId;                        // 縮退：in-place ＋ SSoT検証
   const r = validateAssignment(a);
   rebuildAssignmentIndex();
   return { ok: true, before, after: newVehicleId, validation: r };
@@ -20572,8 +20912,18 @@ function reassignVehicle(assignmentId, newVehicleId) {
 //  ステップ4で renderSchedule をこちらに切り替える
 // ═══════════════════════════════════════════════════════════════
 function buildScheduleViewFromAssignments(tab) {
+  // データ源（物理統合・C6第8段）：フラグON時は
+  //   ① 永続SSoTストア window.__opStore からのライブ派生（getAssignments）を最優先、
+  //   ② 無ければ deriveAssignmentsView（都度往復）、③ それも無ければ素の assignments。
+  let _src;
+  if (window.__useOperationSSoT && window.__opStore && window.__opStore.getAssignments) {
+    try { _src = window.__opStore.getAssignments(tab); } catch (e) { _src = null; }
+  }
+  if (!_src) _src = (typeof deriveAssignmentsView === 'function')
+    ? deriveAssignmentsView(tab)
+    : assignments.filter(a => a.tab === tab);
   const byDriver = {};
-  assignments.filter(a => a.tab === tab).forEach(a => {
+  _src.forEach(a => {
     if (!byDriver[a.driverId]) byDriver[a.driverId] = [];
     byDriver[a.driverId].push(a);
   });
@@ -21024,7 +21374,7 @@ window.__notifyDndChange = function(action) {
       crossBase = true;
     }
     const ownerId = masterD ? masterD.defaultOwnerId : null;
-    assignments.push({
+    const _added = {
       id: _newAssignmentId(),
       tab: 'planning',
       date: action.dateKey || '2026-05-27',
@@ -21046,8 +21396,17 @@ window.__notifyDndChange = function(action) {
       relatedReturnId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    });
-    rebuildAssignmentIndex();
+    };
+    // 【書込先一本化・C6第12段】フラグON時は store へ add → assignments[] を再導出。失敗時は legacy push。
+    if (_opStoreWrite(() => window.__opStore.add(_added))) { /* store-first */ }
+    else { assignments.push(_added); rebuildAssignmentIndex(); }
+    // 課題C6・第5段：D&D配車も書込時点で SSoT 不変条件(I1/I2)を判定（非ブロッキング・フラグON時）。
+    if (window.__useOperationSSoT) {
+      try { const vr = validateAssignment(getAssignmentById(_added.id) || _added);
+        if (vr && !vr.ok && (vr.conflicts.driver.length || vr.conflicts.vehicle.length))
+          console.warn('[SSoT] D&D配車に時間重複の可能性', { driver: vr.conflicts.driver.length, vehicle: vr.conflicts.vehicle.length });
+      } catch (e) { /* 検証失敗は無視 */ }
+    }
   }
 
   else if (action.type === 'remove') {
@@ -21055,9 +21414,13 @@ window.__notifyDndChange = function(action) {
     if (!newDid) return;
     const target = findAssignment(newDid, action.block);
     if (target) {
-      const i = assignments.indexOf(target);
-      if (i >= 0) assignments.splice(i, 1);
-      rebuildAssignmentIndex();
+      const _tid = target.id;
+      // 書込先一本化：store から remove → 再導出。失敗時は legacy splice。
+      if (!_opStoreWrite(() => window.__opStore.remove(_tid))) {
+        const i = assignments.indexOf(target);
+        if (i >= 0) assignments.splice(i, 1);
+        rebuildAssignmentIndex();
+      }
     }
   }
 
@@ -21070,17 +21433,17 @@ window.__notifyDndChange = function(action) {
     const ref = action.fromBlockBefore || action.block;
     const target = findAssignment(fromNewDid, ref);
     if (target) {
-      target.driverId = toNewDid;
-      // ドロップ位置で時間が変わった場合は反映
-      if (action.block) {
-        target.start = action.block.start;
-        target.end = action.block.end;
-      }
-      // 既定では車両もそのドライバー固定車両に差し替え（=「車両ごと移る」既定挙動）
-      // 必要なら別途 assignmentAPI.changeVehicle で個別に変更可能
+      const _tid = target.id;
       const vid = toVehicleId(action.toDriverId);
-      if (vid) target.vehicleId = vid;
-      rebuildAssignmentIndex();
+      const _patch = { driverId: toNewDid, vehicleId: vid || null,
+        start: action.block ? action.block.start : null, end: action.block ? action.block.end : null };
+      // 書込先一本化：store を update → 再導出。失敗時は legacy in-place。
+      if (!_opStoreWrite(() => window.__opStore.update(_tid, _patch))) {
+        target.driverId = toNewDid;
+        if (action.block) { target.start = action.block.start; target.end = action.block.end; }
+        if (vid) target.vehicleId = vid;
+        rebuildAssignmentIndex();
+      }
     } else {
       // 元assignmentが見つからない＝外部から追加されたケース。新規としてaddする
       window.__notifyDndChange({
@@ -23351,7 +23714,21 @@ function dndGetCurrentDateKey() {
 }
 
 // 割当状態: { driverId: { 'YYYY-MM-DD': [{caseId, start, end, ...}], ... }, ... }
-let dndAssignments = {};
+// 【物理getter化・C6第16段】dndAssignments を Proxy で包む。ブロック配列は既に store-first 書込
+// （第14段）＋reader が SSoT 派生（第9段）の「射影」。この Proxy は read を素通し（get トラップ無し＝
+// ネイティブ速度・Object.keys / for-in 不変）、最外層の driver キー設定を計測（観測用）。挙動は不変。
+window.__dndAssignmentsWrites = 0;
+function _makeDndAssignmentsProxy(backing) {
+  if (typeof Proxy === 'undefined') return backing;
+  return new Proxy(backing, {
+    set(target, prop, value) {
+      if (window.__useOperationSSoT) window.__dndAssignmentsWrites = (window.__dndAssignmentsWrites || 0) + 1;
+      target[prop] = value; return true;
+    },
+    deleteProperty(target, prop) { delete target[prop]; return true; }
+  });
+}
+let dndAssignments = _makeDndAssignmentsProxy({});
 dndDrivers.forEach(d => {
   dndAssignments[d.id] = {};
   // presetは「今日」の固定便として配置
@@ -27358,8 +27735,13 @@ function renderDndTimeline() {
     let assigned;
     if (isConfirmedTab) {
       assigned = (dndConfirmedAssignments[d.id] && dndConfirmedAssignments[d.id][currentDateKey]) || [];
+      // C6・第10段：確定タブの reader も SSoT ライブ派生へ（確定行は読取専用＝注入なし。
+      // 既存配列へロスレス往復を in-place 反映。空なら no-op）。
+      applyDndBlocksViaSSoT(d.id, currentDateKey, assigned);
     } else {
       assigned = dndAssignmentsFor(d.id, currentDateKey);
+      // C6・第9段：DnD通常行の reader を SSoT ライブ派生へ（live配列へロスレス往復を in-place 反映）。
+      applyDndBlocksViaSSoT(d.id, currentDateKey, assigned);
     }
 
     // 【リレー輸送】分散モード時：このドライバーが担当する区間を一時的にassignedへ注入
@@ -27368,7 +27750,8 @@ function renderDndTimeline() {
       const driverFirstName = (d.name || '').split(' ')[0];
       processingCases.forEach(c => {
         if (c.vehicleMode !== 'relay' || !c.legs) return;
-        c.legs.forEach(leg => {
+        // 読取専用ビュー：SSoT派生（フラグON時）or レガシー c.legs（既定）
+        deriveRelayLegsView(c).forEach((leg, _li, _legsV) => {
           if (!leg.driverName) return;
           // ドライバー名のマッチング（姓のみで判定）
           const legFirstName = leg.driverName.split(' ')[0];
@@ -27381,7 +27764,7 @@ function renderDndTimeline() {
             _relayLegId: leg.legId,
             _relayJobId: c.jobId || c.id,
             _relayLegNo: leg.legNo,
-            _relayTotalLegs: c.legs.length,
+            _relayTotalLegs: _legsV.length,
             _relayCaseId: c.id,
             start: leg.startTime || '00:00',
             end: leg.endTime || '00:00',
@@ -27391,7 +27774,7 @@ function renderDndTimeline() {
             goods: c.goods,
             deadline: c.deadline,
             color: '#0d9488',
-            label: c.client + ` (${leg.legNo}/${c.legs.length})`,
+            label: c.client + ` (${leg.legNo}/${_legsV.length})`,
             locked: true,  // リレー区間は配車割当ページからは編集不可（モーダルで操作）
             _isRelayLeg: true
           });
@@ -27581,17 +27964,19 @@ function renderDndTimeline() {
       c.vehicleMode === 'relay' && c.legs && c.legs.length > 0
     );
     relayRowsHtml = relayCases.map(c => {
-      const driverChain = c.legs
+      // 読取専用ビュー：SSoT 派生（フラグON時）or レガシー c.legs（既定）
+      const legs = deriveRelayLegsView(c);
+      const driverChain = legs
         .map(l => (l.driverName || '—').split(' ')[0])
         .join(' → ');
-      const vehicleList = c.legs.map(l => l.vehicleId).join(' / ');
+      const vehicleList = legs.map(l => l.vehicleId).join(' / ');
       // 各区間のブロック
-      const blocksHtml = c.legs.map(leg => {
+      const blocksHtml = legs.map(leg => {
         const left = timeToPercent(leg.startTime || '00:00');
         const width = durationToPercent(leg.startTime || '00:00', leg.endTime || '00:00');
         const tip = `${c.client}\n区間${leg.legNo}: ${leg.relayFrom} → ${leg.relayTo}\n${leg.startTime} - ${leg.endTime}\n${leg.driverName} (${leg.vehicleId})`;
         return `<div class="dnd-block dnd-block-relay-leg"
-                     data-leg-no="${leg.legNo}/${c.legs.length}"
+                     data-leg-no="${leg.legNo}/${legs.length}"
                      style="left:${left}%;width:${width}%;background:#0d9488"
                      title="${tip.replace(/"/g, '&quot;').replace(/\n/g, ' / ')}">
           <div class="dnd-block-title">${(leg.driverName || '').split(' ')[0]}</div>
@@ -27599,7 +27984,7 @@ function renderDndTimeline() {
         </div>`;
       }).join('');
       // 車両IDから"車両"プレフィックスを除去（通常行と同じ表示形式）
-      const vehicleListShort = c.legs.map(l => (l.vehicleId || '').replace('車両', '')).join('/');
+      const vehicleListShort = legs.map(l => (l.vehicleId || '').replace('車両', '')).join('/');
       // 取引先名（長すぎる場合は省略）
       const clientShort = (c.client || '').length > 8
         ? c.client.substring(0, 7) + '…'
@@ -27611,7 +27996,7 @@ function renderDndTimeline() {
             <span class="dnd-driver-vehicle" title="${vehicleList.replace(/"/g, '&quot;')}">${vehicleListShort}</span>
           </div>
           <div class="dnd-driver-line2">
-            <span class="dnd-driver-status dnd-relay-row-label">リレー ${c.legs.length}区間</span>
+            <span class="dnd-driver-status dnd-relay-row-label">リレー ${legs.length}区間</span>
             <span class="dnd-driver-capacity" title="${driverChain.replace(/"/g, '&quot;')}">${driverChain}</span>
           </div>
         </div>
@@ -30282,6 +30667,8 @@ function dndTrackDrop(e, driverId) {
     const fromArr = (dndAssignments[dndDraggingFromDriver] && dndAssignments[dndDraggingFromDriver][dndDraggingFromDateKey]) || [];
     if (fromArr[dndDraggingBlockIdx]) {
       fromArr.splice(dndDraggingBlockIdx, 1);
+      // C6第14段：移動元の dndAssignments も store-first（ロスレス往復を in-place 反映）。
+      applyDndBlocksViaSSoT(dndDraggingFromDriver, dndDraggingFromDateKey, fromArr);
     }
   }
 
@@ -30353,6 +30740,8 @@ function dndTrackDrop(e, driverId) {
   dndAssignments[driverId][targetKey].push(_newBlock);
   // 開始時刻順にソート
   dndAssignments[driverId][targetKey].sort((a,b) => timeToMin(a.start) - timeToMin(b.start));
+  // C6第14段：配車先の dndAssignments を store-first（ingestDndBlocks→toDndBlocks のロスレス往復を in-place 反映）。
+  applyDndBlocksViaSSoT(driverId, targetKey, dndAssignments[driverId][targetKey]);
 
   // ★M3: 新スキーマ jobs[]/steps[] にも同じ内容を追加
   // 既存のブロック .push() を維持しつつ、jobs/steps を整合させる
@@ -30521,6 +30910,8 @@ function dndRemoveAssignment(driverId, idx) {
   }
 
   arr.splice(idx, 1);
+  // C6第14段：割当解除後の dndAssignments も store-first（ロスレス往復を in-place 反映）。
+  applyDndBlocksViaSSoT(driverId, currentKey, arr);
 
   // ★M3: 新スキーマ jobs[]/steps[] からも該当ジョブを削除
   try {
@@ -43411,7 +43802,8 @@ function buildAiScorePreview() {
   ];
   var rows = previewVehicles.map(function(v, i) {
     var score = calcAIScore(v.id);
-    var raw = VEHICLE_RAW_SCORES[v.id] || {};
+    // 内訳バーとスコアを同一ロジックに揃える（案件コンテキスト無し＝静的フォールバックで従来表示と一致）
+    var raw = calcAIScoreBreakdown(v.id);
     var w = window.AI_WEIGHTS;
     var barW = function(wt, rawVal) {
       return Math.round((wt/100) * rawVal * wt / 100);
