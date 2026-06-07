@@ -20690,6 +20690,14 @@ function rebuildAssignmentIndex() {
     (_assignByDriver[a.driverId] = _assignByDriver[a.driverId] || []).push(a);
     (_assignByVehicle[a.vehicleId] = _assignByVehicle[a.vehicleId] || []).push(a);
   });
+  // 物理統合（C6・第8段）：全 assignments 変更はここを通るため、単一同期点として
+  // 永続SSoTストアを再構築（完全ロスレス）。reader はこのストアからライブ派生する。
+  if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined' && LogipokeDB.createOperationStore) {
+    try {
+      if (!window.__opStore) window.__opStore = LogipokeDB.createOperationStore();
+      window.__opStore.syncFromAssignments(assignments);
+    } catch (e) { window.__opStore = null; /* 失敗時はストア無効化＝レガシー読取に縮退 */ }
+  }
 }
 let _assignByDriver = {}, _assignByVehicle = {}, _assignById = {};
 rebuildAssignmentIndex();
@@ -20779,8 +20787,14 @@ function reassignVehicle(assignmentId, newVehicleId) {
 //  ステップ4で renderSchedule をこちらに切り替える
 // ═══════════════════════════════════════════════════════════════
 function buildScheduleViewFromAssignments(tab) {
-  // データ源：フラグON時は 正規化SSoT 往復ビュー（deriveAssignmentsView）、既定は素の assignments。
-  const _src = (typeof deriveAssignmentsView === 'function')
+  // データ源（物理統合・C6第8段）：フラグON時は
+  //   ① 永続SSoTストア window.__opStore からのライブ派生（getAssignments）を最優先、
+  //   ② 無ければ deriveAssignmentsView（都度往復）、③ それも無ければ素の assignments。
+  let _src;
+  if (window.__useOperationSSoT && window.__opStore && window.__opStore.getAssignments) {
+    try { _src = window.__opStore.getAssignments(tab); } catch (e) { _src = null; }
+  }
+  if (!_src) _src = (typeof deriveAssignmentsView === 'function')
     ? deriveAssignmentsView(tab)
     : assignments.filter(a => a.tab === tab);
   const byDriver = {};

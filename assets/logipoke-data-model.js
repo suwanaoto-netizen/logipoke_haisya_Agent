@@ -595,6 +595,32 @@
     return { ok: issues.length === 0, issues: issues };
   }
 
+  /* ───────────────────────── ④ 運行層 永続ストア（課題C6・第8段／物理統合）──────
+   *  単一の永続 LogipokeDB を保持し、レガシー配列(assignments[])を無損失同期。
+   *  reader を本ストアからの「ライブ派生」へ1画面ずつ切替える物理統合の足場。
+   *  ・syncFromAssignments: 書込時に呼び、運行層エンティティを再構築（完全ロスレス）。
+   *  ・getAssignments(tab): フラット層をライブ派生（toAssignments）。
+   *  ・reassign: 本ストア上で I1/I2 検証付き書込（将来の書込先一本化用）。
+   * ------------------------------------------------------------------------- */
+  function createOperationStore() {
+    var db = createDB();
+    return {
+      db: db,
+      // レガシー assignments[] から運行層を再構築（運行エンティティのみクリアして再取込）
+      syncFromAssignments: function (flat) {
+        db.trips.clear(); db.legs.clear(); db.stops.clear(); db.assignments.clear(); db.orders.clear();
+        ingestAssignments(db, flat || []);
+        return this;
+      },
+      getAssignments: function (tab) {
+        var all = toAssignments(db);
+        return tab ? all.filter(function (a) { return a.tab === tab; }) : all;
+      },
+      checkConflicts: function (id) { return checkLegConflicts(db, id); },
+      reassign: function (id, change) { return reassignLeg(db, id, change); }
+    };
+  }
+
   /* ───────────────────────── 公開API ─────────────────────────────────────── */
   return {
     // helpers / value objects
@@ -619,6 +645,8 @@
     // ④ operation：書込先SSoT化＋不変条件 I1/I2 の強制（課題C6・第4段）
     checkLegConflicts: checkLegConflicts, reassignLeg: reassignLeg,
     // ④ operation：中継編集(c.legs)の書込検証 I9/ドライバー重複（課題C6・第5段）
-    validateRelayLegs: validateRelayLegs
+    validateRelayLegs: validateRelayLegs,
+    // ④ operation：永続ストア（物理統合の足場・課題C6・第8段）
+    createOperationStore: createOperationStore
   };
 });

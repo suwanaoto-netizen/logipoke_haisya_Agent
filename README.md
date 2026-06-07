@@ -102,10 +102,17 @@ SSoT 未接続のままでした）。
   拡張フィールドは保持されることを `verify_operation.mjs`（計26件）で保証。jsdom（既定ON）でも
   `deriveAssignmentsView` のロスレス・ガント/DnD無例外を再確認済み。**SSoTを唯一の物理ストアにする前提
   （無損失表現）が整った**。
-- 🔜 **本体ではまだ未接続（順次対応）**: 残る完全インバージョンの最終段は「単一の永続 `LogipokeDB` を
-  保持し、`assignments[]`/`c.legs`/`dndAssignments` を**ライブ派生（getter）に降格**して全 reader/writer を
-  そこへ寄せる物理統合」。無損失表現は第7段で確立済みのため**安全に実施可能**だが、reader が多数（数十箇所）
-  に及ぶため、画面ごとの目視を伴う段階適用が必要（別ラウンド）。あわせて 他マスタ（取引先/協力会社/
+- ✅ **物理統合の段階適用①：永続ストア導入＋ガントのreader切替（課題C6・第8段）**:
+  `LogipokeDB.createOperationStore()`（単一の永続 `LogipokeDB` を保持し、`syncFromAssignments` で
+  完全ロスレス再構築、`getAssignments(tab)` でフラット層をライブ派生、`reassign` で I1/I2 検証付き書込）を
+  追加。本体は **全 `assignments[]` 変更が通る `rebuildAssignmentIndex()` を単一同期点**に永続ストア
+  `window.__opStore` を常時再構築し、**ガント（`buildScheduleViewFromAssignments`）の reader を永続ストア
+  からのライブ派生へ切替**（無ければ都度往復→素配列へ多段フォールバック）。jsdom（既定ON）で
+  起動時のストア生成・ロスレス一致・ガント無例外・**書込(reassign)後の単一同期点での追従**を目視確認、
+  `verify_operation.mjs` 計30件で永続ストアの一致/再同期/書込反映を保証。
+- 🔜 **物理統合の残り（順次・画面ごと目視）**: 他 reader（**DnDボードの通常行**＝`dndAssignments`、案件詳細、
+  確定タブ等）を順に `window.__opStore` 由来のライブ派生へ切替え、最終的に `assignments[]`/`c.legs`/
+  `dndAssignments` を getter へ降格して唯一の物理ストア化を完了する。あわせて 他マスタ（取引先/協力会社/
   ユーザー/定期便）・受付（旧 `logipoke_ai_intake_queue` → `logipoke_db_receptions_v1`）・案件4分割
   （`unprocessed`/`processing`/`processed`）の接続が残る。`vehicleMasterData` は固有データを持つ独立
   レジストリのため、物理統合はデータ判断を要します。

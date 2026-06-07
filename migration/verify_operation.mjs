@@ -379,6 +379,41 @@ check('完全ロスレス：中継 c.legs が toCaseLegs で deepStrictEqual 往
   relayCase.legs.forEach((src, i) => assert.deepEqual(legs[i], src));
 });
 
+// ── 永続ストア（第8段 / 物理統合） ──
+check('永続ストア：getAssignments がレガシー配列とロスレス一致', () => {
+  const store = DB.createOperationStore().syncFromAssignments(flatAssignments);
+  const norm = arr => arr.slice().sort((a, b) => a.id.localeCompare(b.id));
+  assert.deepEqual(norm(store.getAssignments()), norm(flatAssignments));
+});
+
+check('永続ストア：tab フィルタが効く', () => {
+  const store = DB.createOperationStore().syncFromAssignments(flatAssignments);
+  const planning = store.getAssignments('planning');
+  assert.ok(planning.length > 0);
+  assert.ok(planning.every(a => a.tab === 'planning'));
+});
+
+check('永続ストア：syncFromAssignments 再同期で前回状態が残らない', () => {
+  const store = DB.createOperationStore();
+  store.syncFromAssignments(flatAssignments);
+  store.syncFromAssignments([flatAssignments[0]]);   // 1件に縮小
+  const out = store.getAssignments();
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, flatAssignments[0].id);
+});
+
+check('永続ストア：reassign が getAssignments に反映（拡張フィールド保持）', () => {
+  const rich = { id: 'A07001', tab: 'planning', date: '2026-05-27', driverId: 'D001', vehicleId: 'V0001',
+    start: '06:00', end: '10:00', status: '運行中', client: 'A社', from: '川口', to: '横浜',
+    goods: 'x/100kg/常温', deadline: '本日中', label: 'A社', color: '#1', effectiveBaseId: 'B001', sub: 'X' };
+  const store = DB.createOperationStore().syncFromAssignments([rich]);
+  store.reassign('A07001', { driverId: 'D777' });
+  const out = store.getAssignments()[0];
+  assert.equal(out.driverId, 'D777');
+  assert.equal(out.effectiveBaseId, 'B001');
+  assert.equal(out.sub, 'X');
+});
+
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {
   function build() {
     DB.resetSeq();
