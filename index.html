@@ -13815,9 +13815,10 @@ function getScaleOutPlan(c, verdict) {
 }
 
 // 増車プランカード（自社①②＋協力会社＋利益影響）。required/recommended のみ。
-function buildScaleOutPlanCard(c, verdict) {
+function buildScaleOutPlanCard(c, verdict, caseIdx) {
   const plan = getScaleOutPlan(c, verdict);
   if (!plan || !plan.legs.length) return '';
+  const ownN = plan.legs.filter(function (l) { return l.kind === 'own'; }).length;
   const f = plan.fare;
   const shapeLabel = { relay: '中継', parallel: '並走', co_split: '相積み分割' }[plan.shape] || plan.shape;
   const tags = '①②③④⑤⑥⑦⑧';
@@ -13847,7 +13848,57 @@ function buildScaleOutPlanCard(c, verdict) {
     + '<div class="so-profit-row total"><span>粗利 / 粗利率</span><b style="color:' + pColor + '">¥' + f.grossProfit.toLocaleString() + ' ・ ' + f.marginPct + '%</b></div>'
     + '</div>'
     + (plan.satisfied ? '' : '<div style="font-size:10.5px;color:#9a3412;margin-top:6px">⚠ 候補が不足しています（手配先の追加が必要）</div>')
+    + ((caseIdx != null && ownN >= 1)
+      ? '<button class="btn btn-orange" style="width:100%;margin-top:10px;justify-content:center" onclick="applyScaleOutPlan(' + caseIdx + ')">'
+        + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+        + '⊕ この増車プランで配車（自社' + ownN + '台' + (plan.partnerCount ? '＋協力' + plan.partnerCount : '') + '）</button>'
+      : '')
     + '</div></div>';
+}
+
+// 自動配車：AI増車プランを multi モード＋legs[] に流し込む（協力会社分は別途依頼へ誘導）。
+function applyScaleOutPlan(caseIdx) {
+  const c = processingCases[caseIdx];
+  if (!c) return;
+  const plan = getScaleOutPlan(c);
+  if (!plan || !plan.legs.length) { showToast('増車プランがありません', 'warn'); return; }
+  const ownLegs = plan.legs.filter(function (l) { return l.kind === 'own'; });
+  if (!ownLegs.length) { showToast('自社便の候補がありません。協力会社へ依頼してください', 'warn'); return; }
+
+  // 区間時間：並走（parallel）は同日帯で30分ずつスタッグ。長距離は当日内に収める。
+  const distKm = parseInt(String(c.distance || '').replace(/[^\d]/g, ''), 10) || (plan.legs[0] && plan.legs[0].distanceKm) || 60;
+  const durMin = Math.min(14 * 60, Math.max(120, Math.round(distKm / 60 * 60 + 90)));
+  function mmToHHMM(mm) { mm = Math.min(23 * 60 + 30, mm); return String(Math.floor(mm / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0'); }
+
+  c.vehicleMode = 'multi';
+  c.legs = ownLegs.slice(0, 3).map(function (l, idx) {
+    const vi = (c.vehicles || []).findIndex(function (v) { return v.id === l.id; });
+    const v = vi >= 0 ? c.vehicles[vi] : null;
+    const cap = v ? v.cap : (l.capKg ? l.capKg.toLocaleString() + 'kg' : '');
+    const startMin = 8 * 60 + idx * 30;
+    return {
+      legId: 'leg-' + Date.now() + '-' + idx, legNo: idx + 1,
+      vehicleId: l.id, vehicleName: l.id, driverName: l.driver || (v && v.driver) || '',
+      capacity: cap,
+      vehicleType: /2,000|2t/.test(cap) ? '2t車' : /1,500/.test(cap) ? '中型' : '小型',
+      role: idx === 0 ? 'main' : 'sub',
+      startTime: mmToHHMM(startMin), endTime: mmToHHMM(startMin + durMin),
+      reason: 'AI増車プラン', notes: 'AI増車プランで自動配車',
+      vehicleIdx: vi >= 0 ? vi : 0,
+      lawOk: v && v.law ? v.law.items.every(function (it) { return it.ok; }) : true
+    };
+  });
+  // 協力会社分は記録（多便UIは自社専用のため、既存「協力会社へ依頼」へ誘導）
+  c.scaleOutPartnerLegs = plan.legs.filter(function (l) { return l.kind === 'partner'; });
+  c.scaleOutFare = plan.fare;
+
+  if (typeof renderProcessingList === 'function') renderProcessingList();
+  if (typeof renderProcessingDetail === 'function') renderProcessingDetail(caseIdx);
+  if (typeof renderDnd === 'function') { try { renderDnd(); } catch (e) {} }
+  if (typeof renderSchedule === 'function') { try { renderSchedule(); } catch (e) {} }
+  const pc = c.scaleOutPartnerLegs.length;
+  showToast('自社' + c.legs.length + '台を複数台配車に流し込みました（配車割当にバー表示）'
+    + (pc ? '。協力' + pc + '社は「協力会社へ依頼」から手配してください' : ''), 'success');
 }
 
 // 増車が必要/推奨の案件件数（required + recommended）。運行スケジュールのサマリー集計用。
@@ -15345,7 +15396,7 @@ function renderProcessingDetail(i) {
       </button>
     </div>
     ${_soBanner}
-    ${(typeof buildScaleOutPlanCard === 'function') ? buildScaleOutPlanCard(c, _so) : ''}
+    ${(typeof buildScaleOutPlanCard === 'function') ? buildScaleOutPlanCard(c, _so, i) : ''}
 
     <!-- 案件パターン -->
     <div class="detail-card" style="margin-bottom:14px">
@@ -26453,6 +26504,35 @@ function renderDndTimeline() {
         const sa = timeToPercent(a.start), sb = timeToPercent(b.start);
         return sa - sb;
       });
+    }
+
+    // 【複数台（増車）】計画中タブで、このドライバーが担当する自社便をバーとして注入
+    if (!isConfirmedTab && typeof processingCases !== 'undefined') {
+      const driverFirstNameM = (d.name || '').split(' ')[0];
+      processingCases.forEach(c => {
+        if (c.vehicleMode !== 'multi' || !c.legs) return;
+        c.legs.forEach(leg => {
+          if (!leg.driverName) return;
+          if (leg.driverName.split(' ')[0] !== driverFirstNameM) return;
+          if (assigned.some(a => a._multiLegId === leg.legId)) return;
+          assigned.push({
+            id: 'multi-' + leg.legId,
+            _multiLegId: leg.legId,
+            _multiCaseId: c.id,
+            _multiLegNo: leg.legNo,
+            _multiTotalLegs: c.legs.length,
+            start: leg.startTime || '08:00',
+            end: leg.endTime || '12:00',
+            client: c.client, from: c.from, to: c.to,
+            goods: c.goods, deadline: c.deadline,
+            color: '#1a7a5e',
+            label: c.client + ` (増車${leg.legNo}/${c.legs.length}台)`,
+            locked: true,   // 増車便は配車割当からは編集不可（個別案件処理で操作）
+            _isMultiLeg: true
+          });
+        });
+      });
+      assigned.sort((a, b) => timeToPercent(a.start) - timeToPercent(b.start));
     }
 
     // 改善基準告示：この日のこのドライバーのステータス（計画中タブのみ）
