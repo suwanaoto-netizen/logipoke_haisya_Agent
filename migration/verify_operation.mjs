@@ -442,6 +442,38 @@ check('DnDブロック：driver/date ごとに分離して復元', () => {
   assert.equal(DB.toDndBlocks(db, 'V0002', '2026-05-27')[0].from, 'c');
 });
 
+// ── 永続ストアの書込API add/remove/update（第12段 / 書込先一本化） ──
+check('永続ストア add：1件追加が getAssignments に現れる（ロスレス）', () => {
+  const store = DB.createOperationStore().syncFromAssignments(flatAssignments);
+  const rec = { id: 'A09999', tab: 'planning', date: '2026-05-27', driverId: 'D050', vehicleId: 'V0050',
+    start: '20:00', end: '22:00', status: '運行中', client: 'Z社', from: '品川', to: '川崎',
+    goods: 'z/200kg/常温', deadline: '本日中', label: 'Z社', color: '#9', effectiveBaseId: 'B005' };
+  store.add(rec);
+  const out = store.getAssignments().find(a => a.id === 'A09999');
+  assert.deepEqual(out, rec);
+  assert.equal(store.getAssignments().length, flatAssignments.length + 1);
+});
+
+check('永続ストア remove：1件削除が反映（他は不変）', () => {
+  const store = DB.createOperationStore().syncFromAssignments(flatAssignments);
+  store.remove('A00002');
+  const out = store.getAssignments();
+  assert.equal(out.length, flatAssignments.length - 1);
+  assert.ok(!out.find(a => a.id === 'A00002'));
+  assert.ok(out.find(a => a.id === 'A00001'));
+});
+
+check('永続ストア update：driver/vehicle/時刻の差し替えが反映', () => {
+  const store = DB.createOperationStore().syncFromAssignments(flatAssignments);
+  store.update('A00001', { driverId: 'D777', vehicleId: 'V0777', start: '07:00', end: '11:00' });
+  const a = store.getAssignments().find(x => x.id === 'A00001');
+  assert.equal(a.driverId, 'D777');
+  assert.equal(a.vehicleId, 'V0777');
+  assert.equal(a.start, '07:00');
+  assert.equal(a.end, '11:00');
+  assert.equal(a.client, '株式会社○○商事');   // 他フィールドは保持
+});
+
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {
   function build() {
     DB.resetSeq();

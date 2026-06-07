@@ -662,7 +662,25 @@
         return tab ? all.filter(function (a) { return a.tab === tab; }) : all;
       },
       checkConflicts: function (id) { return checkLegConflicts(db, id); },
-      reassign: function (id, change) { return reassignLeg(db, id, change); }
+      reassign: function (id, change) { return reassignLeg(db, id, change); },
+      // 書込先一本化：1件追加（id=assignment id でleg/order/assignmentを生成）
+      add: function (rec) { ingestAssignments(db, [rec]); return this; },
+      // 1件削除（leg/stops/order/assignment を id で除去）
+      remove: function (id) {
+        var del = []; db.stops.forEach(function (s) { if (s.legId === id) del.push(s.id); });
+        del.forEach(function (sid) { db.stops.delete(sid); });
+        db.legs.delete(id); db.assignments.delete(id); db.orders.delete(id);
+        return this;
+      },
+      // 1件更新（driver/vehicle/時刻を差し替え。move 等の多フィールド変更用）
+      update: function (id, patch) {
+        var leg = db.legs.get(id); if (!leg) return this; patch = patch || {};
+        if (patch.driverId != null) leg.driverId = patch.driverId;
+        if (patch.vehicleId != null) leg.vehicleId = patch.vehicleId;
+        if (patch.start != null) leg.startTime = patch.start;
+        if (patch.end != null) leg.endTime = patch.end;
+        return this;
+      }
     };
   }
 

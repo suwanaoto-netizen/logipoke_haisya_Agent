@@ -12851,6 +12851,22 @@ function deriveAssignmentsView(tab) {
 }
 window.deriveAssignmentsView = deriveAssignmentsView;
 
+// 【書込先一本化の実行ヘルパー・C6第12段】store を書込先にして mutate→assignments[] 再導出。
+// 手順：現在値で store を最新化 → mutate（add/remove/update）→ store から assignments[] を
+// in-place 再導出（const 参照保持・完全ロスレス）→ index 再構築。成功時 true、不可/失敗時 false（呼び元が legacy 実行）。
+function _opStoreWrite(mutateFn) {
+  if (!window.__useOperationSSoT || !window.__opStore || typeof LogipokeDB === 'undefined') return false;
+  try {
+    window.__opStore.syncFromAssignments(assignments);   // store を現在値に最新化
+    mutateFn();                                           // store を書込先として変更
+    const d = window.__opStore.getAssignments();          // store から再導出（完全ロスレス）
+    assignments.length = 0; d.forEach(x => assignments.push(x));
+    rebuildAssignmentIndex();
+    return true;
+  } catch (e) { return false; }
+}
+window._opStoreWrite = _opStoreWrite;
+
 // 【唯一ストアの読取ファサード・C6第11段】正準ストア(__opStore)を単一情報源として公開する getter API。
 // const 配列(assignments[]) は当面、書込先一本化のための「射影」として残置（物理的な getter 置換は
 // 全 reader/writer のブラウザQAを要するため別ラウンド）。本ファサードは store 由来の値を返す。
@@ -21342,11 +21358,12 @@ window.__notifyDndChange = function(action) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    assignments.push(_added);
-    rebuildAssignmentIndex();
+    // 【書込先一本化・C6第12段】フラグON時は store へ add → assignments[] を再導出。失敗時は legacy push。
+    if (_opStoreWrite(() => window.__opStore.add(_added))) { /* store-first */ }
+    else { assignments.push(_added); rebuildAssignmentIndex(); }
     // 課題C6・第5段：D&D配車も書込時点で SSoT 不変条件(I1/I2)を判定（非ブロッキング・フラグON時）。
     if (window.__useOperationSSoT) {
-      try { const vr = validateAssignment(_added);
+      try { const vr = validateAssignment(getAssignmentById(_added.id) || _added);
         if (vr && !vr.ok && (vr.conflicts.driver.length || vr.conflicts.vehicle.length))
           console.warn('[SSoT] D&D配車に時間重複の可能性', { driver: vr.conflicts.driver.length, vehicle: vr.conflicts.vehicle.length });
       } catch (e) { /* 検証失敗は無視 */ }
@@ -21358,9 +21375,13 @@ window.__notifyDndChange = function(action) {
     if (!newDid) return;
     const target = findAssignment(newDid, action.block);
     if (target) {
-      const i = assignments.indexOf(target);
-      if (i >= 0) assignments.splice(i, 1);
-      rebuildAssignmentIndex();
+      const _tid = target.id;
+      // 書込先一本化：store から remove → 再導出。失敗時は legacy splice。
+      if (!_opStoreWrite(() => window.__opStore.remove(_tid))) {
+        const i = assignments.indexOf(target);
+        if (i >= 0) assignments.splice(i, 1);
+        rebuildAssignmentIndex();
+      }
     }
   }
 
@@ -21373,17 +21394,17 @@ window.__notifyDndChange = function(action) {
     const ref = action.fromBlockBefore || action.block;
     const target = findAssignment(fromNewDid, ref);
     if (target) {
-      target.driverId = toNewDid;
-      // ドロップ位置で時間が変わった場合は反映
-      if (action.block) {
-        target.start = action.block.start;
-        target.end = action.block.end;
-      }
-      // 既定では車両もそのドライバー固定車両に差し替え（=「車両ごと移る」既定挙動）
-      // 必要なら別途 assignmentAPI.changeVehicle で個別に変更可能
+      const _tid = target.id;
       const vid = toVehicleId(action.toDriverId);
-      if (vid) target.vehicleId = vid;
-      rebuildAssignmentIndex();
+      const _patch = { driverId: toNewDid, vehicleId: vid || null,
+        start: action.block ? action.block.start : null, end: action.block ? action.block.end : null };
+      // 書込先一本化：store を update → 再導出。失敗時は legacy in-place。
+      if (!_opStoreWrite(() => window.__opStore.update(_tid, _patch))) {
+        target.driverId = toNewDid;
+        if (action.block) { target.start = action.block.start; target.end = action.block.end; }
+        if (vid) target.vehicleId = vid;
+        rebuildAssignmentIndex();
+      }
     } else {
       // 元assignmentが見つからない＝外部から追加されたケース。新規としてaddする
       window.__notifyDndChange({
