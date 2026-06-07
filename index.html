@@ -23494,9 +23494,108 @@ dndDrivers.forEach(d => {
   });
 })();
 
-// ═══════════════════════════════════════════════════════════════════
-// ★M1: マイグレーション — 既存データから cases/jobs/steps を構築
-// ═══════════════════════════════════════════════════════════════════
+// ── サンプル増量：本日2倍／本日以前ほぼ満載／翌日・翌々日はある程度割当 ──
+// すべて confirmed:true（仮確定済み）の配車として配置し、タイムラインの
+// 「仮確定済み」表示（白リング＋✓確定）でリアルな運用状態を見せる。
+(function _seedMoreAssignments() {
+  if (typeof dndUnassignedCases === 'undefined' || !dndUnassignedCases.length) return;
+  const cases = dndUnassignedCases;
+  let ci = 0;
+  const nextCase = () => cases[(ci++) % cases.length];
+  const dateKeyOffset = (n) => { const d = new Date(dndToday().getTime()); d.setDate(d.getDate() + n); return dndDateKey(d); };
+  const selfDrivers = dndDrivers.filter(d => !d.partner);
+
+  // 既存ブロックとの時間衝突を避けて push
+  const _toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  function hasOverlap(driverId, dateKey, start, end) {
+    const arr = (dndAssignments[driverId] && dndAssignments[driverId][dateKey]) || [];
+    const s = _toMin(start), e = _toMin(end);
+    return arr.some(a => { const as = _toMin(a.start), ae = _toMin(a.end); return s < ae && as < e; });
+  }
+  function seedBlock(caseObj, start, end) {
+    const loadMin = (caseObj.loadMin != null) ? caseObj.loadMin : 30;
+    const unloadMin = (caseObj.unloadMin != null) ? caseObj.unloadMin : 30;
+    const f = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    const totalMin = _toMin(end) - _toMin(start);
+    let driveMin = totalMin - loadMin - unloadMin; if (driveMin < 15) driveMin = 15;
+    const ls = _toMin(start), le = ls + loadMin, de = le + driveMin, ue = de + unloadMin;
+    const label = caseObj.client.length > 8 ? caseObj.client.substring(0, 7) + '…' : caseObj.client;
+    const sub = caseObj.from.replace(/.*?[都道府県]/, '').substring(0, 3) + '→' + caseObj.to.replace(/.*?[都道府県]/, '').substring(0, 3);
+    return {
+      caseId: caseObj.id, caseListId: caseObj.caseListId || null,
+      client: caseObj.client, from: caseObj.from, to: caseObj.to, goods: caseObj.goods,
+      deadline: caseObj.deadline, urgent: caseObj.urgent, label: label, sub: sub, start: start, end: end,
+      loadStart: f(ls), loadEnd: f(le), driveEnd: f(de), unloadEnd: f(ue),
+      loadMin: loadMin, driveMin: driveMin, unloadMin: unloadMin,
+      color: caseObj.color || '#1a7a5e', isPreset: false,
+      confirmed: true, confirmedAt: new Date().toISOString(), _seeded: true
+    };
+  }
+  function place(driver, dateKey, start, end) {
+    if (hasOverlap(driver.id, dateKey, start, end)) return false;
+    if (!dndAssignments[driver.id]) dndAssignments[driver.id] = {};
+    if (!dndAssignments[driver.id][dateKey]) dndAssignments[driver.id][dateKey] = [];
+    dndAssignments[driver.id][dateKey].push(seedBlock(nextCase(), start, end));
+    return true;
+  }
+
+  // 始業時刻にバリエーション（決定論的に分散）
+  const AM = [['06:00', '10:30'], ['06:30', '11:00'], ['07:00', '11:30'], ['08:00', '12:00']];
+  const PM = [['12:30', '16:30'], ['13:00', '17:00'], ['13:30', '17:30'], ['14:00', '18:00']];
+
+  // ① 本日：既存の約18件に対し、空いている自社ドライバーへ確定便を追加して約2倍に
+  (function seedToday() {
+    const todayKey = dndDateKey(dndToday());
+    let added = 0;
+    selfDrivers.forEach((drv, i) => {
+      if (added >= 18) return;
+      const cur = (dndAssignments[drv.id] && dndAssignments[drv.id][todayKey]) || [];
+      if (cur.length > 0) return;              // 既に配車のあるドライバーは温存
+      const [s, e] = AM[i % AM.length];
+      if (place(drv, todayKey, s, e)) added++;
+    });
+    // さらに一部ドライバーへ2件目（午後便）を付与して件数を増やす
+    selfDrivers.forEach((drv, i) => {
+      if (added >= 18) return;
+      if (i % 3 !== 0) return;
+      const [s, e] = PM[i % PM.length];
+      if (place(drv, todayKey, s, e)) added++;
+    });
+  })();
+
+  // ② 本日以前（-1, -2, -3）：自社車両のスケジュールがほぼ埋まる状態（AM+PMの2便）
+  [-1, -2, -3].forEach(off => {
+    const key = dateKeyOffset(off);
+    selfDrivers.forEach((drv, i) => {
+      if (i % 10 === 9) return;                 // 約1割は空き（休車・予備）
+      const [as, ae] = AM[i % AM.length];
+      place(drv, key, as, ae);
+      if (i % 6 !== 5) {                         // 約8割は2便目も入れて満載に
+        const [ps, pe] = PM[i % PM.length];
+        place(drv, key, ps, pe);
+      }
+    });
+  });
+
+  // ③ 翌日・翌々日（+1, +2）：ある程度割当（+1は約5割、+2は約3.5割の自社ドライバーに1便）
+  [{ off: 1, mod: 2 }, { off: 2, mod: 3 }].forEach(cfg => {
+    const key = dateKeyOffset(cfg.off);
+    selfDrivers.forEach((drv, i) => {
+      if (i % cfg.mod !== 0) return;
+      const [s, e] = AM[i % AM.length];
+      place(drv, key, s, e);
+    });
+  });
+
+  // 各日付・各ドライバーを開始時刻順にソート
+  Object.keys(dndAssignments).forEach(did => {
+    Object.keys(dndAssignments[did] || {}).forEach(dk => {
+      dndAssignments[did][dk].sort((a, b) => _toMin(a.start) - _toMin(b.start));
+    });
+  });
+})();
+
+
 // 既存の dndUnassignedCases と dndAssignments[did][date][] からの読み取り。
 // この時点で _prePopulateAssignments() が完了しており、初期配車も入っている。
 (function _migrateExistingDataToJobs() {
