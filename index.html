@@ -12854,6 +12854,23 @@ window.deriveAssignmentsView = deriveAssignmentsView;
 // 中継編集(c.legs)の書込検証を 正規化SSoT に委譲（課題C6・第5段）。書込面 c.legs は据え置き、
 // I9（引き継ぎ連続性）・同一ドライバーの時間重複を SSoT(validateRelayLegs) で判定しUIへ提示。
 // フラグON時のみ。これで残る書込経路（中継編集）の不変条件もSSoT権威下に入る。
+// DnDボード通常行(dndAssignments のブロック)の reader を SSoT ライブ派生へ（課題C6・第9段）。
+// live配列を ingestDndBlocks→toDndBlocks でロスレス往復し、その結果を live配列へ in-place 反映する。
+// 往復は無損失（verify_operation で保証）＝表示・永続semanticsは不変だが、reader が正規化SSoTを経由する。
+// 失敗/件数不一致時は live配列を一切触らず従来動作に縮退。
+function applyDndBlocksViaSSoT(driverId, dateKey, liveArr) {
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined'
+      || !LogipokeDB.ingestDndBlocks || !Array.isArray(liveArr) || liveArr.length === 0) return;
+  try {
+    const db = LogipokeDB.createDB();
+    LogipokeDB.ingestDndBlocks(db, driverId, dateKey, liveArr);
+    const view = LogipokeDB.toDndBlocks(db, driverId, dateKey);
+    if (view.length !== liveArr.length) return;           // 不一致なら触らない
+    liveArr.length = 0; view.forEach(b => liveArr.push(b)); // ロスレス往復を live に反映（配列identity保持）
+  } catch (e) { /* 縮退：live配列はそのまま */ }
+}
+window.applyDndBlocksViaSSoT = applyDndBlocksViaSSoT;
+
 function _ssotValidateRelay(c) {
   if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined'
       || !c || c.vehicleMode !== 'relay' || !LogipokeDB.validateRelayLegs) return;
@@ -27593,6 +27610,8 @@ function renderDndTimeline() {
       assigned = (dndConfirmedAssignments[d.id] && dndConfirmedAssignments[d.id][currentDateKey]) || [];
     } else {
       assigned = dndAssignmentsFor(d.id, currentDateKey);
+      // C6・第9段：DnD通常行の reader を SSoT ライブ派生へ（live配列へロスレス往復を in-place 反映）。
+      applyDndBlocksViaSSoT(d.id, currentDateKey, assigned);
     }
 
     // 【リレー輸送】分散モード時：このドライバーが担当する区間を一時的にassignedへ注入

@@ -414,6 +414,34 @@ check('永続ストア：reassign が getAssignments に反映（拡張フィー
   assert.equal(out.sub, 'X');
 });
 
+// ── DnD通常行ブロックの SSoT ロスレス往復（第9段 / DnDボード reader 切替） ──
+check('DnDブロック：拡張フィールド全部入りが toDndBlocks で deepStrictEqual 往復', () => {
+  // 積荷段組・中継注入マーカー等の DnD 固有フィールドを全部入り。
+  const blocks = [
+    { caseId: 'C1', caseListId: null, client: 'A社', from: '川口', to: '横浜', goods: 'x/800kg/常温',
+      deadline: '本日中', urgent: false, label: 'A社', sub: '川口→横浜', start: '06:00', end: '10:30',
+      loadStart: '06:00', loadEnd: '06:30', driveEnd: '10:00', unloadEnd: '10:30',
+      loadMin: 30, driveMin: 210, unloadMin: 30, color: '#3BB888', isPreset: false, confirmed: false, _isNew: true },
+    { _relayLegId: 'relay-104-1', _relayCaseId: '104', start: '11:00', end: '14:30', from: '名古屋', to: '大阪',
+      client: '関西化学', color: '#0d9488', locked: true, _isRelayLeg: true, label: '関西化学 (2/2)' }
+  ];
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestDndBlocks(db, 'V0001', '2026-05-27', blocks);
+  const out = DB.toDndBlocks(db, 'V0001', '2026-05-27');
+  assert.equal(out.length, 2);
+  blocks.forEach((b, i) => assert.deepEqual(out[i], b));   // 拡張フィールドまで完全一致・順序保持
+});
+
+check('DnDブロック：driver/date ごとに分離して復元', () => {
+  DB.resetSeq();
+  const db = DB.createDB();
+  DB.ingestDndBlocks(db, 'V0001', '2026-05-27', [{ start: '06:00', end: '08:00', from: 'a', to: 'b' }]);
+  DB.ingestDndBlocks(db, 'V0002', '2026-05-27', [{ start: '09:00', end: '11:00', from: 'c', to: 'd' }]);
+  assert.equal(DB.toDndBlocks(db, 'V0001', '2026-05-27').length, 1);
+  assert.equal(DB.toDndBlocks(db, 'V0002', '2026-05-27')[0].from, 'c');
+});
+
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {
   function build() {
     DB.resetSeq();

@@ -110,12 +110,22 @@ SSoT 未接続のままでした）。
   からのライブ派生へ切替**（無ければ都度往復→素配列へ多段フォールバック）。jsdom（既定ON）で
   起動時のストア生成・ロスレス一致・ガント無例外・**書込(reassign)後の単一同期点での追従**を目視確認、
   `verify_operation.mjs` 計30件で永続ストアの一致/再同期/書込反映を保証。
-- 🔜 **物理統合の残り（順次・画面ごと目視）**: 他 reader（**DnDボードの通常行**＝`dndAssignments`、案件詳細、
-  確定タブ等）を順に `window.__opStore` 由来のライブ派生へ切替え、最終的に `assignments[]`/`c.legs`/
-  `dndAssignments` を getter へ降格して唯一の物理ストア化を完了する。あわせて 他マスタ（取引先/協力会社/
-  ユーザー/定期便）・受付（旧 `logipoke_ai_intake_queue` → `logipoke_db_receptions_v1`）・案件4分割
-  （`unprocessed`/`processing`/`processed`）の接続が残る。`vehicleMasterData` は固有データを持つ独立
-  レジストリのため、物理統合はデータ判断を要します。
+- ✅ **物理統合の段階適用②：DnDボード通常行の reader 切替（課題C6・第9段）**:
+  3つ目のレガシーストア `dndAssignments`（D&Dの書込面・積荷段組フィールドを持つ）も正規化モデルへ。
+  `ingestDndBlocks`/`toDndBlocks` を追加し、**1ブロック=1 Leg・start/end/from/to を正規化スロット＋
+  その他（積荷段組 loadMin等／中継注入マーカー _relayLegId 等）を `_extra` 温存**で**完全ロスレス**化。
+  本体は `renderDndTimeline` の通常行読取点で `applyDndBlocksViaSSoT` を呼び、live配列を
+  `ingestDndBlocks→toDndBlocks` でロスレス往復して **in-place 反映**（配列 identity と「中継/増車区間の
+  push 永続」semantics を保持＝表示・挙動は不変だが reader が正規化SSoTを経由）。件数不一致/失敗時は
+  live配列を一切触らず縮退。jsdom（既定ON）で往復ロスレス（値不変）・`renderDnd` 無例外・再入維持を目視、
+  `verify_operation.mjs` 計32件で DnDブロックの拡張フィールド込み deepStrictEqual 往復・driver/date 分離を保証。
+- 🔜 **物理統合の残り（順次・画面ごと目視）**: 案件詳細・確定タブ等の残 reader を SSoT 由来へ切替え、
+  最終的に `assignments[]`/`c.legs`/`dndAssignments` を**単一の永続 `LogipokeDB` の getter へ降格**して
+  唯一の物理ストア化を完了する（無損失表現と reader 経路は確立済みのため、残るは「書込先の物理一本化＋
+  配列の getter 化」）。あわせて 他マスタ（取引先/協力会社/ユーザー/定期便）・受付（旧
+  `logipoke_ai_intake_queue` → `logipoke_db_receptions_v1`）・案件4分割（`unprocessed`/`processing`/
+  `processed`）の接続が残る。`vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合は
+  データ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

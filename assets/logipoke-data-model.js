@@ -405,6 +405,51 @@
     });
   }
 
+  // ── DnDボード通常行(dndAssignments[driverId][dateKey]) の SSoT ロスレス往復（課題C6・第9段）──
+  // 1ブロック=1 Leg。start/end/from/to を正規化スロット/Stop へ、その他（client/goods/積荷段組
+  // loadMin等/中継注入マーカー _relayLegId 等）は _extra に温存。toDndBlocks で完全ロスレス復元。
+  var _DNDBLOCK_MAPPED = { start: 1, end: 1, from: 1, to: 1 };
+  function ingestDndBlocks(db, driverId, dateKey, blocks) {
+    blocks = blocks || [];
+    var tripKey = 'dnd|' + driverId + '|' + dateKey;
+    var trip = db.trips.get(tripKey) || createTrip(db, {
+      id: tripKey, tab: 'planning', serviceDate: dateKey || null, shape: 'single', source: 'dnd', dndDriverId: driverId
+    });
+    blocks.forEach(function (b, i) {
+      var extra = {};
+      Object.keys(b).forEach(function (k) { if (!_DNDBLOCK_MAPPED[k]) extra[k] = b[k]; });
+      var leg = addLeg(db, {
+        id: tripKey + '#' + i, tripId: trip.id, sequenceNo: i + 1, driverId: driverId,
+        startTime: b.start, endTime: b.end, role: 'pickup_delivery',
+        _extra: extra, _origKeys: Object.keys(b), _dndIdx: i
+      });
+      addStop(db, { legId: leg.id, sequenceNo: 1, kind: 'pickup', locationRaw: b.from });
+      addStop(db, { legId: leg.id, sequenceNo: 2, kind: 'dropoff', locationRaw: b.to });
+    });
+    return db;
+  }
+  function toDndBlocks(db, driverId, dateKey) {
+    var tripKey = 'dnd|' + driverId + '|' + dateKey;
+    var rows = [];
+    db.legs.forEach(function (leg) {
+      if (leg.tripId !== tripKey || leg.active === false) return;
+      var stops = _legStops(db, leg.id);
+      var full = { start: leg.startTime, end: leg.endTime,
+        from: stops.length ? stops[0].locationRaw : null,
+        to: stops.length ? stops[stops.length - 1].locationRaw : null };
+      var extra = leg._extra || {};
+      for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) full[k] = extra[k];
+      var keys = leg._origKeys || Object.keys(full);
+      var rec = {};
+      keys.forEach(function (k) { rec[k] = full[k]; });
+      rec.__idx = leg._dndIdx;
+      rows.push(rec);
+    });
+    rows.sort(function (a, b) { return (a.__idx || 0) - (b.__idx || 0); });
+    rows.forEach(function (r) { delete r.__idx; });
+    return rows;
+  }
+
   // v_case_timeline 相当（プロトタイプ表記の driverName/vehicleLabel をそのまま射影）
   function toCaseTimeline(db, orderId) {
     var rows = [];
@@ -640,6 +685,8 @@
     // ④ operation：旧 case.legs[] → SSoT 取込 と SSoT → 3画面 派生（課題C6）
     ingestCaseLegs: ingestCaseLegs, toScheduleBlocks: toScheduleBlocks, toDndBoard: toDndBoard,
     toCaseTimeline: toCaseTimeline, toCaseLegs: toCaseLegs,
+    // ④ operation：DnD通常行(dndAssignmentsブロック)の SSoT ロスレス往復（課題C6・第9段）
+    ingestDndBlocks: ingestDndBlocks, toDndBlocks: toDndBlocks,
     // ④ operation：旧 assignments[]（ガント/DnD正準層）の SSoT ロスレス往復（課題C6・第3段）
     ingestAssignments: ingestAssignments, toAssignments: toAssignments,
     // ④ operation：書込先SSoT化＋不変条件 I1/I2 の強制（課題C6・第4段）
