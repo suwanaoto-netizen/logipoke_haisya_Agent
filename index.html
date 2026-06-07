@@ -12851,6 +12851,36 @@ function deriveAssignmentsView(tab) {
 }
 window.deriveAssignmentsView = deriveAssignmentsView;
 
+// 【唯一ストアの読取ファサード・C6第11段】正準ストア(__opStore)を単一情報源として公開する getter API。
+// const 配列(assignments[]) は当面、書込先一本化のための「射影」として残置（物理的な getter 置換は
+// 全 reader/writer のブラウザQAを要するため別ラウンド）。本ファサードは store 由来の値を返す。
+window.OpStore = {
+  get ready() { return !!(window.__opStore && window.__opStore.getAssignments); },
+  // store 由来の assignments（tab 省略可）。reader はこれを単一情報源として参照できる。
+  assignments: function (tab) {
+    return window.__opStore && window.__opStore.getAssignments ? window.__opStore.getAssignments(tab) : [];
+  },
+  conflicts: function (id) {
+    return window.__opStore && window.__opStore.checkConflicts ? window.__opStore.checkConflicts(id) : { driver: [], vehicle: [] };
+  }
+};
+// 整合不変条件：store 由来の assignments と レガシー配列 assignments[] が常に一致することを検証。
+// 開発時の保証（jsdom/コンソールで __opStoreConsistent() を実行）。射影が崩れていれば false。
+window.__opStoreConsistent = function () {
+  try {
+    if (!window.__opStore || !window.__opStore.getAssignments) return null;  // ストア未生成
+    const fromStore = window.__opStore.getAssignments();
+    if (fromStore.length !== assignments.length) return false;
+    const byId = {}; fromStore.forEach(a => { byId[a.id] = a; });
+    return assignments.every(a => {
+      const s = byId[a.id];
+      return s && s.driverId === a.driverId && s.vehicleId === a.vehicleId
+        && s.start === a.start && s.end === a.end && s.client === a.client
+        && s.from === a.from && s.to === a.to;
+    });
+  } catch (e) { return null; }
+};
+
 // 中継編集(c.legs)の書込検証を 正規化SSoT に委譲（課題C6・第5段）。書込面 c.legs は据え置き、
 // I9（引き継ぎ連続性）・同一ドライバーの時間重複を SSoT(validateRelayLegs) で判定しUIへ提示。
 // フラグON時のみ。これで残る書込経路（中継編集）の不変条件もSSoT権威下に入る。
@@ -20774,17 +20804,38 @@ function validateAssignment(target) {
   };
 }
 
-// 更新系API：ドライバーだけ差し替え / 車両だけ差し替え。
-// 不変条件 I1/I2 の判定は validateAssignment（フラグON時に正規化SSoTへ委譲済み）が権威。
-// 変更はリッチな assignments[] レコードに in-place 適用し、拡張フィールド
-// （effectiveBaseId/crossBase/ownerId/caseIds 等）を保持する（ロスレス）。
+// 更新系API：ドライバー/車両の差し替え。
+// 【書込先一本化・C6第11段】フラグON時は「永続ストア(__opStore)へ書込 → assignments[] を
+//  store から再導出（in-place・ロスレス）」＝store が書込先（権威）、assignments[] は射影。
+//  失敗時は従来の in-place 変更＋SSoT検証へ縮退（I1/I2 は validateAssignment が SSoT 権威）。
+function _reassignViaOpStore(assignmentId, change) {
+  if (!window.__useOperationSSoT || !window.__opStore || typeof LogipokeDB === 'undefined') return null;
+  try {
+    window.__opStore.syncFromAssignments(assignments);          // 現在値で store を確実に最新化
+    const r = window.__opStore.reassign(assignmentId, change);  // 書込先＝store（I1/I2 判定付き）
+    const derived = window.__opStore.getAssignments();           // store から再導出（完全ロスレス）
+    assignments.length = 0; derived.forEach(x => assignments.push(x));  // const 参照を保持して射影
+    rebuildAssignmentIndex();
+    const tgt = getAssignmentById(assignmentId);
+    const validation = { ok: r.ok, conflicts: {
+      driver: r.conflicts.driver.map(id => getAssignmentById(id)).filter(Boolean),
+      vehicle: r.conflicts.vehicle.map(id => getAssignmentById(id)).filter(Boolean),
+      capacity: null, license: null } };
+    const v = tgt && getVehicleById(tgt.vehicleId);   // I6 積載量はアプリ層で補完
+    if (v && tgt.goods) { const m = String(tgt.goods).match(/([\d,]+)\s*kg/);
+      if (m) { const kg = parseInt(m[1].replace(/,/g, ''), 10); if (kg > v.maxLoad) { validation.capacity = { needed: kg, max: v.maxLoad }; validation.ok = false; } } }
+    return { ok: true, validation };
+  } catch (e) { return null; }
+}
 function reassignDriver(assignmentId, newDriverId) {
   const a = getAssignmentById(assignmentId);
   if (!a) return { ok: false, reason: 'assignment not found' };
   if (!getDriverById(newDriverId)) return { ok: false, reason: 'driver not found' };
   const before = a.driverId;
-  a.driverId = newDriverId;
-  const r = validateAssignment(a);   // I1/I2 は SSoT 権威（__useOperationSSoT ON時）
+  const viaStore = _reassignViaOpStore(assignmentId, { driverId: newDriverId });
+  if (viaStore) return { ok: true, before, after: newDriverId, validation: viaStore.validation, via: 'opstore' };
+  a.driverId = newDriverId;                          // 縮退：in-place ＋ SSoT検証
+  const r = validateAssignment(a);
   rebuildAssignmentIndex();
   return { ok: true, before, after: newDriverId, validation: r };
 }
@@ -20793,8 +20844,10 @@ function reassignVehicle(assignmentId, newVehicleId) {
   if (!a) return { ok: false, reason: 'assignment not found' };
   if (!getVehicleById(newVehicleId)) return { ok: false, reason: 'vehicle not found' };
   const before = a.vehicleId;
-  a.vehicleId = newVehicleId;
-  const r = validateAssignment(a);   // I1/I2 は SSoT 権威（__useOperationSSoT ON時）
+  const viaStore = _reassignViaOpStore(assignmentId, { vehicleId: newVehicleId });
+  if (viaStore) return { ok: true, before, after: newVehicleId, validation: viaStore.validation, via: 'opstore' };
+  a.vehicleId = newVehicleId;                        // 縮退：in-place ＋ SSoT検証
+  const r = validateAssignment(a);
   rebuildAssignmentIndex();
   return { ok: true, before, after: newVehicleId, validation: r };
 }

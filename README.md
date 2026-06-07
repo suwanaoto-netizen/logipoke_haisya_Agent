@@ -126,9 +126,18 @@ SSoT 未接続のままでした）。
     `applyDndBlocksViaSSoT` を適用し、`ingestDndBlocks→toDndBlocks` のロスレス往復を in-place 反映。
     jsdom（既定ON）で 確定タブ切替・`renderDnd` 無例外・確定行のロスレス往復・計画タブ復帰を目視確認。
   これで運行層の主要 reader（ガント／DnD通常行／DnD確定行／中継表示／案件サマリー）が**すべてSSoT経由**に。
-- 🔜 **物理統合の最終段（順次・画面ごと目視）**: 主要 reader はSSoT経由化が完了。残るは
-  `assignments[]`/`c.legs`/`dndAssignments` を**単一の永続 `LogipokeDB` の getter へ降格**し、書込先を
-  物理一本化して唯一の物理ストア化を完了する段（無損失表現・reader 経路・不変条件権威は確立済み）。
+- ✅ **唯一ストアの権威確立：書込先一本化＋読取ファサード（課題C6・第11段）**:
+  - **書込先一本化**：`reassignDriver`/`reassignVehicle` を「永続ストア `__opStore` へ書込（I1/I2判定）→
+    `assignments[]` を `toAssignments` で再導出（in-place・**完全ロスレス**）」へ反転。**store が書込先（権威）**、
+    `assignments[]` はその射影（`const` 参照は保持）。失敗時は in-place＋SSoT検証へ縮退。
+  - **読取ファサード**：`window.OpStore`（`assignments(tab)`/`conflicts(id)`）を**単一情報源の読取API**として公開。
+  - **整合不変条件**：`window.__opStoreConsistent()` が「store 由来 ≡ `assignments[]`」を常時検証。jsdom（既定ON）で
+    起動時整合・store-first reassign（`via:'opstore'`・store/legacy 両反映・整合維持）・描画無例外を目視確認。
+- 🔜 **完全インバージョン最後の一歩（ブラウザQA必須）**: `assignments[]`/`c.legs`/`dndAssignments` の
+  **`const` 実体を物理的に getter/Proxy へ置換**し、全 writer（`push`/`splice`/`a.x=…` の直接変異が数十箇所）を
+  store-first へ寄せる物理一本化。**無損失表現・reader 経路・書込先一本化（reassign）・不変条件権威・整合
+  不変条件は全て確立済み**で、残るは「直接変異 writer 群の store-first 化」と「const 実体の getter 化」だが、
+  これは稼働中UIの全画面ブラウザ目視を要するため別ラウンド（当環境は実機目視不可のため安全側で保留）。
   あわせて 他マスタ（取引先/協力会社/ユーザー/定期便）・受付（旧 `logipoke_ai_intake_queue` →
   `logipoke_db_receptions_v1`）・案件4分割（`unprocessed`/`processing`/`processed`）の接続が残る。
   `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
