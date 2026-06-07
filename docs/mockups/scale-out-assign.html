@@ -12,7 +12,7 @@
     --border:#e5e7eb; --bg:#f4f6f8; --card-bg:#fff; --red:#dc2626;
     --orange:#f97316; --orange-light:#fff7ed; --green:#16a34a; --green-light:#f0fdf4;
     /* 増車（scale-out）用 */
-    --grp:#6366f1; --grp-bg:#eef2ff; --partner:#b45309; --partner-bg:#fffbeb;
+    --grp:#0D4A3A; --grp-bg:#EAF5F0; --partner:#c2410c; --partner-bg:#fff7ed;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:'Noto Sans JP','Inter',sans-serif; background:var(--bg); color:var(--text-primary); font-size:13px; padding:16px; }
@@ -65,7 +65,7 @@
 
   /* ── 増車：選択中カードの強調 ── */
   .dnd-card.scaleout { border-color:var(--grp); }
-  .dnd-card.scaleout.sel { box-shadow:0 0 0 3px rgba(99,102,241,.18); border-color:var(--grp); }
+  .dnd-card.scaleout.sel { box-shadow:0 0 0 3px rgba(13,74,58,.18); border-color:var(--grp); }
 
   /* 増車バッジ */
   .dnd-card-scaleout-badge { display:inline-flex; align-items:center; gap:5px; margin-top:7px; font-size:9.5px; font-weight:800; color:#9a3412; background:var(--orange-light); border:1px solid #fed7aa; padding:3px 8px; border-radius:6px; }
@@ -80,9 +80,9 @@
   .dnd-card.done .dnd-fulfill-fill { background:var(--green); }
 
   /* AI増車プラン（①②③スタック） */
-  .dnd-plan { margin-top:7px; background:var(--grp-bg); border:1px solid #c7cdfa; border-radius:7px; padding:6px; }
+  .dnd-plan { margin-top:7px; background:var(--grp-bg); border:1px solid #b6e6d3; border-radius:7px; padding:6px; }
   .dnd-plan-head { font-size:9px; font-weight:800; color:var(--grp); display:flex; align-items:center; gap:4px; margin-bottom:5px; }
-  .dnd-plan-row { display:flex; align-items:center; gap:6px; font-size:9.5px; padding:3px 4px; border-radius:5px; background:#fff; margin-bottom:3px; border:1px solid #e0e3f5; }
+  .dnd-plan-row { display:flex; align-items:center; gap:6px; font-size:9.5px; padding:3px 4px; border-radius:5px; background:#fff; margin-bottom:3px; border:1px solid #cdeadd; }
   .dnd-plan-row:last-child { margin-bottom:0; }
   .dnd-plan-tag { width:14px; height:14px; border-radius:3px; background:var(--grp); color:#fff; font-size:9px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
   .dnd-plan-row.partner .dnd-plan-tag { background:var(--partner); }
@@ -122,7 +122,7 @@
   .dnd-stat { display:flex; align-items:center; gap:3px; padding:3px 8px; background:#fff; border:1px solid var(--border); border-radius:5px; font-weight:600; color:var(--text-secondary); }
   .dnd-stat-val { font-family:'Inter',sans-serif; font-weight:800; color:var(--text-primary); }
   /* 充足率stat（新規） */
-  .dnd-stat.scaleout { background:var(--grp-bg); border-color:#c7cdfa; color:var(--grp); }
+  .dnd-stat.scaleout { background:var(--grp-bg); border-color:#b6e6d3; color:var(--grp); }
   .dnd-stat.scaleout .dnd-stat-val { color:var(--grp); }
   .dnd-timeline.done .dnd-stat.scaleout { background:var(--green-light); border-color:#a7f3d0; color:var(--green); }
   .dnd-timeline.done .dnd-stat.scaleout .dnd-stat-val { color:var(--green); }
@@ -181,7 +181,7 @@
 
   /* AIおすすめ枠（ゴースト・index.html の dnd-rec-slot を踏襲） */
   .dnd-rec-slot { position:absolute; top:4px; bottom:4px; border-radius:6px; pointer-events:none; z-index:9; border:2px dashed var(--accent); background:repeating-linear-gradient(45deg, rgba(59,184,136,.14), rgba(59,184,136,.14) 7px, rgba(59,184,136,.26) 7px, rgba(59,184,136,.26) 14px); box-shadow:0 0 0 2px rgba(255,255,255,.65), 0 4px 12px rgba(26,122,94,.28); display:none; animation:recPulse 1.25s ease-in-out infinite; }
-  .dnd-rec-slot.alt { border-color:var(--partner); background:repeating-linear-gradient(45deg, rgba(180,83,9,.12), rgba(180,83,9,.12) 7px, rgba(180,83,9,.24) 7px, rgba(180,83,9,.24) 14px); box-shadow:0 0 0 2px rgba(255,255,255,.65), 0 4px 12px rgba(180,83,9,.22); }
+  .dnd-rec-slot.alt { border-color:var(--partner); background:repeating-linear-gradient(45deg, rgba(194,65,12,.12), rgba(194,65,12,.12) 7px, rgba(194,65,12,.24) 7px, rgba(194,65,12,.24) 14px); box-shadow:0 0 0 2px rgba(255,255,255,.65), 0 4px 12px rgba(194,65,12,.22); }
   .dnd-timeline.sel:not(.done) .dnd-rec-slot { display:block; }
   @keyframes recPulse { 0%,100%{opacity:1} 50%{opacity:.58} }
   .dnd-rec-tag { position:absolute; left:50%; top:-18px; transform:translateX(-50%); font-size:9px; font-weight:800; color:#fff; background:var(--accent); padding:2px 8px; border-radius:5px; white-space:nowrap; font-family:'Inter','Noto Sans JP',sans-serif; box-shadow:0 2px 6px rgba(0,0,0,.22); }
