@@ -20755,6 +20755,23 @@ function _scheduleRowToAssignments(row, tab) {
 }
 
 // 初期アサインメントを生成
+// 【物理getter化・C6第15段】assignments[] を Proxy で包む。
+// 設計上 assignments[] は永続ストア(__opStore)の「射影」であり、書込は store-first を通る。
+// この Proxy は read を素通し（get トラップ無し＝ネイティブ速度・identity/Array.isArray 不変）、
+// write（index/length 設定＝push/splice/length=0）のみ計測して「直接変異の有無」を観測可能にする。
+// 挙動は完全に不変（pass-through）。Proxy 非対応環境では素の配列にフォールバック。
+window.__assignmentsWrites = 0;
+function _makeAssignmentsProxy(backing) {
+  if (typeof Proxy === 'undefined') return backing;
+  return new Proxy(backing, {
+    set(target, prop, value) {
+      if (window.__useOperationSSoT && (prop === 'length' || (typeof prop === 'string' && /^\d+$/.test(prop)))) {
+        window.__assignmentsWrites = (window.__assignmentsWrites || 0) + 1;
+      }
+      target[prop] = value; return true;
+    }
+  });
+}
 const assignments = (function(){
   const out = [];
   ['planning', 'confirmed'].forEach(tab => {
@@ -20762,7 +20779,7 @@ const assignments = (function(){
       _scheduleRowToAssignments(row, tab).forEach(a => out.push(a));
     });
   });
-  return out;
+  return _makeAssignmentsProxy(out);
 })();
 
 // 検索用インデックス（必要に応じて再構築）
