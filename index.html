@@ -18890,7 +18890,7 @@ function dvDefaults() {
   };
 }
 const DV_PRESETS = {
-  minimal:  { card:{status:false,route:false,goods:false,phone:false,amount:false,time:false,deadline:false,urgent:false,source:false,edit:false}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showFilterBar:false, showSummaryBar:false },
+  minimal:  { card:{status:false,route:false,goods:false,phone:false,amount:false,time:false,deadline:false,urgent:false,source:false,edit:true}, driver:{vehicle:false,capacity:false,status:false,kaizen:false}, showDateBar:false, showFilterBar:false, showSummaryBar:false },
   standard: { card:{status:true,route:true,goods:true,phone:true,amount:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
   full:     { card:{status:true,route:true,goods:true,phone:true,amount:true,time:true,deadline:true,urgent:true,source:true,edit:true},         driver:{vehicle:true,capacity:true,status:true,kaizen:true},      showDateBar:true,  showFilterBar:true,  showSummaryBar:true  },
 };
@@ -19056,7 +19056,7 @@ function renderDisplaySettings() {
     ['荷主の電話番号', 'phone'],
     ['金額（運賃）', 'amount'],
     ['時刻・所要時間', 'time'], ['納期', 'deadline'], ['緊急マーク', 'urgent'],
-    ['受付経路アイコン（AI受付など）', 'source'], ['編集ボタン', 'edit'],
+    ['受付経路アイコン（AI受付など）', 'source'], ['編集ボタン', null, true],
   ].map(function(r){ const l=r[0], k=r[1], must=r[2]; return dvRowHtml(l, must?true:c[k], must?'':("dvSetCard('"+k+"',"+(!c[k])+")"), must); }).join('');
   const driverRows = [
     ['ドライバー名', null, true], ['車両番号・車種', 'vehicle'], ['最大積載量', 'capacity'],
@@ -26078,7 +26078,7 @@ function renderDndList() {
         <div class="dnd-card-head">
           <div class="dnd-card-client" title="${c.client}">${c.client}</div>
           ${dvc('status') ? `<div class="dnd-card-status ${statusClass}">${statusLabel}</div>` : ''}
-          ${(assigned || processed || !dvc('edit')) ? '' : `<button class="dnd-card-edit-btn"
+          ${(assigned || processed) ? '' : `<button class="dnd-card-edit-btn"
             onclick="event.stopPropagation();openDndEditModal('${c.id}')"
             onmousedown="event.stopPropagation()"
             ondragstart="event.preventDefault();event.stopPropagation()"
