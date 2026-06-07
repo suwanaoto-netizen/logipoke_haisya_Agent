@@ -12353,9 +12353,68 @@ function renderFinalRecommendCard(caseObj) {
     </div>`;
 }
 
-function calcAIScore(vehicleId) {
-  const raw = VEHICLE_RAW_SCORES[vehicleId];
-  if (!raw) return 75;
+function clampScore(n){ return Math.max(0, Math.min(100, Math.round(n))); }
+
+// 案件×候補 から5軸の素点(0-100)を算出。caseObj/vehicle が無ければ静的表(VEHICLE_RAW_SCORES)に
+// フォールバックするため、案件コンテキストの無い呼び出し（設定プレビュー等）は従来挙動のまま。
+function calcAIScoreBreakdown(vehicleId, caseObj, vehicle) {
+  const fb = VEHICLE_RAW_SCORES[vehicleId] || { distance:75, load:75, driver:75, law:75, customer:75 };
+  if (!caseObj || !vehicle) return Object.assign({}, fb, { _static:true });
+  const SO = window.LogipokeScaleOut;
+
+  // ① 距離効率：候補拠点→集荷地の回送(空車)距離が短いほど高い（50km毎に約30点減）
+  let distance = fb.distance;
+  const deadheadKm = (typeof estimateDistance === 'function' && vehicle.base && caseObj.from)
+    ? estimateDistance(vehicle.base, caseObj.from) : null;
+  if (deadheadKm != null) distance = clampScore(100 - deadheadKm * 0.6);
+
+  // ② 積載量適合度：積載率を 0.85 頂点の山型で評価。容量不足は0（＝増車判定の対象）
+  let load = fb.load;
+  const weightKg = SO ? SO.parseWeightKg(caseObj.goods) : 0;
+  const capKg    = SO ? SO.capLabelToKg(vehicle.cap)    : 0;
+  if (weightKg > 0 && capKg > 0) {
+    load = weightKg > capKg ? 0 : clampScore(100 - Math.abs(weightKg/capKg - 0.85) * 130);
+  }
+  // 温度帯適合：冷凍/冷蔵荷で要求車格が冷蔵系でなければ大幅減点（候補にボディ情報が無いため要求車格で代替）
+  const zones = SO ? SO.parseTempZones(caseObj.goods) : [];
+  const reqType = (caseObj.aiResult && caseObj.aiResult.vehicle) || caseObj.vehicle || '';
+  if ((zones.indexOf('frozen') >= 0 || zones.indexOf('chilled') >= 0) && reqType && !/冷凍|冷蔵|リーファー/.test(reqType)) {
+    load = Math.min(load, 30);
+  }
+
+  // ③ ドライバー実績：stars 主体。過去粗利実績(VEHICLE_PROFIT)があれば4割ブレンド
+  let driver = fb.driver;
+  if (typeof vehicle.stars === 'number') {
+    driver = clampScore(vehicle.stars / 5 * 100);
+    const prof = VEHICLE_PROFIT[vehicleId];
+    if (prof) driver = clampScore(driver * 0.6 + prof.marginPct * 0.4);
+  }
+
+  // ④ 拘束時間余裕：候補の law.status と適合項目比率から算出
+  let law = fb.law;
+  if (vehicle.law && Array.isArray(vehicle.law.items)) {
+    const items = vehicle.law.items;
+    const okRatio = items.length ? items.filter(it => it.ok).length / items.length : 1;
+    const base = vehicle.law.status === 'ng' ? 0 : vehicle.law.status === 'warn' ? 55 : 100;
+    law = clampScore(base * 0.6 + okRatio * 100 * 0.4);
+  }
+
+  // ⑤ 顧客相性：実データ(担当×荷主の取引履歴)が未整備。注入フックを残し、無ければ即応性で代替
+  let customer = fb.customer;
+  if (typeof window.customerAffinity === 'function') {
+    const a = window.customerAffinity(vehicleId, caseObj.client);
+    if (typeof a === 'number') customer = clampScore(a);
+  } else {
+    const availFull = /空車|可/.test(String(vehicle.avail || '')) ? 100 : 60;
+    const urgentFit = (caseObj.priority === '緊急' || caseObj.priority === 'urgent') ? availFull : 80;
+    customer = clampScore(availFull * 0.5 + urgentFit * 0.5);
+  }
+
+  return { distance, load, driver, law, customer, _static:false };
+}
+
+function calcAIScore(vehicleId, caseObj, vehicle) {
+  const raw = calcAIScoreBreakdown(vehicleId, caseObj, vehicle);
   const w = window.AI_WEIGHTS;
   const total = w.distance + w.load + w.driver + w.law + w.customer;
   if (total === 0) return 0;
@@ -12374,7 +12433,7 @@ function recalcAllScores() {
   allCases.forEach(c => {
     if (!c.vehicles) return;
     c.vehicles.forEach(v => {
-      v.score = calcAIScore(v.id);
+      v.score = calcAIScore(v.id, c, v);
     });
     // スコア降順で rank を振り直す
     c.vehicles.sort((a,b) => b.score - a.score);
@@ -43411,7 +43470,8 @@ function buildAiScorePreview() {
   ];
   var rows = previewVehicles.map(function(v, i) {
     var score = calcAIScore(v.id);
-    var raw = VEHICLE_RAW_SCORES[v.id] || {};
+    // 内訳バーとスコアを同一ロジックに揃える（案件コンテキスト無し＝静的フォールバックで従来表示と一致）
+    var raw = calcAIScoreBreakdown(v.id);
     var w = window.AI_WEIGHTS;
     var barW = function(wt, rawVal) {
       return Math.round((wt/100) * rawVal * wt / 100);
