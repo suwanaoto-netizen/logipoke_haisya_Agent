@@ -25514,6 +25514,373 @@ function _pickerEsc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/* ============================================================================
+ *  配車割当ボード：増車（車建て）UI ― 「1案件=caseId に複数の配車を持たせる」設計
+ * ----------------------------------------------------------------------------
+ *  右パネル（案件詳細）から5パターンの増車を行う。配車（車建て）は
+ *  dndAssignments のブロックで表現し、同一案件は caseId で束ねる。
+ *    ① 同一案件への車両追加（並走・最多）   ② 一部を別案件として切出し（親子複製）
+ *    ③ 自社→協力会社へ振替（既存 dispatchBlockToPartner を再利用）
+ *    ④ 積地・卸地ごとに分割（経由地で区間分割）  ⑤ 車格変更＋増車
+ *  親子構造：案件A(親) ├配車① ├配車② └増車案件①(子) └配車③
+ * ========================================================================== */
+var _soCtx = null; // { soId } 操作対象配車の安定参照
+
+function soToast(msg, type) {
+  if (typeof showToast === 'function') showToast(msg, type === 'warn' ? 'warn' : (type || 'success'));
+  else if (typeof showDndToast === 'function') showDndToast(msg, type === 'warn');
+}
+function soVal(id) { const e = document.getElementById(id); return e ? String(e.value).trim() : ''; }
+function soFmtMin(m) { m = Math.max(0, Math.min(23 * 60 + 59, m)); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+function soSub(from, to) { return String(from || '').replace(/.*?[都道府県]/, '').substring(0, 3) + '→' + String(to || '').replace(/.*?[都道府県]/, '').substring(0, 3); }
+function soCircNo(n) { return '①②③④⑤⑥⑦⑧⑨⑩⑪⑫'.charAt(n - 1) || ('#' + n); }
+
+// 案件のルートID（親案件があれば親、無ければ自身の case 系キー）
+function soRootCaseId(a) {
+  if (!a) return null;
+  return a.parentCaseId || a._relayCaseId || a.caseId || a.caseListId || a._soId || null;
+}
+// ブロックに安定IDを付与（再描画後の再特定用）
+function soEnsureBlockId(a) {
+  if (a && !a._soId) a._soId = '_so' + Date.now() + Math.floor(Math.random() * 1000);
+  return a && a._soId;
+}
+// _soId から現在日の {driverId, idx, block} を探す
+function soFindBlockBySoId(soId) {
+  if (typeof dndAssignments === 'undefined' || !soId) return null;
+  const key = dndGetCurrentDateKey();
+  let found = null;
+  Object.keys(dndAssignments).forEach(did => {
+    const arr = (dndAssignments[did] && dndAssignments[did][key]) || [];
+    arr.forEach((b, i) => { if (b._soId === soId) found = { driverId: did, idx: i, block: b }; });
+  });
+  return found;
+}
+// あるルート案件に属する全配車ブロックを収集（現在日）。親＋子(parentCaseId)を含む。
+function soCollectCaseBlocks(rootId) {
+  const out = [];
+  if (typeof dndAssignments === 'undefined' || !rootId) return out;
+  const key = dndGetCurrentDateKey();
+  Object.keys(dndAssignments).forEach(did => {
+    const arr = (dndAssignments[did] && dndAssignments[did][key]) || [];
+    arr.forEach((b, i) => {
+      if (soRootCaseId(b) === rootId || b.caseId === rootId || b.parentCaseId === rootId) {
+        out.push({ driverId: did, idx: i, block: b });
+      }
+    });
+  });
+  return out;
+}
+function soCountChildren(rootId) {
+  if (typeof dndUnassignedCases === 'undefined') return 0;
+  return dndUnassignedCases.filter(c => c.parentCaseId === rootId).length;
+}
+
+// 配車ブロック生成（base から client/goods 等を継承し、opts で上書き）
+function soMakeBlock(base, opts) {
+  opts = opts || {};
+  const client = opts.client != null ? opts.client : base.client;
+  const lbl = String(client || '案件').length > 8 ? String(client).substring(0, 7) + '…' : String(client || '案件');
+  const from = opts.from != null ? opts.from : base.from;
+  const to = opts.to != null ? opts.to : base.to;
+  const b = {
+    caseId: opts.caseId != null ? opts.caseId : base.caseId,
+    caseListId: opts.caseListId !== undefined ? opts.caseListId : (base.caseListId || null),
+    client: client,
+    from: from, to: to,
+    goods: opts.goods != null ? opts.goods : base.goods,
+    deadline: base.deadline,
+    urgent: base.urgent,
+    label: lbl,
+    sub: soSub(from, to),
+    start: opts.start || base.start,
+    end: opts.end || base.end,
+    color: opts.color || '#0f7a52',
+    isPreset: false,
+    confirmed: false,
+    confirmedAt: null,
+    _isNew: true
+  };
+  if (opts.parentCaseId !== undefined) b.parentCaseId = opts.parentCaseId;
+  else if (base.parentCaseId) b.parentCaseId = base.parentCaseId;
+  if (opts.scaleOutKind) b._scaleOutKind = opts.scaleOutKind;
+  if (opts.caraNo) b._caraNo = opts.caraNo;
+  soEnsureBlockId(b);
+  return b;
+}
+function soPushBlock(driverId, block) {
+  const key = dndGetCurrentDateKey();
+  if (!dndAssignments[driverId]) dndAssignments[driverId] = {};
+  if (!dndAssignments[driverId][key]) dndAssignments[driverId][key] = [];
+  dndAssignments[driverId][key].push(block);
+}
+// 操作後：ボード再描画＋詳細パネルを（移動後の）対象配車に再オープン
+function soReopenDetail(soId) {
+  if (typeof renderDnd === 'function') { try { renderDnd(); } catch (e) {} }
+  const f = soFindBlockBySoId(soId);
+  if (f && typeof window.openDndDetailPane === 'function') { try { window.openDndDetailPane(f.driverId, f.idx); } catch (e) {} }
+}
+
+// 自社ドライバーの <option>（filterType で車格絞り込み）
+function soDriverOptions(selectedId, filterType) {
+  const list = (typeof dndDrivers !== 'undefined' ? dndDrivers : []);
+  return list.filter(d => !d.partner).filter(d => !filterType || d.type === filterType)
+    .map(d => '<option value="' + d.id + '"' + (d.id === selectedId ? ' selected' : '') + '>'
+      + _pickerEsc(d.driver) + '（' + _pickerEsc(d.vehicle || d.type) + ' / ' + ((d.maxLoad || 0) / 1000).toFixed(0) + 't）</option>')
+    .join('');
+}
+function soField(label, inner) { return '<div class="so-field"><label class="so-field-label">' + label + '</label>' + inner + '</div>'; }
+function soButtons(applyCall) {
+  return '<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">'
+    + '<button class="dnd-detail-btn secondary" onclick="soShowMenu()">← 戻る</button>'
+    + '<button class="dnd-detail-btn primary" style="flex:0 0 auto;min-width:120px" onclick="' + applyCall + '">実行</button></div>';
+}
+
+// ── 右パネルに差し込む「この案件の配車（車建て）」一覧セクション ──
+function soBuildDispatchListSection(driverId, blockIdx) {
+  if (typeof dndAssignments === 'undefined') return '';
+  const key = dndGetCurrentDateKey();
+  const arr = (dndAssignments[driverId] && dndAssignments[driverId][key]) || [];
+  const a = arr[blockIdx];
+  if (!a) return '';
+  soEnsureBlockId(a);
+  const rootId = soRootCaseId(a);
+  let all = soCollectCaseBlocks(rootId);
+  if (all.length === 0) all = [{ driverId: driverId, idx: blockIdx, block: a }];
+
+  const rowHtml = (x, no, isCurrent) => {
+    const b = x.block;
+    const drv = (typeof dndDrivers !== 'undefined' ? dndDrivers : []).find(d => d.id === x.driverId);
+    const isPartner = drv && drv.partner;
+    const veh = drv ? (drv.vehicle || drv.type) : '—';
+    const kind = b._scaleOutKind || (b._isRelayLeg ? 'リレー' : 'メイン');
+    const kindCls = isPartner ? 'partner' : (b._scaleOutKind ? 'scaleout' : 'main');
+    const conf = b.confirmed ? '<span class="so-disp-conf">✓確定</span>' : '';
+    return '<div class="so-disp-row' + (isCurrent ? ' current' : '') + '" onclick="soOpenBlock(\'' + x.driverId + '\',' + x.idx + ')" title="この配車の詳細を開く">'
+      + '<span class="so-disp-no">配車' + soCircNo(no) + '</span>'
+      + '<span class="so-disp-main"><b>' + _pickerEsc(drv ? drv.driver : '—') + '</b> <span class="so-disp-veh">' + _pickerEsc(veh) + '</span><br>'
+      + '<span class="so-disp-seg">' + _pickerEsc(b.from || '') + '→' + _pickerEsc(b.to || '') + ' / ' + (b.start || '') + '〜' + (b.end || '') + '</span></span>'
+      + '<span class="so-disp-tags"><span class="so-disp-tag ' + kindCls + '">' + (isPartner ? '協力' : '自社') + '・' + _pickerEsc(kind) + '</span>' + conf + '</span>'
+      + '</div>';
+  };
+
+  let html = '<div class="dnd-detail-section"><div class="dnd-detail-section-title">'
+    + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0D4A3A" stroke-width="2.5"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2"/><circle cx="18.5" cy="18.5" r="2"/></svg>'
+    + 'この案件の配車（車建て）<span style="margin-left:auto;font-size:10px;color:var(--text-muted)">' + all.length + '台</span></div>';
+
+  const parents = all.filter(x => !x.block.parentCaseId);
+  const childMap = {};
+  all.forEach(x => { if (x.block.parentCaseId) (childMap[x.block.caseId] = childMap[x.block.caseId] || []).push(x); });
+
+  let no = 0;
+  parents.forEach(x => { no++; html += rowHtml(x, no, x.driverId === driverId && x.idx === blockIdx); });
+  Object.keys(childMap).forEach(cid => {
+    const rows = childMap[cid];
+    html += '<div class="so-disp-child">↳ 増車案件：<b>' + _pickerEsc(rows[0].block.client || '増車案件') + '</b></div>';
+    rows.forEach(x => { no++; html += rowHtml(x, no, x.driverId === driverId && x.idx === blockIdx); });
+  });
+
+  if (!a.confirmed && !a.isPreset) {
+    html += '<button class="dnd-detail-btn scaleout" style="width:100%;margin-top:10px" onclick="openScaleOutDispatchModal(\'' + driverId + '\',' + blockIdx + ')">⊕ 増車する（車両追加・分割・振替・車格変更）</button>';
+  }
+  html += '</div>';
+  return html;
+}
+window.soOpenBlock = function (did, idx) { if (typeof window.openDndDetailPane === 'function') window.openDndDetailPane(did, idx); };
+
+// ── 増車パターン選択モーダル ──
+function soGetModal() {
+  let m = document.getElementById('scaleout-dispatch-modal');
+  if (!m) {
+    m = document.createElement('div');
+    m.className = 'modal-overlay';
+    m.id = 'scaleout-dispatch-modal';
+    m.setAttribute('onclick', 'if(event.target===this)closeScaleOutDispatchModal()');
+    document.body.appendChild(m);
+  }
+  return m;
+}
+function soRenderModal(title, bodyHtml) {
+  const m = soGetModal();
+  m.innerHTML = '<div class="modal" style="max-width:560px;width:95vw;max-height:90vh;display:flex;flex-direction:column">'
+    + '<div style="display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--border)">'
+    + '<span style="font-size:15px;font-weight:800;color:#0D4A3A;white-space:nowrap">⊕ 増車（車建て）</span>'
+    + '<span style="font-size:12px;color:var(--text-secondary)">' + title + '</span>'
+    + '<button onclick="closeScaleOutDispatchModal()" style="margin-left:auto;border:none;background:none;font-size:22px;line-height:1;cursor:pointer;color:var(--text-muted)">×</button>'
+    + '</div><div style="padding:16px 18px;overflow:auto">' + bodyHtml + '</div></div>';
+  m.style.display = 'flex';
+}
+window.closeScaleOutDispatchModal = function () { const m = document.getElementById('scaleout-dispatch-modal'); if (m) m.style.display = 'none'; };
+
+function soPatternMenuHtml(a) {
+  const card = (k, emoji, title, desc, common) =>
+    '<button class="so-pat-card" onclick="soShowPatternForm(\'' + k + '\')">'
+    + '<span class="so-pat-emoji">' + emoji + '</span>'
+    + '<span class="so-pat-text"><b>' + title + '</b>' + (common ? '<span class="so-pat-tag">最多</span>' : '')
+    + '<br><span class="so-pat-desc">' + desc + '</span></span></button>';
+  return '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">対象配車：<b>' + _pickerEsc(a.client || a.label || '') + '</b>（' + _pickerEsc(a.from || '') + '→' + _pickerEsc(a.to || '') + ' / ' + (a.start || '') + '〜' + (a.end || '') + '）</div>'
+    + '<div class="so-pat-grid">'
+    + card('add', '🚚', '① 同一案件への車両追加', '同じ案件に並走の配車を1台追加。最も多いパターン。', true)
+    + card('split', '🧬', '② 一部を別案件として切り出す', '親子構造で「増車案件」を複製し、その配車を作成。')
+    + card('partner', '🤝', '③ 自社→協力会社へ振替', 'この配車を協力会社（傭車）依頼フローへ切替。')
+    + card('stops', '📍', '④ 積地・卸地ごとに分割', '経由地で区間を分け複数台へ。ルート最適化・納品時間対応。')
+    + card('class', '📦', '⑤ 車格変更＋増車', '車格を変えて積載率・利益率を改善し、増車。')
+    + '</div>';
+}
+
+window.openScaleOutDispatchModal = function (driverId, blockIdx) {
+  const key = dndGetCurrentDateKey();
+  const arr = (typeof dndAssignments !== 'undefined' && dndAssignments[driverId] && dndAssignments[driverId][key]) || [];
+  const a = arr[blockIdx];
+  if (!a) { soToast('配車情報が取得できません', 'warn'); return; }
+  soEnsureBlockId(a);
+  // グループ化キー（caseId）が無いブロックでも車建てを束ねられるよう補完
+  if (!a.caseId) a.caseId = a._relayCaseId || a.caseListId || a._soId;
+  _soCtx = { soId: a._soId };
+  if (typeof closeDndDetailPane === 'function') closeDndDetailPane();
+  soRenderModal('パターンを選択', soPatternMenuHtml(a));
+};
+window.soShowMenu = function () {
+  const cur = soFindBlockBySoId(_soCtx && _soCtx.soId);
+  if (!cur) { closeScaleOutDispatchModal(); return; }
+  soRenderModal('パターンを選択', soPatternMenuHtml(cur.block));
+};
+window.soShowPatternForm = function (kind) {
+  const cur = soFindBlockBySoId(_soCtx && _soCtx.soId);
+  if (!cur) { soToast('対象配車が見つかりません', 'warn'); closeScaleOutDispatchModal(); return; }
+  const a = cur.block;
+  let title = '', body = '';
+  if (kind === 'add') { title = '① 同一案件への車両追加'; body = soFormAdd(a); }
+  else if (kind === 'split') { title = '② 一部を別案件として切り出す'; body = soFormSplit(a); }
+  else if (kind === 'partner') { title = '③ 自社→協力会社へ振替'; body = soFormPartner(a); }
+  else if (kind === 'stops') { title = '④ 積地・卸地ごとに分割'; body = soFormStops(a); }
+  else if (kind === 'class') { title = '⑤ 車格変更＋増車'; body = soFormClass(a); }
+  else return;
+  soRenderModal(title, body);
+};
+
+/* ── 各パターンのフォーム ── */
+function soFormAdd(a) {
+  return '<div class="so-hint">同じ案件（caseId）に並走の配車を1台追加します。既定は同時刻（並走）。荷量増・繁忙時の最も多い増車です。</div>'
+    + soField('追加するドライバー / 車両', '<select id="so-f-driver" class="so-input">' + soDriverOptions(null) + '</select>')
+    + soField('区間（積地 → 卸地）', '<div style="display:flex;gap:6px;align-items:center"><input id="so-f-from" class="so-input" value="' + _pickerEsc(a.from || '') + '"><span>→</span><input id="so-f-to" class="so-input" value="' + _pickerEsc(a.to || '') + '"></div>')
+    + soField('時間（並走・既定は同時刻）', '<div style="display:flex;gap:6px;align-items:center"><input id="so-f-start" class="so-input" type="time" value="' + (a.start || '09:00') + '"><span>〜</span><input id="so-f-end" class="so-input" type="time" value="' + (a.end || '12:00') + '"></div>')
+    + soButtons('soApplyAdd()');
+}
+function soFormSplit(a) {
+  return '<div class="so-hint">案件の一部を「増車案件（子案件）」として切り出し、親子構造で管理します。<br>案件A(親) └ 増車案件①(子) └ 配車。子案件は未割当案件にも登録されます。</div>'
+    + soField('増車案件名（荷主）', '<input id="so-f-client" class="so-input" value="' + _pickerEsc((a.client || '案件') + '（増車）') + '">')
+    + soField('切り出す荷物', '<input id="so-f-goods" class="so-input" value="' + _pickerEsc(a.goods || '') + '">')
+    + soField('区間（積地 → 卸地）', '<div style="display:flex;gap:6px;align-items:center"><input id="so-f-from" class="so-input" value="' + _pickerEsc(a.from || '') + '"><span>→</span><input id="so-f-to" class="so-input" value="' + _pickerEsc(a.to || '') + '"></div>')
+    + soField('担当ドライバー / 車両', '<select id="so-f-driver" class="so-input">' + soDriverOptions(null) + '</select>')
+    + soField('時間', '<div style="display:flex;gap:6px;align-items:center"><input id="so-f-start" class="so-input" type="time" value="' + (a.start || '09:00') + '"><span>〜</span><input id="so-f-end" class="so-input" type="time" value="' + (a.end || '12:00') + '"></div>')
+    + soButtons('soApplySplit()');
+}
+function soFormPartner(a) {
+  return '<div class="so-hint">この配車を自社から協力会社（傭車）へ振り替えます。既存の「協力会社へ依頼」モーダルが開き、見積・発注の現状ロジックで対応します。</div>'
+    + '<div style="font-size:12px;color:#374151">対象：<b>' + _pickerEsc(a.client || a.label || '') + '</b>（' + _pickerEsc(a.from || '') + '→' + _pickerEsc(a.to || '') + '）</div>'
+    + soButtons('soApplyPartner()');
+}
+function soFormStops(a) {
+  return '<div class="so-hint">経由地で区間を分割し、2台に割り当てます。1区間目は現在の配車（積地→経由地）に短縮、2区間目（経由地→卸地）を別車両で新規作成します。納品時間・ルート最適化向け。</div>'
+    + soField('経由地（区切り地点）', '<input id="so-f-via" class="so-input" placeholder="例：静岡県浜松市">')
+    + soField('最終卸地', '<input id="so-f-to" class="so-input" value="' + _pickerEsc(a.to || '') + '">')
+    + soField('2区間目のドライバー / 車両', '<select id="so-f-driver2" class="so-input">' + soDriverOptions(null) + '</select>')
+    + soButtons('soApplyStops()');
+}
+function soFormClass(a) {
+  return '<div class="so-hint">積載率・利益率の改善のため車格を変更します。変更後の車両（より大きい車格など）を選ぶとこの配車を移します。必要なら同時に増車もできます。</div>'
+    + soField('変更後の車両 / 車格（この配車を移す）', '<select id="so-f-driver" class="so-input">' + soDriverOptions(null) + '</select>')
+    + soField('', '<label style="display:flex;align-items:center;gap:7px;font-size:12px;color:#374151;font-weight:600;cursor:pointer"><input type="checkbox" id="so-f-also" onchange="var e=document.getElementById(\'so-f-also-wrap\');if(e)e.style.display=this.checked?\'block\':\'none\'"> さらに1台増車する</label>')
+    + '<div id="so-f-also-wrap" style="display:none">' + soField('増車するドライバー / 車両', '<select id="so-f-driver2" class="so-input">' + soDriverOptions(null) + '</select>') + '</div>'
+    + soButtons('soApplyClass()');
+}
+
+/* ── 各パターンの適用 ── */
+window.soApplyAdd = function () {
+  const cur = soFindBlockBySoId(_soCtx && _soCtx.soId); if (!cur) { soToast('対象配車が見つかりません', 'warn'); return; }
+  const did = soVal('so-f-driver'); if (!did) { soToast('ドライバーを選択してください', 'warn'); return; }
+  const a = cur.block;
+  const existing = soCollectCaseBlocks(soRootCaseId(a)).length;
+  const block = soMakeBlock(a, { from: soVal('so-f-from'), to: soVal('so-f-to'), start: soVal('so-f-start'), end: soVal('so-f-end'), scaleOutKind: '車両追加', caraNo: existing + 1, color: '#0f7a52' });
+  soPushBlock(did, block);
+  closeScaleOutDispatchModal();
+  const drv = (dndDrivers || []).find(d => d.id === did);
+  soToast('🚚 増車：' + (drv ? drv.driver : '車両') + ' に配車を追加しました');
+  soReopenDetail(_soCtx.soId);
+};
+window.soApplySplit = function () {
+  const cur = soFindBlockBySoId(_soCtx && _soCtx.soId); if (!cur) { soToast('対象配車が見つかりません', 'warn'); return; }
+  const did = soVal('so-f-driver'); if (!did) { soToast('担当ドライバーを選択してください', 'warn'); return; }
+  const a = cur.block;
+  const rootId = soRootCaseId(a);
+  const client = soVal('so-f-client') || ((a.client || '案件') + '（増車）');
+  const childId = String(a.caseId || rootId || 'CASE') + '-CH' + (soCountChildren(rootId) + 1);
+  if (typeof dndUnassignedCases !== 'undefined') {
+    dndUnassignedCases.push({
+      id: childId, caseListId: null, originalPhase: null, parentCaseId: rootId, _isScaleOutChild: true,
+      client: client, status: 'processing', from: soVal('so-f-from'), to: soVal('so-f-to'),
+      goods: soVal('so-f-goods'), deadline: a.deadline, durationH: 3, preferredStart: soVal('so-f-start') || '09:00',
+      urgent: !!a.urgent, color: '#7c3aed'
+    });
+  }
+  const block = soMakeBlock(a, {
+    caseId: childId, caseListId: null, parentCaseId: rootId, client: client, goods: soVal('so-f-goods'),
+    from: soVal('so-f-from'), to: soVal('so-f-to'), start: soVal('so-f-start'), end: soVal('so-f-end'),
+    scaleOutKind: '増車案件', color: '#7c3aed'
+  });
+  soPushBlock(did, block);
+  a._hasChildren = true;
+  closeScaleOutDispatchModal();
+  soToast('🧬 増車案件「' + client + '」を作成し配車しました');
+  soReopenDetail(_soCtx.soId);
+};
+window.soApplyPartner = function () {
+  const cur = soFindBlockBySoId(_soCtx && _soCtx.soId); if (!cur) { soToast('対象配車が見つかりません', 'warn'); return; }
+  closeScaleOutDispatchModal();
+  if (typeof window.dispatchBlockToPartner === 'function') window.dispatchBlockToPartner(cur.driverId, cur.idx);
+  else soToast('協力会社依頼を起動できませんでした', 'warn');
+};
+window.soApplyStops = function () {
+  const cur = soFindBlockBySoId(_soCtx && _soCtx.soId); if (!cur) { soToast('対象配車が見つかりません', 'warn'); return; }
+  const a = cur.block;
+  const via = soVal('so-f-via'); if (!via) { soToast('経由地を入力してください', 'warn'); return; }
+  const did2 = soVal('so-f-driver2'); if (!did2) { soToast('2区間目のドライバーを選択してください', 'warn'); return; }
+  const origTo = soVal('so-f-to') || a.to;
+  const sMin = _relayTimeToMin(a.start || '08:00'), eMin = _relayTimeToMin(a.end || '12:00');
+  const midMin = sMin + Math.max(30, Math.round((eMin - sMin) / 2));
+  // 区間1：現配車を 積地→経由地 に短縮
+  a.to = via; a.end = soFmtMin(midMin); a.sub = soSub(a.from, via); a._scaleOutKind = '積卸分割①';
+  // 区間2：経由地→最終卸地（新規ブロック）
+  const block = soMakeBlock(a, { from: via, to: origTo, start: soFmtMin(midMin + 15), end: soFmtMin(eMin), scaleOutKind: '積卸分割②', color: '#0d9488' });
+  soPushBlock(did2, block);
+  closeScaleOutDispatchModal();
+  soToast('📍 積卸分割：' + via + ' で2区間に分割しました');
+  soReopenDetail(_soCtx.soId);
+};
+window.soApplyClass = function () {
+  const cur = soFindBlockBySoId(_soCtx && _soCtx.soId); if (!cur) { soToast('対象配車が見つかりません', 'warn'); return; }
+  const a = cur.block;
+  const targetDid = soVal('so-f-driver'); if (!targetDid) { soToast('変更後の車両を選択してください', 'warn'); return; }
+  if (targetDid !== cur.driverId) {
+    const key = dndGetCurrentDateKey();
+    if (dndAssignments[cur.driverId] && dndAssignments[cur.driverId][key]) dndAssignments[cur.driverId][key].splice(cur.idx, 1);
+    a._scaleOutKind = '車格変更';
+    soPushBlock(targetDid, a);
+  } else {
+    a._scaleOutKind = '車格変更';
+  }
+  const also = document.getElementById('so-f-also');
+  if (also && also.checked) {
+    const addDid = soVal('so-f-driver2');
+    if (addDid) { soPushBlock(addDid, soMakeBlock(a, { scaleOutKind: '車両追加', color: '#0f7a52' })); }
+  }
+  closeScaleOutDispatchModal();
+  const drv = (dndDrivers || []).find(d => d.id === targetDid);
+  soToast('📦 車格変更を適用しました（' + (drv ? (drv.type + ' ' + ((drv.maxLoad || 0) / 1000).toFixed(0) + 't') : '') + '）');
+  soReopenDetail(_soCtx.soId);
+};
+
 // 日付ナビゲーション全体描画
 function renderDndDateNav() {
   // ◀ / ▶ ボタンの活性制御
@@ -36743,6 +37110,34 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   cursor: not-allowed;
   box-shadow: none;
 }
+/* ⊕増車（車建て）UI：右パネルの配車一覧・増車ボタン・パターンモーダル */
+.dnd-detail-btn.scaleout { background:#EAF5F0; color:#0D4A3A; border:1.5px solid #3BB888; }
+.dnd-detail-btn.scaleout:hover { background:#0D4A3A; color:#fff; box-shadow:0 2px 6px rgba(13,74,58,.3); }
+.so-disp-row { display:flex; align-items:center; gap:8px; padding:7px 8px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:6px; cursor:pointer; transition:all .12s; }
+.so-disp-row:hover { border-color:#3BB888; background:#f6fbf9; }
+.so-disp-row.current { border-color:#0D4A3A; background:#EAF5F0; }
+.so-disp-no { font-size:11px; font-weight:800; color:#0D4A3A; flex-shrink:0; }
+.so-disp-main { flex:1; font-size:11px; line-height:1.4; min-width:0; }
+.so-disp-veh { color:#6b7280; font-weight:600; }
+.so-disp-seg { color:#6b7280; font-size:10px; }
+.so-disp-tags { flex-shrink:0; display:flex; flex-direction:column; align-items:flex-end; gap:3px; }
+.so-disp-tag { font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px; white-space:nowrap; }
+.so-disp-tag.main { background:#EAF5F0; color:#0D4A3A; }
+.so-disp-tag.scaleout { background:#ede9fe; color:#6d28d9; }
+.so-disp-tag.partner { background:#fef3c7; color:#92400e; }
+.so-disp-conf { font-size:9px; font-weight:700; color:#16a34a; }
+.so-disp-child { font-size:10.5px; font-weight:700; color:#6d28d9; margin:8px 0 4px; padding-left:4px; border-left:3px solid #c4b5fd; }
+.so-pat-grid { display:flex; flex-direction:column; gap:8px; }
+.so-pat-card { display:flex; align-items:center; gap:10px; text-align:left; width:100%; padding:11px 12px; border:1.5px solid #e5e7eb; border-radius:10px; background:#fff; cursor:pointer; transition:all .12s; font-family:inherit; }
+.so-pat-card:hover { border-color:#3BB888; background:#f6fbf9; }
+.so-pat-emoji { font-size:20px; flex-shrink:0; }
+.so-pat-text { font-size:12px; color:#111827; line-height:1.45; }
+.so-pat-desc { font-size:10.5px; color:#6b7280; font-weight:500; }
+.so-pat-tag { font-size:9px; font-weight:800; color:#ea580c; background:#fff7ed; border:1px solid #fed7aa; padding:1px 6px; border-radius:8px; margin-left:6px; }
+.so-input { width:100%; padding:7px 9px; border:1px solid #d1d5db; border-radius:7px; font-size:12px; font-family:inherit; box-sizing:border-box; background:#fff; }
+.so-field { margin-bottom:12px; }
+.so-field-label { font-size:11px; font-weight:700; color:#374151; margin-bottom:5px; display:block; }
+.so-hint { font-size:10.5px; color:#6b7280; line-height:1.55; background:#f8fafc; border:1px solid #e5e7eb; border-radius:7px; padding:8px 10px; margin-bottom:12px; }
 .dnd-detail-law-chip {
   display: inline-flex;
   align-items: center;
@@ -37381,8 +37776,22 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
       </div>
     `;
 
+    // 「この案件の配車（車建て）」一覧＋増車セクションを差し込む
+    if (typeof soBuildDispatchListSection === 'function') {
+      try { body.insertAdjacentHTML('beforeend', soBuildDispatchListSection(driverId, blockIdx)); } catch (e) {}
+    }
+
     // アクションボタン
     const actions = document.getElementById('dnd-detail-actions');
+    // 増車ボタン：確定前 & 編集可能な案件のみ表示（5パターンのパネルを開く）
+    const canScaleOut = !a.confirmed && !a.isPreset;
+    const scaleoutBtn = canScaleOut ? `
+      <button class="dnd-detail-btn scaleout" onclick="openScaleOutDispatchModal('${driverId}', ${blockIdx})"
+              title="増車（車両追加・別案件切出し・協力会社振替・積卸分割・車格変更）">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        増車
+      </button>
+    ` : '';
     // リレー追加ボタン：確定前 & リレー輸送が編集可能な案件のみ表示
     const canAddRelay = !a.confirmed && !a.isPreset;
     const relayBtn = canAddRelay ? `
@@ -37402,6 +37811,7 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
     } else {
       actions.innerHTML = `
         <button class="dnd-detail-btn secondary" onclick="closeDndDetailPane()">閉じる</button>
+        ${scaleoutBtn}
         ${relayBtn}
         <button class="dnd-detail-btn partner" onclick="dispatchBlockToPartner('${driverId}', ${blockIdx})">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>
