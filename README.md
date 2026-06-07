@@ -144,12 +144,16 @@ SSoT 未接続のままでした）。
   モデル未読込時のみ直接取込の安全網）。`ai-phone-reception.html` は既に正規化ストアが主経路（旧キューは
   フォールバックのみ）。実ブラウザQA（HTTP同一オリジン）で 正規化経由取込／旧キュー→移送→取込・旧キー除去・
   ストア空 を確認。
-- 🔜 **完全インバージョン最後の一歩（ブラウザQA必須）**: `assignments[]`/`c.legs`/`dndAssignments` の
-  `const` 実体は **Proxy 化済み（第15-16段）**。残るは `assignments→store` 安全同期の単方向化
-  （`rebuildAssignmentIndex` の store←assignments 同期を外し store 単一権威へ。全直接変異 writer の
-  洗い出し＋全画面ブラウザQAが必要）。あわせて **案件4分割（`unprocessed`/`processing`/`processed`/
-  `allCasesMasterData`）の統合（C7）** が残る。`vehicleMasterData` は固有データを持つ独立レジストリのため、
-  物理統合はデータ判断を要します。
+- ✅ **assignments→store 単方向化（C6 仕上げ）**: 残る直接変異 writer の汎用CRUD
+  `createAssignment`/`updateAssignment`/`deleteAssignment` を **store-first 化**（store へ add/remove → 
+  `assignments[]` を再導出）。これで reassign/DnD/中継 を含む**全 writer が store-first** に。
+  `rebuildAssignmentIndex` の常時 back-sync（store←assignments）を**自己修復型・単方向**へ変更：
+  既定 strict で「乖離が無ければ再同期しない（単方向）／乖離検出時のみ自己修復＋warn」（`window.__opStoreStrict=false`
+  で従来の常時同期に戻せる）。実ブラウザQAで CRUD/reassign/DnD 実行後も **乖離 0**（=全 writer が store-first で
+  back-flow 不要）・store/legacy 一致・全画面整合 true・エラー0 を確認。store が単一権威、`assignments[]` は
+  その射影。万一の非 store-first 変異も自己修復＋warn で検出（データ損失なし）。
+- 🔜 **残**: **案件4分割（`unprocessed`/`processing`/`processed`/`allCasesMasterData`）の統合（C7）**（最大規模）。
+  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

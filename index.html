@@ -20108,8 +20108,11 @@ function createAssignment(input) {
   a.mainOwnerId = a.mainOwnerId || a.ownerId;
   a.crossBase = isCrossBaseAssignment(a);
 
-  assignments.push(a);
-  if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  // 【単方向化・C6仕上げ】store-first：store へ add → assignments[] を再導出。失敗時 legacy push。
+  if (!(typeof _opStoreWrite === 'function' && _opStoreWrite(() => window.__opStore.add(a)))) {
+    assignments.push(a);
+    if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  }
   _appendAssignmentLog(a.id, 'create', null, a, actorId);
   return a;
 }
@@ -20123,17 +20126,28 @@ function updateAssignment(id, patch, actorId) {
     'mainOwnerId','caseIds','start','end','status','client','from','to',
     'goods','deadline','label','color','legNo','parentAssignmentId',
     'relatedReturnId','isReturn','note','tab'];
+  // 【単方向化】patch を当てたレコードを構築し、store へ remove+add（store-first）。失敗時のみ in-place。
+  const patched = Object.assign({}, a);
   for (const key of ALLOWED) {
-    if (patch && Object.prototype.hasOwnProperty.call(patch, key)) {
-      a[key] = patch[key];
-    }
+    if (patch && Object.prototype.hasOwnProperty.call(patch, key)) patched[key] = patch[key];
   }
-  a.crossBase = isCrossBaseAssignment(a);
-  a.updatedAt = new Date().toISOString();
-  a.updatedBy = actorId || a.ownerId;
-  if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
-  _appendAssignmentLog(a.id, 'update', before, a, actorId);
-  return a;
+  patched.crossBase = isCrossBaseAssignment(patched);
+  patched.updatedAt = new Date().toISOString();
+  patched.updatedBy = actorId || patched.ownerId;
+  const viaStore = (typeof _opStoreWrite === 'function') &&
+    _opStoreWrite(() => { window.__opStore.remove(id); window.__opStore.add(patched); });
+  if (!viaStore) {
+    for (const key of ALLOWED) {
+      if (patch && Object.prototype.hasOwnProperty.call(patch, key)) a[key] = patch[key];
+    }
+    a.crossBase = isCrossBaseAssignment(a);
+    a.updatedAt = patched.updatedAt;
+    a.updatedBy = patched.updatedBy;
+    if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  }
+  const after = (typeof getAssignmentById === 'function') ? getAssignmentById(id) : patched;
+  _appendAssignmentLog(id, 'update', before, after, actorId);
+  return after;
 }
 
 function deleteAssignment(id, actorId) {
@@ -20141,8 +20155,11 @@ function deleteAssignment(id, actorId) {
   const idx = assignments.findIndex(a => a.id === id);
   if (idx < 0) return false;
   const before = assignments[idx];
-  assignments.splice(idx, 1);
-  if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  // 【単方向化】store-first：store から remove → 再導出。失敗時のみ legacy splice。
+  if (!(typeof _opStoreWrite === 'function' && _opStoreWrite(() => window.__opStore.remove(id)))) {
+    assignments.splice(idx, 1);
+    if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  }
   _appendAssignmentLog(id, 'delete', before, null, actorId);
   return true;
 }
@@ -20801,14 +20818,42 @@ function rebuildAssignmentIndex() {
     (_assignByDriver[a.driverId] = _assignByDriver[a.driverId] || []).push(a);
     (_assignByVehicle[a.vehicleId] = _assignByVehicle[a.vehicleId] || []).push(a);
   });
-  // 物理統合（C6・第8段）：全 assignments 変更はここを通るため、単一同期点として
-  // 永続SSoTストアを再構築（完全ロスレス）。reader はこのストアからライブ派生する。
+  // 【単方向化・C6仕上げ】store を単一権威にする。全 writer は store-first（reassign/DnD/CRUD/中継）。
+  //  ・初回：store を生成し assignments で seed（一度きり）。
+  //  ・以降：store←assignments の常時 back-sync は行わない（単方向）。乖離（=store-firstを通らない
+  //    変異）を検出した時のみ自己修復で再同期＋warn（安全網）。__opStoreStrict=false で従来の常時同期に戻せる。
   if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined' && LogipokeDB.createOperationStore) {
     try {
-      if (!window.__opStore) window.__opStore = LogipokeDB.createOperationStore();
-      window.__opStore.syncFromAssignments(assignments);
+      if (!window.__opStore) {
+        window.__opStore = LogipokeDB.createOperationStore();
+        window.__opStore.syncFromAssignments(assignments);   // 初回 seed
+        return;
+      }
+      var strict = (window.__opStoreStrict !== false);        // 既定 strict（単方向）
+      var diverged = !_assignmentsMatchesStore();
+      if (diverged) {
+        window.__opStoreDivergences = (window.__opStoreDivergences || 0) + 1;
+        console.warn('[SSoT] assignments が store と乖離（非 store-first 変異の可能性）。自己修復で再同期します。');
+      }
+      if (!strict || diverged) window.__opStore.syncFromAssignments(assignments); // strict時は乖離時のみ自己修復
     } catch (e) { window.__opStore = null; /* 失敗時はストア無効化＝レガシー読取に縮退 */ }
   }
+}
+// store 由来 assignments と現配列が一致するか（乖離検出用・単方向化の番人）
+function _assignmentsMatchesStore() {
+  try {
+    if (!window.__opStore || !window.__opStore.getAssignments) return true;
+    var s = window.__opStore.getAssignments();
+    if (s.length !== assignments.length) return false;
+    var byId = {}; s.forEach(function (a) { byId[a.id] = a; });
+    return assignments.every(function (a) {
+      var x = byId[a.id];
+      return x && x.driverId === a.driverId && x.vehicleId === a.vehicleId
+        && x.start === a.start && x.end === a.end && x.status === a.status
+        && x.client === a.client && x.from === a.from && x.to === a.to
+        && x.tab === a.tab && x.date === a.date;
+    });
+  } catch (e) { return true; }
 }
 let _assignByDriver = {}, _assignByVehicle = {}, _assignById = {};
 rebuildAssignmentIndex();
