@@ -144,7 +144,8 @@
         contact: { name: p.contact, tel: p.tel, email: p.email },
         clientType: null, clientTypeRaw: null, billingFormatId: null,
         serviceableVehicleTypes: (p.vehicleTypes || []).slice(),
-        caseIds: (p.cases || []).slice(), legacyId: id
+        caseIds: (p.cases || []).slice(), legacyId: id,
+        partnerRates: p.partnerRates, performance: p.performance
       });
       db._idx.companyByName.set(p.name, id);
     });
@@ -189,8 +190,12 @@
     db.companies.forEach(function (c) {
       if (c.kind !== 'partner') return;
       var loc = db.locations.get(c.locationId);
-      out.push({ id: c.id, name: c.name, area: loc ? loc.raw : '', contact: c.contact.name, tel: c.contact.tel,
-        email: c.contact.email, vehicleTypes: (c.serviceableVehicleTypes || []).slice(), cases: c.caseIds.slice() });
+      var o = { id: c.id, name: c.name, area: loc ? loc.raw : '', contact: c.contact.name, tel: c.contact.tel,
+        email: c.contact.email, vehicleTypes: (c.serviceableVehicleTypes || []).slice(), cases: c.caseIds.slice() };
+      // 増車推薦用の傭車レート/実績（存在時のみ。キー順は seed と一致＝lossless）
+      if (c.partnerRates !== undefined) o.partnerRates = c.partnerRates;
+      if (c.performance !== undefined) o.performance = c.performance;
+      out.push(o);
     });
     return out;
   }

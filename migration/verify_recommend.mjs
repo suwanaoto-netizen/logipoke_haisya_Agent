@@ -84,6 +84,38 @@ check('recommendPartners 適合順＋傭車見積', () => {
   assert.equal(r.selected.length, 1);
 });
 
+// ② 協力会社推薦：partnerRates（車格別レート）で傭車見積を実データ化
+check('recommendPartners partnerRates 実データ見積', () => {
+  const r = R.recommendPartners({
+    remainingKg: 2800, remainingCount: 1, requiredVehicleType: '4tウィング',
+    originPrefecture: '茨城県', distanceKm: 365,
+    partners: [{
+      id: 'PT-001', name: '北関東物流', area: '埼玉県熊谷市',
+      vehicleTypes: ['4tウィング', '2tトラック'], cases: ['a', 'b'],
+      partnerRates: [{ vehicleType: '4tウィング', baseCharge: 20000, perKm: 120 }],
+      performance: { onTimeRate: 0.98, qualityScore: 90, jobCount: 60 }
+    }]
+  });
+  const p = r.ranked[0];
+  assert.equal(p.rateSource, 'rate');
+  assert.equal(p.charge, 64000);   // round1000(20000 + 120*365=43800 → 63800 → 64000)
+  assert.equal(p.onTimeRate, 0.98);
+});
+
+// ② 実績(performance)が高いほど適合スコアが高い
+check('recommendPartners performance でスコア差', () => {
+  const base = {
+    requiredVehicleType: '4tウィング', originPrefecture: '東京都', distanceKm: 100, remainingKg: 2000, remainingCount: 1,
+    partners: [
+      { id: 'HI', name: 'High', area: '東京都', vehicleTypes: ['4tウィング'], cases: [], performance: { onTimeRate: 0.99, qualityScore: 95, jobCount: 80 } },
+      { id: 'LO', name: 'Low', area: '東京都', vehicleTypes: ['4tウィング'], cases: [], performance: { onTimeRate: 0.70, qualityScore: 50, jobCount: 2 } }
+    ]
+  };
+  const r = R.recommendPartners(base);
+  assert.equal(r.ranked[0].id, 'HI', '実績の高い社が上位');
+  assert.ok(r.ranked[0].score > r.ranked[1].score);
+});
+
 // ③ 運賃推薦：粗利＝受注−自社原価−傭車支払
 check('recommendFare 粗利計算', () => {
   const f = R.recommendFare({

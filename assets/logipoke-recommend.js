@@ -121,8 +121,24 @@
   }
 
   /* ───────────────────────── ② AI協力会社推薦 ─────────────────────────────── */
+  // 傭車見積を解決：partnerRates（車格別 base+perKm）→ flat baseCharge → 原価×マークアップ。
+  // 戻り: { charge, source:'rate'|'flat'|'estimate' }
+  function resolvePartnerCharge(p, reqType, types, distanceKm) {
+    if (Array.isArray(p.partnerRates) && p.partnerRates.length) {
+      var r = p.partnerRates.filter(function (x) {
+        return reqType && (String(x.vehicleType).indexOf(reqType) >= 0 || reqType.indexOf(String(x.vehicleType)) >= 0);
+      })[0] || p.partnerRates[0];
+      return { charge: round1000((r.baseCharge || 0) + (r.perKm || 0) * distanceKm), source: 'rate' };
+    }
+    if (p.baseCharge != null) {
+      return { charge: round1000(p.baseCharge + (p.perKm || 0) * distanceKm), source: 'flat' };
+    }
+    var pr = paramsForLabel(reqType) || paramsForLabel((types[0] || '')) || COST_PARAMS.t4;
+    return { charge: round1000(estimateLegCost(distanceKm, pr).total * DEFAULT_PARAMS.PARTNER_MARKUP), source: 'estimate' };
+  }
+
   // ctx: { remainingKg, remainingCount, requiredVehicleType, originPrefecture, distanceKm,
-  //        partners:[{id,name,area,vehicleTypes,cases,available,perKm,baseCharge,performance}] }
+  //        partners:[{id,name,area,vehicleTypes,cases,available,partnerRates,baseCharge,perKm,performance}] }
   function recommendPartners(ctx) {
     ctx = ctx || {};
     var distanceKm = ctx.distanceKm || 0;
@@ -135,24 +151,27 @@
       var areaNear = origin && p.area ? (String(p.area).slice(0, 3) === origin.slice(0, 3)) : false;
       var usage = (p.cases || []).length;          // 過去依頼数（信頼性プロキシ）
       var available = p.available != null ? p.available : true;
-      // 傭車見積：協力会社の原価×マークアップ（rates が無い場合の決定的推定）
-      var charge;
-      if (p.baseCharge != null) charge = p.baseCharge + (p.perKm || 0) * distanceKm;
-      else {
-        var pr = paramsForLabel(reqType) || paramsForLabel((types[0] || '')) || COST_PARAMS.t4;
-        charge = round1000(estimateLegCost(distanceKm, pr).total * DEFAULT_PARAMS.PARTNER_MARKUP);
-      }
-      // 適合スコア 0-100：車格適合40 + エリア20 + 実績20 + 空き20
-      var score = (typeMatch ? 40 : 0) + (areaNear ? 20 : 0)
-        + Math.min(20, usage * 5) + (available ? 20 : 0);
-      // 品質スコアがあれば反映（performance.qualityScore 0-100 を ±10 補正）
-      if (p.performance && typeof p.performance.qualityScore === 'number') {
-        score = Math.round(score * 0.8 + p.performance.qualityScore * 0.2);
+      // 傭車見積：partnerRates（車格別 base+perKm）→ flat baseCharge → 原価×マークアップ
+      var chargeInfo = resolvePartnerCharge(p, reqType, types, distanceKm);
+      // 適合スコア 0-100：車格適合40 + エリア15 + 空き15 + 実績/品質30
+      var perf = p.performance;
+      var score = (typeMatch ? 40 : 0) + (areaNear ? 15 : 0) + (available ? 15 : 0);
+      if (perf) {
+        // 定時遵守率(0-1)×12 + 品質(0-100)/100×12 + 実績件数/10(上限6) = 最大30
+        var perf30 = (perf.onTimeRate || 0) * 12
+          + (typeof perf.qualityScore === 'number' ? perf.qualityScore / 100 * 12 : 0)
+          + Math.min(6, (perf.jobCount || 0) / 10);
+        score += Math.round(perf30);
+      } else {
+        score += Math.min(30, usage * 6);   // 実績データが無ければ依頼数プロキシ
       }
       return {
         id: p.id, name: p.name, area: p.area, vehicleTypes: types,
         typeMatch: typeMatch, areaNear: areaNear, usage: usage,
-        available: available, charge: charge, score: Math.min(100, score)
+        available: available, charge: chargeInfo.charge, rateSource: chargeInfo.source,
+        onTimeRate: perf ? perf.onTimeRate : null,
+        qualityScore: perf && typeof perf.qualityScore === 'number' ? perf.qualityScore : null,
+        score: Math.min(100, score)
       };
     }).filter(function (p) { return p.available; })
       .sort(function (a, b) {

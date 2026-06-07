@@ -9337,12 +9337,24 @@ function _ssotDerive(seed, build){
 
     // 協力会社
     const _partnerMasterSeed = [
-      { id:'PT-001', name:'北関東物流株式会社', area:'埼玉県熊谷市', contact:'安藤 清志', tel:'048-222-3333', email:'ando@kitatrans.co.jp', vehicleTypes:['4tウィング','2tトラック'], cases:['20240524100','20240521110'] },
-      { id:'PT-002', name:'東海急送株式会社', area:'静岡県浜松市', contact:'伊勢 誠一', tel:'053-444-5555', email:'ise@tokakyuso.co.jp', vehicleTypes:['10tトラック','4tウィング'], cases:['20240519055','20240515010'] },
-      { id:'PT-003', name:'九州ネット輸送株式会社', area:'福岡県北九州市', contact:'岡部 雄介', tel:'093-666-7777', email:'okabe@kyunet.co.jp', vehicleTypes:['4tウィング','冷蔵車'], cases:['20240524105'] },
-      { id:'PT-004', name:'中央フレート株式会社', area:'東京都江戸川区', contact:'桐島 和也', tel:'03-8888-9999', email:'kirishima@chuo-freight.co.jp', vehicleTypes:['軽バン','2tトラック'], cases:['20240522120','20240520080'] },
-      { id:'PT-005', name:'北海道運輸株式会社', area:'北海道札幌市', contact:'本間 浩二', tel:'011-000-1111', email:'honma@hokkaido-unyu.co.jp', vehicleTypes:['10tトラック','冷蔵車'], cases:['20240521095'] },
-      { id:'PT-006', name:'関西エクスプレス株式会社', area:'大阪府堺市', contact:'丸山 隆司', tel:'072-222-3333', email:'maruyama@kansai-ex.co.jp', vehicleTypes:['4tウィング','チャーター'], cases:['20240513002'] },
+      { id:'PT-001', name:'北関東物流株式会社', area:'埼玉県熊谷市', contact:'安藤 清志', tel:'048-222-3333', email:'ando@kitatrans.co.jp', vehicleTypes:['4tウィング','2tトラック'], cases:['20240524100','20240521110'],
+        partnerRates:[{vehicleType:'4tウィング',baseCharge:22000,perKm:130},{vehicleType:'2tトラック',baseCharge:15000,perKm:95}],
+        performance:{onTimeRate:0.98, qualityScore:90, avgCostRatio:0.95, jobCount:62} },
+      { id:'PT-002', name:'東海急送株式会社', area:'静岡県浜松市', contact:'伊勢 誠一', tel:'053-444-5555', email:'ise@tokakyuso.co.jp', vehicleTypes:['10tトラック','4tウィング'], cases:['20240519055','20240515010'],
+        partnerRates:[{vehicleType:'10tトラック',baseCharge:35000,perKm:220},{vehicleType:'4tウィング',baseCharge:24000,perKm:140}],
+        performance:{onTimeRate:0.95, qualityScore:84, avgCostRatio:1.02, jobCount:38} },
+      { id:'PT-003', name:'九州ネット輸送株式会社', area:'福岡県北九州市', contact:'岡部 雄介', tel:'093-666-7777', email:'okabe@kyunet.co.jp', vehicleTypes:['4tウィング','冷蔵車'], cases:['20240524105'],
+        partnerRates:[{vehicleType:'4tウィング',baseCharge:25000,perKm:150},{vehicleType:'冷蔵車',baseCharge:30000,perKm:180}],
+        performance:{onTimeRate:0.96, qualityScore:88, avgCostRatio:0.98, jobCount:27} },
+      { id:'PT-004', name:'中央フレート株式会社', area:'東京都江戸川区', contact:'桐島 和也', tel:'03-8888-9999', email:'kirishima@chuo-freight.co.jp', vehicleTypes:['軽バン','2tトラック'], cases:['20240522120','20240520080'],
+        partnerRates:[{vehicleType:'軽バン',baseCharge:8000,perKm:70},{vehicleType:'2tトラック',baseCharge:14000,perKm:90}],
+        performance:{onTimeRate:0.92, qualityScore:78, avgCostRatio:1.05, jobCount:51} },
+      { id:'PT-005', name:'北海道運輸株式会社', area:'北海道札幌市', contact:'本間 浩二', tel:'011-000-1111', email:'honma@hokkaido-unyu.co.jp', vehicleTypes:['10tトラック','冷蔵車'], cases:['20240521095'],
+        partnerRates:[{vehicleType:'10tトラック',baseCharge:38000,perKm:210},{vehicleType:'冷蔵車',baseCharge:33000,perKm:190}],
+        performance:{onTimeRate:0.90, qualityScore:80, avgCostRatio:1.00, jobCount:22} },
+      { id:'PT-006', name:'関西エクスプレス株式会社', area:'大阪府堺市', contact:'丸山 隆司', tel:'072-222-3333', email:'maruyama@kansai-ex.co.jp', vehicleTypes:['4tウィング','チャーター'], cases:['20240513002'],
+        partnerRates:[{vehicleType:'4tウィング',baseCharge:26000,perKm:160},{vehicleType:'チャーター',baseCharge:40000,perKm:230}],
+        performance:{onTimeRate:0.97, qualityScore:86, avgCostRatio:0.97, jobCount:33} },
     ];
     // (a) 協力会社マスタを SSoT から derive（不一致時は seed にフォールバック）
     const partnerMasterData = _ssotDerive(_partnerMasterSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { partners: _partnerMasterSeed }); return DB.toPartnerMaster(db); });
@@ -13810,7 +13822,8 @@ function getScaleOutPlan(c, verdict) {
       complianceOk: !v.law || v.law.status !== 'ng' };
   });
   const partners = (typeof partnerMasterData !== 'undefined' ? partnerMasterData : []).map(function (p) {
-    return { id: p.id, name: p.name, area: p.area, vehicleTypes: p.vehicleTypes, cases: p.cases, available: true };
+    return { id: p.id, name: p.name, area: p.area, vehicleTypes: p.vehicleTypes, cases: p.cases, available: true,
+      partnerRates: p.partnerRates, performance: p.performance };
   });
   const order = {
     weightKg: weightKg, distanceKm: distanceKm, from: c.from, vehicle: c.vehicle, aiResult: c.aiResult,
@@ -13836,7 +13849,7 @@ function buildScaleOutPlanCard(c, verdict, caseIdx) {
     const isOwn = l.kind === 'own';
     const tag = tags.charAt(l.seq - 1) || ('#' + l.seq);
     const name = isOwn ? (l.driver || '') + '（' + l.id + '）' : l.name;
-    const meta = isOwn ? '自社 ' + (l.score || 0) + 'pt' : '協力 傭車¥' + (l.charge || 0).toLocaleString();
+    const meta = isOwn ? '自社 ' + (l.score || 0) + 'pt' : '協力 適合' + (l.score || 0) + ' ・ 傭車¥' + (l.charge || 0).toLocaleString();
     return '<div class="so-leg ' + (isOwn ? 'own' : 'partner') + '">'
       + '<span class="so-leg-tag">' + tag + '</span>'
       + '<span class="so-leg-name">' + name + '</span>'
