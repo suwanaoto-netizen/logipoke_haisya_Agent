@@ -103,6 +103,16 @@ check('H6 混載不可 → required', () => {
   assert.ok(v.reasons.some(r => r.type === 'mixload'));
 });
 
+// explainVerdict: 決定的な理由文（LLMフォールバック）
+check('explainVerdict 理由文（決定的）', () => {
+  const req = ev({ goods: '精密機器 / 6,800kg', vehicle: '4t', deadline: '05/26 AM' });
+  const t = SO.explainVerdict(req);
+  assert.ok(/増車必要/.test(t), '必要の文言');
+  assert.ok(/2,800kg/.test(t), '不足量を含む');
+  const none = SO.explainVerdict({ verdict: 'none', reasons: [] });
+  assert.ok(/増車不要/.test(none));
+});
+
 console.log('\n' + (fail === 0
   ? '✅ 全 ' + pass + ' 件パス'
   : '❌ ' + fail + ' 件失敗 / ' + (pass + fail) + ' 件中') + '\n');

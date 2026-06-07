@@ -243,12 +243,46 @@
     return verdict === 'required' || verdict === 'recommended';
   }
 
+  // 決定的な理由文（同期・LLM非依存）。PR5でLLMが文章を上書きする際のフォールバックにもなる。
+  var REASON_LABELS = {
+    overload: '積載超過', volume: '容積超過', time_window: '時間制約',
+    compliance: '改善基準', geo: '地理的分散', mixload: '混載不可', info: '情報不足'
+  };
+  var SHAPE_LABELS = { relay: '中継', parallel: '並走', co_split: '相積み分割' };
+  function explainVerdict(v) {
+    if (!v || !v.verdict) return '';
+    var reasons = (v.reasons || []).map(function (r) { return REASON_LABELS[r.type] || r.type; });
+    var d = v.deficit || {};
+    var shape = SHAPE_LABELS[v.shapeHint] || '';
+    switch (v.verdict) {
+      case 'required': {
+        var parts = [];
+        if (d.weightKg) parts.push('不足' + d.weightKg.toLocaleString() + 'kg');
+        if (d.vehicles) parts.push('推定' + d.vehicles + '台');
+        if (d.minutes) parts.push('納期' + d.minutes + '分超過');
+        return '増車必要：' + (reasons.join('・') || '1台では不可') + '。'
+          + (parts.length ? parts.join(' / ') + '。' : '')
+          + (shape ? '分割形態は' + shape + 'を推奨。' : '');
+      }
+      case 'recommended':
+        return '増車推奨：1台でも可能ですが余裕が薄く'
+          + (v.score != null ? '（推奨度' + v.score + '点）' : '') + '、確実性重視なら増車が有効です。';
+      case 'negotiate':
+        return '要交渉：増車が必要ですが自社・協力会社とも手配枠が見つかりません。納期/条件の調整か広域打診を検討してください。';
+      case 'review':
+        return '要確認：荷量・時間などの情報が不足のため自動判定を保留中です。案件情報を補完してください。';
+      default:
+        return '1台で対応可能（増車不要）。';
+    }
+  }
+
   /* ───────────────────────── 公開API ─────────────────────────────────────── */
   return {
     DEFAULT_CONFIG: DEFAULT_CONFIG,
     VERDICT_LABELS: VERDICT_LABELS,
     evaluateScaleOut: evaluateScaleOut,
     countsAsScaleOut: countsAsScaleOut,
+    explainVerdict: explainVerdict,
     // helpers（再利用・テスト用）
     parseWeightKg: parseWeightKg,
     capLabelToKg: capLabelToKg,

@@ -602,6 +602,13 @@ function _ssotDerive(seed, build){
   .so-recommended { color:#0D4A3A; background:#EAF5F0; border:1px solid #b6e6d3; } .so-recommended .dot { background:#3BB888; } /* 推奨＝グリーン */
   .so-negotiate   { color:#92400e; background:#fffbeb; border:1px solid #fde68a; } .so-negotiate .dot { background:#d97706; }  /* 要交渉＝アンバー */
   .so-review      { color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; } .so-review .dot { background:#94a3b8; }    /* 要確認＝グレー */
+  /* 増車コメント（PR5・詳細パネル）。色は verdict トーン（so-* の背景/枠/文字）を流用 */
+  .scaleout-rationale { display:flex; align-items:flex-start; gap:7px; padding:9px 12px; border-radius:8px; font-size:11.5px; font-weight:600; line-height:1.55; border:1px solid var(--border); }
+  .scaleout-rationale.so-required    { color:#9a3412; background:#fff7ed; border-color:#fed7aa; }
+  .scaleout-rationale.so-recommended { color:#0D4A3A; background:#EAF5F0; border-color:#b6e6d3; }
+  .scaleout-rationale.so-negotiate   { color:#92400e; background:#fffbeb; border-color:#fde68a; }
+  .scaleout-rationale.so-review      { color:#475569; background:#f1f5f9; border-color:#cbd5e1; }
+  .so-rationale-ico { flex-shrink:0; }
 
   .btn { 
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -13729,7 +13736,37 @@ function scaleOutBadgeHtml(c) {
     review:      { cls: 'so-review',      txt: '要確認（情報不足）' }
   };
   const m = map[v.verdict]; if (!m) return '';
-  return '<div class="scaleout-badge ' + m.cls + '"><span class="dot"></span>' + m.txt + '</div>';
+  // 決定的な理由文を title に（ホバーで即表示）。LLM強化はaiExplainScaleOut（任意・非同期）。
+  let tip = '';
+  try { tip = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.explainVerdict) ? LogipokeScaleOut.explainVerdict(v) : ''; } catch (e) {}
+  const titleAttr = tip ? ' title="' + tip.replace(/"/g, '&quot;') + '"' : '';
+  return '<div class="scaleout-badge ' + m.cls + '"' + titleAttr + '><span class="dot"></span>' + m.txt + '</div>';
+}
+
+// LLMによる増車理由文（calcFare と同じ Claude API パターン・失敗時は決定的フォールバック）。
+// 数値判定は決定的ロジックが権威。LLMは説明文の自然化のみ（docs/scale-out-judgement.md §8）。
+async function aiExplainScaleOut(caseObj) {
+  const v = getCaseScaleOut(caseObj);
+  const fallback = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.explainVerdict)
+    ? LogipokeScaleOut.explainVerdict(v) : '';
+  if (v.verdict !== 'required' && v.verdict !== 'recommended') return fallback;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514', max_tokens: 200,
+        messages: [{ role: 'user', content:
+          '配送案件の増車判定の根拠を、配車担当者向けに日本語60字以内の1文で。説明文のみ返す（前置き不要）。\n'
+          + '案件：' + (caseObj.from || '') + '→' + (caseObj.to || '') + ' / ' + (caseObj.goods || '') + ' / 納期' + (caseObj.deadline || '') + '\n'
+          + '判定：' + v.verdict + ' / 理由：' + (v.reasons || []).map(function (r) { return r.type; }).join(',')
+          + ' / 不足：' + JSON.stringify(v.deficit || {}) + ' / 分割：' + (v.shapeHint || '')
+        }]
+      })
+    });
+    const data = await res.json();
+    const text = data.content.map(function (b) { return b.text || ''; }).join('').trim();
+    return text || fallback;
+  } catch (e) { return fallback; }
 }
 
 // 増車が必要/推奨の案件件数（required + recommended）。運行スケジュールのサマリー集計用。
@@ -14338,6 +14375,16 @@ function selectProcessing(i) {
     el.classList.toggle('selected', idx===i);
   });
   renderProcessingDetail(i);
+  // PR5: 増車コメントをLLMで自然化（失敗時は決定的文のまま）。判定の数値は不変。
+  try {
+    const c = processingCases[i];
+    if (c && typeof aiExplainScaleOut === 'function') {
+      aiExplainScaleOut(c).then(function (text) {
+        const box = document.getElementById('so-rationale-' + c.id);
+        if (box && text) { const t = box.querySelector('.so-rationale-text'); if (t) t.textContent = text; }
+      }).catch(function () {});
+    }
+  } catch (e) {}
 }
 
 // ── ★配送スケジュール（縦タイムライン）ヘルパー ─────────────────
@@ -15131,6 +15178,16 @@ function renderProcessingDetail(i) {
   const selIdx = c.selectedVehicleIdx ?? 0;
   const selV = c.vehicles[selIdx];
 
+  // 増車コメント（PR5）：決定的な理由文を即表示。selectProcessingでLLM文に上書き（任意）。
+  const _so = (typeof getCaseScaleOut === 'function') ? getCaseScaleOut(c) : { verdict: 'none' };
+  const _soToneCls = { required: 'so-required', recommended: 'so-recommended', negotiate: 'so-negotiate', review: 'so-review' }[_so.verdict] || '';
+  const _soText = (typeof LogipokeScaleOut !== 'undefined' && LogipokeScaleOut.explainVerdict) ? LogipokeScaleOut.explainVerdict(_so) : '';
+  const _soBanner = (_so.verdict && _so.verdict !== 'none')
+    ? '<div id="so-rationale-' + c.id + '" class="scaleout-rationale ' + _soToneCls + '" style="margin-bottom:14px">'
+      + '<span class="so-rationale-ico">🤖</span>'
+      + '<span class="so-rationale-text">' + _soText + '</span></div>'
+    : '';
+
   const vcards = c.vehicles.map((v, ri) => {
     const isTop = ri === 0;
     const isSel = ri === selIdx;
@@ -15206,6 +15263,7 @@ function renderProcessingDetail(i) {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="8" stroke-width="3" stroke-linecap="round"/><line x1="12" y1="12" x2="12" y2="16"/></svg>
       </button>
     </div>
+    ${_soBanner}
 
     <!-- 案件パターン -->
     <div class="detail-card" style="margin-bottom:14px">
