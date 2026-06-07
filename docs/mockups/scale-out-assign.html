@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>配車割当タブ ― 増車対応UIモック</title>
+<style>
+  /* ── index.html と同じカラートークン ── */
+  :root {
+    --sidebar-bg:#1A6B56; --accent:#3BB888; --accent-pale:#EAF5F0;
+    --text-primary:#1a1a1a; --text-secondary:#6b7280; --text-muted:#9ca3af;
+    --border:#e5e7eb; --bg:#f4f6f8; --card-bg:#fff; --red:#dc2626;
+    --orange:#f97316; --orange-light:#fff7ed; --green:#16a34a; --green-light:#f0fdf4;
+    /* 増車（scale-out）用 */
+    --grp:#6366f1; --grp-bg:#eef2ff; --partner:#b45309; --partner-bg:#fffbeb;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Noto Sans JP','Inter',sans-serif; background:var(--bg); color:var(--text-primary); font-size:13px; padding:16px; }
+  .wrap { max-width:1180px; margin:0 auto; }
+  .mock-note { font-size:11px; color:var(--text-secondary); background:#fff; border:1px dashed var(--border); border-radius:8px; padding:8px 12px; margin-bottom:12px; line-height:1.6; }
+  .mock-note b { color:var(--sidebar-bg); }
+
+  /* ── ヘッダー / タブ ── */
+  .dispatch-header { background:var(--card-bg); border:1px solid var(--border); border-bottom:none; border-radius:10px 10px 0 0; padding:0 18px; display:flex; align-items:stretch; min-height:50px; }
+  .page-title { font-size:16px; font-weight:800; display:flex; align-items:center; }
+  .dispatch-tabs { display:flex; margin-left:16px; align-items:stretch; border-left:1px solid var(--border); }
+  .dispatch-tab { padding:0 20px; font-size:13px; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--text-secondary); border-bottom:3px solid transparent; border-top:3px solid transparent; border-right:1px solid var(--border); display:flex; align-items:center; gap:7px; }
+  .dispatch-tab.active { color:#1a7a5e; background:#eaf6f1; border-bottom-color:#1a7a5e; }
+  .tab-count { font-size:10px; font-weight:800; font-family:'Inter',sans-serif; padding:2px 8px; border-radius:20px; background:#e5e7eb; color:var(--text-secondary); }
+
+  /* サブタブ */
+  .dispatch-subtabs { display:flex; background:var(--card-bg); border-left:1px solid var(--border); border-right:1px solid var(--border); border-bottom:1px solid var(--border); padding:0 18px; }
+  .dispatch-subtab { padding:9px 16px; font-size:12px; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--text-muted); border-bottom:2px solid transparent; display:flex; align-items:center; gap:6px; }
+  .dispatch-subtab.active { color:#1a7a5e; border-bottom-color:#1a7a5e; }
+  .dnd-pill { font-size:9px; font-weight:800; font-family:'Inter',sans-serif; padding:1px 6px; border-radius:10px; background:var(--accent); color:#fff; }
+
+  /* ── 2ペインボード ── */
+  .dnd-wrap { display:flex; background:var(--bg); border-left:1px solid var(--border); border-right:1px solid var(--border); border-bottom:1px solid var(--border); border-radius:0 0 10px 10px; overflow:hidden; height:660px; }
+
+  /* 左：未割当案件リスト */
+  .dnd-left { width:316px; flex-shrink:0; background:var(--card-bg); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
+  .dnd-left-header { padding:12px 14px 8px; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .dnd-left-title { font-size:12px; font-weight:800; display:flex; align-items:center; gap:6px; }
+  .dnd-left-title-badge { background:var(--orange); color:#fff; font-size:10px; font-weight:800; padding:1px 7px; border-radius:10px; font-family:'Inter',sans-serif; }
+  .dnd-left-sub { font-size:10px; color:var(--text-muted); margin-top:3px; line-height:1.4; }
+  .dnd-filter-row { display:flex; gap:4px; margin-top:8px; }
+  .dnd-filter-chip { flex:1; padding:4px 6px; font-size:10px; font-weight:600; border:1px solid var(--border); border-radius:5px; cursor:pointer; background:#fff; color:var(--text-secondary); text-align:center; }
+  .dnd-filter-chip.active { background:var(--sidebar-bg); border-color:var(--sidebar-bg); color:#fff; }
+  .dnd-search-row { position:relative; margin-top:6px; }
+  .dnd-search-input { width:100%; padding:5px 10px 5px 10px; font-size:11px; border:1px solid var(--border); border-radius:5px; outline:none; font-family:inherit; }
+  .dnd-list { flex:1; overflow-y:auto; padding:8px 10px 16px; display:flex; flex-direction:column; gap:8px; }
+
+  /* 案件カード */
+  .dnd-card { background:#fff; border:1.5px solid var(--border); border-radius:8px; padding:9px 10px; cursor:grab; transition:all .15s; position:relative; }
+  .dnd-card:hover { border-color:var(--accent); box-shadow:0 2px 8px rgba(59,184,136,.15); transform:translateY(-1px); }
+  .dnd-card.assigned { opacity:.55; background:#f9fafb; border-style:dashed; cursor:default; }
+  .dnd-card.assigned:hover { transform:none; box-shadow:none; border-color:var(--border); }
+  .dnd-card-head { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:5px; }
+  .dnd-card-client { font-size:11px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+  .dnd-card-status { font-size:9px; font-weight:700; padding:1px 6px; border-radius:8px; flex-shrink:0; font-family:'Inter',sans-serif; }
+  .dnd-card-status.unprocessed { background:#fee2e2; color:#b91c1c; }
+  .dnd-card-status.processing { background:#fef3c7; color:#92400e; }
+  .dnd-card-route { font-size:10.5px; color:var(--text-secondary); display:flex; align-items:center; gap:5px; margin-bottom:3px; }
+  .dnd-card-goods { font-size:10px; color:var(--text-secondary); line-height:1.4; }
+
+  /* ── 増車：選択中カードの強調 ── */
+  .dnd-card.scaleout { border-color:var(--grp); }
+  .dnd-card.scaleout.sel { box-shadow:0 0 0 3px rgba(99,102,241,.18); border-color:var(--grp); }
+
+  /* 増車バッジ */
+  .dnd-card-scaleout-badge { display:inline-flex; align-items:center; gap:5px; margin-top:7px; font-size:9.5px; font-weight:800; color:#9a3412; background:var(--orange-light); border:1px solid #fed7aa; padding:3px 8px; border-radius:6px; }
+  .dnd-card-scaleout-badge .dot { width:6px; height:6px; border-radius:50%; background:var(--orange); }
+
+  /* 充足カウンタ＋プログレス */
+  .dnd-fulfill { margin-top:7px; }
+  .dnd-fulfill-row { display:flex; align-items:center; justify-content:space-between; font-size:9.5px; font-weight:700; color:var(--grp); margin-bottom:3px; }
+  .dnd-fulfill-row .full { color:var(--green); }
+  .dnd-fulfill-bar { height:5px; border-radius:3px; background:#e5e7eb; overflow:hidden; }
+  .dnd-fulfill-fill { height:100%; background:var(--grp); border-radius:3px; transition:width .4s ease; }
+  .dnd-card.done .dnd-fulfill-fill { background:var(--green); }
+
+  /* AI増車プラン（①②③スタック） */
+  .dnd-plan { margin-top:7px; background:var(--grp-bg); border:1px solid #c7cdfa; border-radius:7px; padding:6px; }
+  .dnd-plan-head { font-size:9px; font-weight:800; color:var(--grp); display:flex; align-items:center; gap:4px; margin-bottom:5px; }
+  .dnd-plan-row { display:flex; align-items:center; gap:6px; font-size:9.5px; padding:3px 4px; border-radius:5px; background:#fff; margin-bottom:3px; border:1px solid #e0e3f5; }
+  .dnd-plan-row:last-child { margin-bottom:0; }
+  .dnd-plan-tag { width:14px; height:14px; border-radius:3px; background:var(--grp); color:#fff; font-size:9px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .dnd-plan-row.partner .dnd-plan-tag { background:var(--partner); }
+  .dnd-plan-name { font-weight:700; color:var(--text-primary); }
+  .dnd-plan-meta { margin-left:auto; font-size:8.5px; color:var(--text-secondary); font-weight:600; }
+  .dnd-plan-state { font-size:8.5px; font-weight:800; flex-shrink:0; }
+  .dnd-plan-row .pending { color:var(--text-muted); }
+  .dnd-plan-row.assigned-leg { background:#ecfdf5; border-color:#a7f3d0; }
+  .dnd-plan-row.assigned-leg .dnd-plan-state { color:var(--green); }
+
+  /* ボタン */
+  .dnd-card-btns { display:flex; flex-direction:column; gap:5px; margin-top:8px; }
+  .dnd-btn-scaleout { width:100%; font-size:10.5px; font-weight:800; color:#fff; background:var(--grp); border:none; border-radius:6px; padding:7px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px; }
+  .dnd-btn-scaleout:hover { filter:brightness(1.08); }
+  .dnd-card.done .dnd-btn-scaleout { background:var(--green); }
+  .dnd-card-partner-btn { width:100%; font-size:9.5px; font-weight:700; color:var(--partner); background:var(--partner-bg); border:1px solid #fde68a; border-radius:6px; padding:5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px; }
+  .dnd-card-partner-btn svg { width:11px; height:11px; }
+
+  /* AI推奨（通常案件用、1件） */
+  .dnd-card-airec { display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-top:6px; padding:4px 6px; background:linear-gradient(135deg,#ecfdf5,#d1fae5); border:1px solid #a7f3d0; border-radius:6px; font-size:9px; }
+  .dnd-card-airec-label { font-weight:800; color:#047857; background:#fff; border:1px solid #6ee7b7; padding:1px 5px; border-radius:8px; }
+  .dnd-card-airec-target { font-weight:800; color:#065f46; }
+  .dnd-card-airec-time { color:#047857; font-family:'Inter',sans-serif; }
+  .dnd-card-assigned-info { font-size:9px; font-weight:700; color:var(--green); margin-top:5px; display:flex; align-items:center; gap:4px; }
+
+  /* スプリッター */
+  .dnd-splitter { width:6px; flex-shrink:0; background:transparent; position:relative; }
+  .dnd-splitter::before { content:''; position:absolute; top:0; bottom:0; left:2px; width:2px; background:var(--border); }
+
+  /* 右：タイムライン */
+  .dnd-right { flex:1; display:flex; flex-direction:column; background:var(--card-bg); overflow:hidden; min-width:0; }
+  .dnd-right-header { display:flex; align-items:center; gap:10px; padding:10px 16px; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .dnd-right-title { font-size:12px; font-weight:800; display:flex; align-items:center; gap:6px; }
+  .dnd-date-label { font-size:11px; font-weight:700; color:var(--text-secondary); }
+  .dnd-right-spacer { flex:1; }
+  .dnd-right-stats { display:flex; gap:6px; font-size:9px; }
+  .dnd-stat { display:flex; align-items:center; gap:3px; padding:3px 8px; background:#fff; border:1px solid var(--border); border-radius:5px; font-weight:600; color:var(--text-secondary); }
+  .dnd-stat-val { font-family:'Inter',sans-serif; font-weight:800; color:var(--text-primary); }
+  /* 充足率stat（新規） */
+  .dnd-stat.scaleout { background:var(--grp-bg); border-color:#c7cdfa; color:var(--grp); }
+  .dnd-stat.scaleout .dnd-stat-val { color:var(--grp); }
+  .dnd-timeline.done .dnd-stat.scaleout { background:var(--green-light); border-color:#a7f3d0; color:var(--green); }
+  .dnd-timeline.done .dnd-stat.scaleout .dnd-stat-val { color:var(--green); }
+
+  .dnd-timeline { flex:1; overflow:auto; padding:12px 18px 20px; }
+
+  /* タイムヘッダー */
+  .dnd-time-header { display:grid; grid-template-columns:172px 1fr; position:sticky; top:0; background:var(--card-bg); z-index:8; padding-bottom:6px; margin-bottom:6px; }
+  .dnd-time-header-label { font-size:10px; font-weight:700; color:var(--text-muted); padding:6px 10px; align-self:center; }
+  .dnd-time-ticks { position:relative; height:22px; border-bottom:1px solid var(--border); }
+  .dnd-time-tick { position:absolute; top:2px; transform:translateX(-50%); font-size:9px; font-weight:700; color:var(--text-muted); font-family:'Inter',sans-serif; }
+
+  /* セクション見出し */
+  .dnd-section-head { display:flex; align-items:center; gap:8px; padding:5px 4px; font-size:10px; font-weight:800; color:var(--text-secondary); margin:6px 0 4px; }
+  .dnd-section-head.partner { color:var(--partner); }
+  .dnd-section-head .pill { font-size:8.5px; font-weight:700; padding:1px 7px; border-radius:10px; background:#e5e7eb; color:var(--text-secondary); }
+  .dnd-section-head.partner .pill { background:#fde68a; color:#92400e; }
+
+  /* 行 */
+  .dnd-row { display:grid; grid-template-columns:172px 1fr; margin-bottom:4px; position:relative; }
+  .dnd-driver-cell { display:flex; flex-direction:column; justify-content:center; padding:4px 8px; background:#fafbfc; border:1px solid var(--border); border-right:none; border-radius:8px 0 0 8px; min-height:48px; gap:2px; }
+  .dnd-driver-line1 { display:flex; align-items:center; gap:6px; }
+  .dnd-driver-name { font-size:11px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dnd-driver-line2 { display:flex; align-items:center; gap:6px; }
+  .dnd-driver-status { font-size:9px; font-weight:700; display:inline-flex; align-items:center; gap:3px; }
+  .dnd-driver-status::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
+  .dnd-driver-status.available { color:var(--green); }
+  .dnd-driver-status.busy { color:var(--orange); }
+  .dnd-driver-capacity { font-size:9px; color:var(--text-muted); font-family:'Inter',sans-serif; }
+  .sched-base-badge { font-size:8px; font-weight:700; padding:1px 5px; border-radius:4px; background:#47556922; color:#475569; }
+  .sched-base-partner { background:#fde68a; color:#92400e; }
+
+  .dnd-track { position:relative; height:48px; background:repeating-linear-gradient(90deg, transparent, transparent calc(100%/24 - 1px), #eef0f3 calc(100%/24 - 1px), #eef0f3 calc(100%/24)), repeating-linear-gradient(90deg, transparent, transparent calc(100%/8 - 1px), #d1d5db calc(100%/8 - 1px), #d1d5db calc(100%/8)); background-color:#fbfcfd; border:1px solid var(--border); border-left:none; border-radius:0 8px 8px 0; }
+
+  /* 配車ブロック */
+  .dnd-block { position:absolute; top:3px; bottom:3px; border-radius:5px; display:flex; flex-direction:column; justify-content:center; padding:0 8px; overflow:hidden; cursor:grab; z-index:2; box-shadow:0 1px 3px rgba(0,0,0,.15); }
+  .dnd-block:hover { filter:brightness(1.06); }
+  .dnd-block-title { font-size:10px; font-weight:800; color:#fff; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative; z-index:2; display:flex; align-items:center; gap:4px; }
+  .dnd-block-sub { font-size:8.5px; color:rgba(255,255,255,.9); line-height:1.2; white-space:nowrap; position:relative; z-index:2; font-family:'Inter',sans-serif; }
+  .dnd-block-segments { position:absolute; inset:0; display:flex; border-radius:inherit; overflow:hidden; pointer-events:none; z-index:1; }
+  .dnd-block-seg { height:100%; }
+  .dnd-block-seg.seg-load { background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0) 0 4px, rgba(255,255,255,.35) 4px 8px); border-right:1px dashed rgba(255,255,255,.75); }
+  .dnd-block-seg.seg-unload { background-image:repeating-linear-gradient(-45deg, rgba(0,0,0,0) 0 4px, rgba(0,0,0,.22) 4px 8px); }
+
+  /* 増車グループのブロック */
+  .dnd-block.grp { background:var(--grp); }
+  .dnd-block.grp.partner { background-color:var(--partner); }
+  .dnd-block.grp.partner .dnd-block-segments { background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.22), rgba(255,255,255,.22) 4px, transparent 4px, transparent 8px); }
+  .dnd-grp-tag { width:14px; height:14px; border-radius:3px; background:#fff; color:var(--grp); font-size:9px; font-weight:900; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .dnd-block.grp.partner .dnd-grp-tag { color:var(--partner); }
+
+  /* 増車「これから埋める」便：通常は隠れていて一括配車で出現 */
+  .pending-block { display:none; }
+  .dnd-timeline.done .pending-block { display:flex; animation:dndPop .45s ease-out; }
+  @keyframes dndPop { 0%{transform:scale(.4);opacity:0} 60%{transform:scale(1.06);opacity:1} 100%{transform:scale(1)} }
+
+  /* AIおすすめ枠（ゴースト・index.html の dnd-rec-slot を踏襲） */
+  .dnd-rec-slot { position:absolute; top:4px; bottom:4px; border-radius:6px; pointer-events:none; z-index:9; border:2px dashed var(--accent); background:repeating-linear-gradient(45deg, rgba(59,184,136,.14), rgba(59,184,136,.14) 7px, rgba(59,184,136,.26) 7px, rgba(59,184,136,.26) 14px); box-shadow:0 0 0 2px rgba(255,255,255,.65), 0 4px 12px rgba(26,122,94,.28); display:none; animation:recPulse 1.25s ease-in-out infinite; }
+  .dnd-rec-slot.alt { border-color:var(--partner); background:repeating-linear-gradient(45deg, rgba(180,83,9,.12), rgba(180,83,9,.12) 7px, rgba(180,83,9,.24) 7px, rgba(180,83,9,.24) 14px); box-shadow:0 0 0 2px rgba(255,255,255,.65), 0 4px 12px rgba(180,83,9,.22); }
+  .dnd-timeline.sel:not(.done) .dnd-rec-slot { display:block; }
+  @keyframes recPulse { 0%,100%{opacity:1} 50%{opacity:.58} }
+  .dnd-rec-tag { position:absolute; left:50%; top:-18px; transform:translateX(-50%); font-size:9px; font-weight:800; color:#fff; background:var(--accent); padding:2px 8px; border-radius:5px; white-space:nowrap; font-family:'Inter','Noto Sans JP',sans-serif; box-shadow:0 2px 6px rgba(0,0,0,.22); }
+  .dnd-rec-slot.alt .dnd-rec-tag { background:var(--partner); }
+  .dnd-rec-tag::after { content:''; position:absolute; left:50%; bottom:-4px; transform:translateX(-50%); border-left:4px solid transparent; border-right:4px solid transparent; border-top:4px solid var(--accent); }
+  .dnd-rec-slot.alt .dnd-rec-tag::after { border-top-color:var(--partner); }
+
+  /* 推奨ドライバー行の見出し強調（index.html dnd-rec-target） */
+  .dnd-timeline.sel:not(.done) .dnd-row.rec-target .dnd-driver-cell { background:#eafaf3; border-color:var(--accent); box-shadow:inset 3px 0 0 0 var(--accent); }
+  .dnd-timeline.sel:not(.done) .dnd-row.rec-target.partner .dnd-driver-cell { background:#fff7ed; border-color:var(--partner); box-shadow:inset 3px 0 0 0 var(--partner); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="mock-note">
+    <b>配車割当タブ ― 増車対応UIモック（静的・2ペインD&D）</b><br>
+    左の <b>▲▲製作所</b>（増車必要・現在 <b>1/3台</b>）カードをクリックすると、右タイムラインにAI増車提案のゴースト枠（緑＝自社／橙＝協力会社）と推奨行ハイライトが出ます。
+    カード内の <b>「⊕ AI増車プランで一括配車」</b>を押すと、残り2便（②③）が一括着地し、充足カウンタが <b>3/3台</b> になります。<br>
+    ＝ <b>カードが充足するまで消えない</b>／<b>AI推奨が複数便を同時提示</b>／<b>一括 or 分割で配置</b> という増車の操作モデルを表現しています。
+  </div>
+
+  <!-- ヘッダー -->
+  <div class="dispatch-header">
+    <div class="page-title">配車計画表</div>
+    <div class="dispatch-tabs">
+      <button class="dispatch-tab active">計画中 <span class="tab-count">12</span></button>
+      <button class="dispatch-tab">請求確定済み <span class="tab-count">3</span></button>
+    </div>
+  </div>
+  <!-- サブタブ -->
+  <div class="dispatch-subtabs">
+    <button class="dispatch-subtab active">≡ 配車割当 <span class="dnd-pill">D&D</span></button>
+    <button class="dispatch-subtab">▦ 運行スケジュール</button>
+    <button class="dispatch-subtab">◎ 動態管理</button>
+    <button class="dispatch-subtab">💬 連絡状況</button>
+  </div>
+
+  <!-- 2ペイン -->
+  <div class="dnd-wrap">
+
+    <!-- 左：未割当案件 -->
+    <div class="dnd-left">
+      <div class="dnd-left-header">
+        <div class="dnd-left-title">✓ 未割当案件 <span class="dnd-left-title-badge">4</span></div>
+        <div class="dnd-left-sub">案件カードを右のトラックにドラッグ／増車案件はAI一括配車も可</div>
+        <div class="dnd-filter-row">
+          <div class="dnd-filter-chip active">すべて</div>
+          <div class="dnd-filter-chip">未処理・処理中</div>
+          <div class="dnd-filter-chip">処理済み</div>
+        </div>
+        <div class="dnd-search-row"><input class="dnd-search-input" placeholder="荷主名で検索（例：商事、食品）"></div>
+      </div>
+      <div class="dnd-list">
+
+        <!-- ① 増車案件（選択対象・1/3割当中） -->
+        <div class="dnd-card scaleout" id="caseA" onclick="selectCard()">
+          <div class="dnd-card-head">
+            <div class="dnd-card-client">▲▲製作所</div>
+            <div class="dnd-card-status processing">処理中</div>
+          </div>
+          <div class="dnd-card-route">📍 川口 → 仙台</div>
+          <div class="dnd-card-goods">精密機器 6,800kg</div>
+
+          <div class="dnd-card-scaleout-badge"><span class="dot"></span>⊕ 要3台（4t積載超過・不足2,800kg）</div>
+
+          <div class="dnd-fulfill">
+            <div class="dnd-fulfill-row" id="fulfillRow"><span>増車充足</span><span id="fulfillTxt">1 / 3台</span></div>
+            <div class="dnd-fulfill-bar"><div class="dnd-fulfill-fill" id="fulfillFill" style="width:33%"></div></div>
+          </div>
+
+          <div class="dnd-plan">
+            <div class="dnd-plan-head">🤖 AI増車プラン</div>
+            <div class="dnd-plan-row assigned-leg">
+              <span class="dnd-plan-tag">①</span><span class="dnd-plan-name">山田 (1245)</span>
+              <span class="dnd-plan-meta">自社 92pt</span><span class="dnd-plan-state">✓割当</span>
+            </div>
+            <div class="dnd-plan-row" id="planRow2">
+              <span class="dnd-plan-tag">②</span><span class="dnd-plan-name">佐藤 (2580)</span>
+              <span class="dnd-plan-meta">自社 88pt</span><span class="dnd-plan-state pending">未配置</span>
+            </div>
+            <div class="dnd-plan-row partner" id="planRow3">
+              <span class="dnd-plan-tag">③</span><span class="dnd-plan-name">北関東物流</span>
+              <span class="dnd-plan-meta">協力 傭車¥38k</span><span class="dnd-plan-state pending">未配置</span>
+            </div>
+          </div>
+
+          <div class="dnd-card-btns">
+            <button class="dnd-btn-scaleout" id="bulkBtn" onclick="event.stopPropagation();bulkAssign()">⊕ AI増車プランで一括配車</button>
+            <button class="dnd-card-partner-btn" onclick="event.stopPropagation();alert('協力会社モーダル（不足分の台数・車格でプリフィルタ）を開く想定')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              協力会社へ依頼（不足分のみ）
+            </button>
+          </div>
+        </div>
+
+        <!-- ② 通常案件（AI推奨1件） -->
+        <div class="dnd-card">
+          <div class="dnd-card-head">
+            <div class="dnd-card-client">関東物流</div>
+            <div class="dnd-card-status unprocessed">未処理</div>
+          </div>
+          <div class="dnd-card-route">📍 江東 → 千葉</div>
+          <div class="dnd-card-goods">パレット 12枚 / 1,800kg</div>
+          <div class="dnd-card-airec">
+            <span>🤖</span><span class="dnd-card-airec-label">AI推奨</span>
+            <span class="dnd-card-airec-target">鈴木 (1356)</span>
+            <span class="dnd-card-airec-time">14:00〜17:30</span>
+          </div>
+        </div>
+
+        <!-- ③ 別の増車案件（0/2台） -->
+        <div class="dnd-card scaleout">
+          <div class="dnd-card-head">
+            <div class="dnd-card-client">◇◇商店</div>
+            <div class="dnd-card-status unprocessed">未処理</div>
+          </div>
+          <div class="dnd-card-route">📍 さいたま → 名古屋</div>
+          <div class="dnd-card-goods">飲料 ケース多数 / 5,200kg</div>
+          <div class="dnd-card-scaleout-badge"><span class="dot"></span>⊕ 要2台（時間制約・1台では納期超過）</div>
+          <div class="dnd-fulfill">
+            <div class="dnd-fulfill-row"><span>増車充足</span><span>0 / 2台</span></div>
+            <div class="dnd-fulfill-bar"><div class="dnd-fulfill-fill" style="width:2%"></div></div>
+          </div>
+          <div class="dnd-card-btns">
+            <button class="dnd-btn-scaleout">⊕ AI増車プランで一括配車</button>
+          </div>
+        </div>
+
+        <!-- ④ 割当済み（薄表示） -->
+        <div class="dnd-card assigned">
+          <div class="dnd-card-head">
+            <div class="dnd-card-client">△△食品</div>
+            <div class="dnd-card-status processing">処理中</div>
+          </div>
+          <div class="dnd-card-route">📍 船橋 → 大田</div>
+          <div class="dnd-card-assigned-info">✓ 6/6(金) 高橋 五郎 08:00〜12:30</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- スプリッター -->
+    <div class="dnd-splitter"></div>
+
+    <!-- 右：タイムライン -->
+    <div class="dnd-right">
+      <div class="dnd-right-header">
+        <div class="dnd-right-title">🚚 トラック・ドライバー</div>
+        <div class="dnd-date-label">6月6日(金)</div>
+        <div class="dnd-right-spacer"></div>
+        <div class="dnd-right-stats">
+          <div class="dnd-stat">割当済 <span class="dnd-stat-val" id="statAssigned">3</span></div>
+          <div class="dnd-stat">稼働率 <span class="dnd-stat-val">58%</span></div>
+          <!-- 充足率stat（新規） -->
+          <div class="dnd-stat scaleout">⊕ 増車充足 <span class="dnd-stat-val" id="statFulfill">1/3台</span></div>
+        </div>
+      </div>
+
+      <div class="dnd-timeline" id="timeline">
+        <!-- タイムヘッダー -->
+        <div class="dnd-time-header">
+          <div class="dnd-time-header-label">ドライバー / 車両（7台）</div>
+          <div class="dnd-time-ticks">
+            <div class="dnd-time-tick" style="left:0%">0</div>
+            <div class="dnd-time-tick" style="left:25%">6:00</div>
+            <div class="dnd-time-tick" style="left:50%">12:00</div>
+            <div class="dnd-time-tick" style="left:75%">18:00</div>
+            <div class="dnd-time-tick" style="left:100%">24</div>
+          </div>
+        </div>
+
+        <!-- ─ 自社車両 ─ -->
+        <div class="dnd-section-head">自社車両 <span class="pill">5台</span></div>
+
+        <!-- 山田：増車① 配置済み -->
+        <div class="dnd-row">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1"><span class="dnd-driver-name">山田 一郎</span><span class="sched-base-badge">川口</span></div>
+            <div class="dnd-driver-line2"><span class="dnd-driver-status busy">運行中</span><span class="dnd-driver-capacity">1245 ・ 4t 4,000kg</span></div>
+          </div>
+          <div class="dnd-track">
+            <div class="dnd-block grp" style="left:33.33%;width:16.67%">
+              <div class="dnd-block-segments"><div class="dnd-block-seg seg-load" style="width:14%"></div><div class="dnd-block-seg seg-drive" style="width:72%"></div><div class="dnd-block-seg seg-unload" style="width:14%"></div></div>
+              <div class="dnd-block-title"><span class="dnd-grp-tag">①</span>▲▲製作所</div>
+              <div class="dnd-block-sub">川口→仙台 08:00-12:00</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 佐藤：増車② ゴースト→一括で配置 -->
+        <div class="dnd-row rec-target">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1"><span class="dnd-driver-name">佐藤 健太</span><span class="sched-base-badge">品川</span></div>
+            <div class="dnd-driver-line2"><span class="dnd-driver-status available">空車</span><span class="dnd-driver-capacity">2580 ・ 4t 4,000kg</span></div>
+          </div>
+          <div class="dnd-track">
+            <!-- ゴースト（選択時に表示） -->
+            <div class="dnd-rec-slot" style="left:35.42%;width:18.75%"><div class="dnd-rec-tag">推奨② 自社 88pt ・ 粗利¥18k</div></div>
+            <!-- 一括配車で出現する実ブロック -->
+            <div class="dnd-block grp pending-block" style="left:35.42%;width:16.67%">
+              <div class="dnd-block-segments"><div class="dnd-block-seg seg-load" style="width:14%"></div><div class="dnd-block-seg seg-drive" style="width:72%"></div><div class="dnd-block-seg seg-unload" style="width:14%"></div></div>
+              <div class="dnd-block-title"><span class="dnd-grp-tag">②</span>▲▲製作所</div>
+              <div class="dnd-block-sub">川口→仙台 08:30-12:30</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 鈴木：通常案件（緑） -->
+        <div class="dnd-row">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1"><span class="dnd-driver-name">鈴木 三郎</span><span class="sched-base-badge">川口</span></div>
+            <div class="dnd-driver-line2"><span class="dnd-driver-status busy">運行中</span><span class="dnd-driver-capacity">1356 ・ 2t 2,000kg</span></div>
+          </div>
+          <div class="dnd-track">
+            <div class="dnd-block" style="left:58.33%;width:14.58%;background:#1a7a5e">
+              <div class="dnd-block-segments"><div class="dnd-block-seg seg-load" style="width:14%"></div><div class="dnd-block-seg seg-drive" style="width:72%"></div><div class="dnd-block-seg seg-unload" style="width:14%"></div></div>
+              <div class="dnd-block-title">関東物流</div>
+              <div class="dnd-block-sub">江東→千葉 14:00-17:30</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中村：空き（代替候補） -->
+        <div class="dnd-row">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1"><span class="dnd-driver-name">中村 六太</span><span class="sched-base-badge">横浜</span></div>
+            <div class="dnd-driver-line2"><span class="dnd-driver-status available">空車</span><span class="dnd-driver-capacity">3312 ・ 4t 4,000kg</span></div>
+          </div>
+          <div class="dnd-track"></div>
+        </div>
+
+        <!-- 高橋：稼働中（別案件・△△食品） -->
+        <div class="dnd-row">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1"><span class="dnd-driver-name">高橋 五郎</span><span class="sched-base-badge">川口</span></div>
+            <div class="dnd-driver-line2"><span class="dnd-driver-status busy">運行中</span><span class="dnd-driver-capacity">2201 ・ 2t 2,000kg</span></div>
+          </div>
+          <div class="dnd-track">
+            <div class="dnd-block" style="left:33.33%;width:18.75%;background:#0f766e">
+              <div class="dnd-block-segments"><div class="dnd-block-seg seg-load" style="width:14%"></div><div class="dnd-block-seg seg-drive" style="width:72%"></div><div class="dnd-block-seg seg-unload" style="width:14%"></div></div>
+              <div class="dnd-block-title">△△食品</div>
+              <div class="dnd-block-sub">船橋→大田 08:00-12:30</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─ 増車枠（協力会社） ─ -->
+        <div class="dnd-section-head partner">⊕ 増車枠（協力会社 / スポット） <span class="pill">不足分のみ</span></div>
+
+        <!-- 北関東物流：増車③ ゴースト→一括で配置 -->
+        <div class="dnd-row rec-target partner">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1"><span class="dnd-driver-name">北関東物流</span><span class="sched-base-badge sched-base-partner">協力</span></div>
+            <div class="dnd-driver-line2"><span class="dnd-driver-status available">即時可</span><span class="dnd-driver-capacity">4tウィング ・ 傭車</span></div>
+          </div>
+          <div class="dnd-track">
+            <div class="dnd-rec-slot alt" style="left:37.5%;width:18.75%"><div class="dnd-rec-tag">推奨③ 協力 ・ 傭車¥38k ・ 粗利¥10k</div></div>
+            <div class="dnd-block grp partner pending-block" style="left:37.5%;width:16.67%">
+              <div class="dnd-block-segments"><div class="dnd-block-seg seg-load" style="width:14%"></div><div class="dnd-block-seg seg-drive" style="width:72%"></div><div class="dnd-block-seg seg-unload" style="width:14%"></div></div>
+              <div class="dnd-block-title"><span class="dnd-grp-tag">③</span>▲▲製作所（傭車）</div>
+              <div class="dnd-block-sub">川口→仙台 09:00-13:00</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 東海急送：別の協力候補（空き） -->
+        <div class="dnd-row">
+          <div class="dnd-driver-cell">
+            <div class="dnd-driver-line1"><span class="dnd-driver-name">東海急送</span><span class="sched-base-badge sched-base-partner">協力</span></div>
+            <div class="dnd-driver-line2"><span class="dnd-driver-status available">15時〜可</span><span class="dnd-driver-capacity">4tウィング ・ 傭車</span></div>
+          </div>
+          <div class="dnd-track"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="mock-note" style="margin-top:12px">
+    <b>このモックで使っている新規パーツ（すべて既存 dnd- クラスの拡張）</b><br>
+    ・<b>充足カウンタ</b>：<code>.dnd-fulfill</code>（1/3台＋プログレス）。1本ドロップしても<b>カードは消えない</b>のが要点<br>
+    ・<b>AI増車プラン</b>：<code>.dnd-plan</code> で <code>.dnd-card-airec</code>（従来1件）を①②③のスタックに拡張<br>
+    ・<b>一括配車</b>：<code>.dnd-btn-scaleout</code>（<code>applyScaleOutPlan()</code> 呼び出し想定）／分割ドラッグも併存<br>
+    ・<b>AI増車ゴースト</b>：<code>.dnd-rec-slot</code>＋<code>.rec-target</code>（index.html のものを<b>複数本同時</b>表示）<br>
+    ・<b>増車枠（協力会社）</b>：タイムライン下部の <code>.dnd-section-head.partner</code> 区間＋協力会社トラック<br>
+    ・<b>充足率stat</b>：<code>.dnd-stat.scaleout</code>（割当済／稼働率の隣に追加）<br>
+    ・<b>便番号タグ</b>：<code>.dnd-grp-tag</code>（①②③・運行スケジュールと同色で連動）
+  </div>
+
+</div>
+
+<script>
+  var selected = false, done = false;
+  var tl = document.getElementById('timeline');
+  var card = document.getElementById('caseA');
+
+  function selectCard() {
+    if (done) return;
+    selected = !selected;
+    tl.classList.toggle('sel', selected);
+    card.classList.toggle('sel', selected);
+  }
+
+  function bulkAssign() {
+    if (done) return;
+    done = true; selected = true;
+    tl.classList.add('sel', 'done');           // done: ゴースト消し→実ブロック出現
+    card.classList.add('sel', 'done');
+    // 充足カウンタ更新
+    document.getElementById('fulfillTxt').textContent = '3 / 3台 完了';
+    document.getElementById('fulfillTxt').classList.add('full');
+    document.getElementById('fulfillFill').style.width = '100%';
+    document.getElementById('statFulfill').textContent = '3/3台';
+    document.getElementById('statAssigned').textContent = '5';
+    // プランの②③を割当済みに
+    ['planRow2','planRow3'].forEach(function(id){
+      var r = document.getElementById(id);
+      r.classList.add('assigned-leg');
+      var s = r.querySelector('.dnd-plan-state');
+      s.textContent = '✓割当'; s.classList.remove('pending');
+    });
+    // ボタン文言
+    document.getElementById('bulkBtn').textContent = '✓ 3台で配車確定（粗利 ¥22,000 / 18%）';
+  }
+</script>
+</body>
+</html>
