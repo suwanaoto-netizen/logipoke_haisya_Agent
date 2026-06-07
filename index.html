@@ -10,6 +10,9 @@
 <!-- 理想7層データモデル（SSoT）。ローカル同梱なのでオフラインでも読み込める。
      本体マスタの一部（拠点 bases）はこの window.LogipokeDB から derive する（C1: 縦串） -->
 <script src="assets/logipoke-data-model.js"></script>
+<!-- 増車（scale-out）判定エンジン。docs/scale-out-judgement.md / assets/logipoke-scaleout.js。
+     window.LogipokeScaleOut.evaluateScaleOut(order, deps, config) を提供（純ロジック・決定的）。 -->
+<script src="assets/logipoke-scaleout.js"></script>
 <script>
 /* SSoT由来 derive 共通ヘルパー: derive結果が seed と lossless(JSON一致)なら採用、違えば seed にフォールバック。
    本体は常に正しいデータ（最悪 seed）を使い、lossless 性は migration/verify_model.mjs が判定する。 */
@@ -591,6 +594,14 @@ function _ssotDerive(seed, build){
   .case-meta { display: flex; gap: 8px; flex-wrap: wrap; }
   .case-meta-item { font-size: 10px; color: var(--text-muted); display: flex; align-items: center; gap: 3px; }
   .case-actions-mini { display: flex; gap: 6px; margin-top: 8px; }
+
+  /* ━━ 増車（scale-out）判定バッジ：グリーン基調・既存トークンのみ（docs/scale-out-judgement.md §9.2） ━━ */
+  .scaleout-badge { display:inline-flex; align-items:center; gap:5px; margin-top:7px; font-size:10px; font-weight:800; padding:3px 9px; border-radius:6px; }
+  .scaleout-badge .dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .so-required    { color:#9a3412; background:#fff7ed; border:1px solid #fed7aa; } .so-required .dot { background:#f97316; }   /* 要対応＝既存オレンジ */
+  .so-recommended { color:#0D4A3A; background:#EAF5F0; border:1px solid #b6e6d3; } .so-recommended .dot { background:#3BB888; } /* 推奨＝グリーン */
+  .so-negotiate   { color:#92400e; background:#fffbeb; border:1px solid #fde68a; } .so-negotiate .dot { background:#d97706; }  /* 要交渉＝アンバー */
+  .so-review      { color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; } .so-review .dot { background:#94a3b8; }    /* 要確認＝グレー */
 
   .btn { 
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -12249,7 +12260,7 @@ const unprocessedCases = [
     casePattern: '特殊条件案件',
     vehicles:[ {rank:1,id:'車両0887',driver:'田中 四郎',base:'船橋市',avail:'空車',cap:'1,000kg',stars:4,score:78} ]
   },
-  { id:'20240524003', status:'未解析', client:'株式会社□□製作所', from:'茨城県つくば市', to:'愛知県名古屋市', goods:'機械部品 / 1200kg / 常温', deadline:'05/25 終日', ch:'tel', time:'09:42', analyzed:false,
+  { id:'20240524003', status:'未解析', client:'株式会社□□製作所', from:'茨城県つくば市', to:'愛知県名古屋市', goods:'機械部品 / 7,200kg / 常温', deadline:'05/25 終日', ch:'tel', time:'09:42', analyzed:false,
     casePattern: 'チャーター案件',
     vehicles:[]
   },
@@ -13658,6 +13669,54 @@ function setChFilter(ch) {
   renderUnprocessedList();
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  増車（scale-out）判定アダプタ ― 既存case → 判定エンジン
+//  PR2: 個別案件処理カードに verdict バッジを反映（最小の縦串）。
+//  本体データの薄い項目（時間超過/採算/空き）はこのPRでは未注入＝安全側。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function getCaseScaleOut(c) {
+  if (!c || typeof LogipokeScaleOut === 'undefined') return { verdict: 'none', reasons: [] };
+  const order = {
+    goods: c.goods, deadline: c.deadline,
+    vehicle: c.vehicle || (c.aiResult && c.aiResult.vehicle),
+    vehicles: c.vehicles, casePattern: c.casePattern, priority: c.priority,
+    aiResult: c.aiResult
+  };
+  const deps = {
+    // 最適1台の最大積載：AI推奨車格・候補車両・割当車格の最大（最大の適合車で判定）
+    maxSingleLoadKg: function () {
+      const caps = [];
+      const av = LogipokeScaleOut.capLabelToKg(c.aiResult && c.aiResult.vehicle); if (av) caps.push(av);
+      (c.vehicles || []).forEach(function (v) { const x = LogipokeScaleOut.capLabelToKg(v.cap); if (x) caps.push(x); });
+      const vv = LogipokeScaleOut.capLabelToKg(c.vehicle); if (vv) caps.push(vv);
+      return caps.length ? Math.max.apply(null, caps) : null;
+    }
+  };
+  try { return LogipokeScaleOut.evaluateScaleOut(order, deps, (window.SCALEOUT_CONFIG || {})); }
+  catch (e) { return { verdict: 'none', reasons: [] }; }
+}
+
+// verdict → カードに差し込む増車バッジHTML（none は空文字）
+function scaleOutBadgeHtml(c) {
+  const v = getCaseScaleOut(c);
+  if (!v || v.verdict === 'none') return '';
+  const d = v.deficit || {};
+  const detail =
+    v.verdict === 'required'
+      ? (d.weightKg ? '（不足' + d.weightKg.toLocaleString() + 'kg）' : (d.minutes ? '（納期' + d.minutes + '分超過）' : (d.vehicles ? '（' + d.vehicles + '台）' : '')))
+      : v.verdict === 'recommended'
+        ? (v.score ? '（' + v.score + '点）' : '')
+        : '';
+  const map = {
+    required:    { cls: 'so-required',    txt: '⊕ 増車必要' + detail },
+    recommended: { cls: 'so-recommended', txt: '⊕ 増車推奨' + detail },
+    negotiate:   { cls: 'so-negotiate',   txt: '⚠ 要交渉（手配困難）' },
+    review:      { cls: 'so-review',      txt: '要確認（情報不足）' }
+  };
+  const m = map[v.verdict]; if (!m) return '';
+  return '<div class="scaleout-badge ' + m.cls + '"><span class="dot"></span>' + m.txt + '</div>';
+}
+
 function renderUnprocessedList() {
   const el = document.getElementById('unprocessed-list');
   let filtered = holdFilterUnprocessed ? unprocessedCases.filter(c => c.onHold) : unprocessedCases;
@@ -13719,6 +13778,7 @@ function renderUnprocessedList() {
         + '<div class="case-meta-item">📦 ' + c.goods + '</div>'
         + '<div class="case-meta-item">🕐 納品：' + c.deadline + '</div>'
       + '</div>'
+      + scaleOutBadgeHtml(c)
       + '<div class="case-actions-mini">'
         + actionBtn
         + '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();selectUnprocessed(\'' + cid + '\')">確認・編集</button>'
@@ -14234,6 +14294,7 @@ function renderProcessingList() {
         + '<div class="case-meta-item">🚛 ' + (c.vehicleMode==='multi' && c.legs && c.legs.length>0 ? c.legs.map(l=>l.driverName).join(' / ') + ' <span class="multi-badge">複数台 '+c.legs.length+'台</span>' : c.driver) + '</div>'
         + '<div class="case-meta-item">📅 納期：' + c.deadline + '</div>'
       + '</div>'
+      + scaleOutBadgeHtml(c)
       + '<div class="case-actions-mini">'
         + '<button class="btn btn-orange btn-sm" onclick="event.stopPropagation();openConfirmModal(' + i + ')">確定（ドライバーへ指示）</button>'
       + '</div>'

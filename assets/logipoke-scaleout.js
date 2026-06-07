@@ -167,7 +167,8 @@
     var strict = order.timeStrict != null ? !!order.timeStrict : isStrictDeadline(order.deadline);
 
     // ── G1 review（情報不足は必須化しない・誤手配防止） ──
-    if (conf === 'low' || !reqKg || reqKg <= 0) {
+    // conf は 'low' / '低' / '低信頼度' 等を低信頼度として扱う（日英・和表記対応）。
+    if (/low|低/i.test(String(conf)) || !reqKg || reqKg <= 0) {
       return mk('review', [{ type: 'info', detail: '荷量/時間が不明（信頼度low）' }]);
     }
 
