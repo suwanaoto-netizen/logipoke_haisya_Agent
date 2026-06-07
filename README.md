@@ -76,6 +76,13 @@ SSoT 未接続のままでした）。
   `reassignVehicle` をフラグON時に**SSoTへ書込→`toAssignments` でフラット層を再導出**（フラット層を
   派生に降格）。I6 積載量は車両マスタ参照のためアプリ層に残置（deep-dive §2）。失敗時はレガシーへ縮退。
   `verify_operation.mjs`（計19件）で I1/I2 検出・書込後の射影・非重複時OK を検証。
+- ✅ **運行層SSoT を既定ON化（課題C6・第6段）**: `window.__useOperationSSoT` を**既定 `true`** に変更。
+  jsdom（実機相当）で `index.html` を読み込み、フラグON経路を実データで検証済み——LogipokeDB ロード、
+  中継読取ビュー（品川→名古屋→大阪の2区間）、`assignments` のロスレス往復（件数一致＋全件値一致）、
+  `validateAssignment`(I1/I2 SSoT)、`renderSchedule`(assignmentView)/`renderDnd`/`_ssotValidateRelay` の
+  **無例外実行**を確認（全8項目パス・fatal 0）。読取＝SSoT派生・書込検証＝SSoT権威が**既定で有効**。
+  万一に備え、各ブリッジは失敗時レガシーへフォールバックし、`window.__useOperationSSoT=false;` で
+  従来挙動へ即時復帰できる。以降の各段の「既定OFF」記述は導入時点の値で、現行の既定はON。
 - ✅ **運行層SSoT 書込側の完結（課題C6・第5段）**: 残る書込経路の不変条件もSSoT権威下へ。
   (1) **中継編集**（`addRelayLeg` / `removeRelayLeg` / `updateRelayLeg` / `setRelayLegVehicle` → `c.legs`）に
   `LogipokeDB.validateRelayLegs`（I9 引き継ぎ連続性／同一ドライバーの時間重複）を接続し、編集のたびに

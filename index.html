@@ -12805,12 +12805,15 @@ window.customerAffinity = function (vehicleId, clientName, _deps) {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  運行層SSoT 描画ブリッジ（課題C6・第2段：読取専用ビューの切替）
-//  読取専用の投影（DnD盤の中継行など）を SSoT 派生に切替えるフラグ。既定OFFで従来描画を維持。
-//  ONにすると c.legs を LogipokeDB.ingestCaseLegs → toCaseTimeline 経由で再構成して描画する。
-//  ※書込先は引き続き c.legs（中継編集UI）。ここで差し替えるのは読取専用ビューのみ。
-//  ※派生失敗時は必ず c.legs にフォールバック（描画は決して壊さない）。
+//  読取専用の投影（DnD盤の中継行など）を SSoT 派生に、書込の不変条件判定を SSoT 権威に切替えるフラグ。
+//  ONにすると c.legs を LogipokeDB.ingestCaseLegs → toCaseTimeline 経由で再構成して描画し、
+//  assignments の I1/I2 検証・中継編集の I9 検証を正規化SSoTで行う。
+//  ※書込面（中継編集UI c.legs / リッチな assignments レコード）は据え置き。差し替えるのは読取投影と検証経路のみ。
+//  ※派生/検証失敗時は必ずレガシーにフォールバック（描画は決して壊さない）。
+//  ※既定ON（jsdom実機相当でロスレス往復・全描画経路の無例外を検証済み）。無効化は事前に
+//    window.__useOperationSSoT=false; を設定すれば従来挙動に戻せる。
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-window.__useOperationSSoT = window.__useOperationSSoT || false;
+if (typeof window.__useOperationSSoT === 'undefined') window.__useOperationSSoT = true;
 function deriveRelayLegsView(c) {
   if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined' || !c) return (c && c.legs) || [];
   try {
