@@ -294,6 +294,41 @@ check('書込：重ならない時間帯への差し替えは衝突なし', () =
   assert.equal(r.ok, true);
 });
 
+// ── 中継編集(c.legs)の書込検証 I9/ドライバー重複（第5段 / e） ──
+check('中継検証：連続かつ別ドライバーなら ok', () => {
+  const r = DB.validateRelayLegs(relayCase.legs);
+  assert.equal(r.ok, true);
+  assert.equal(r.issues.length, 0);
+});
+
+check('中継検証 I9：引き継ぎ地点が不連続なら handoff_gap を検出', () => {
+  const broken = [
+    Object.assign({}, relayCase.legs[0], { relayTo: '愛知県名古屋市' }),
+    Object.assign({}, relayCase.legs[1], { relayFrom: '岐阜県岐阜市' }) // 前区間の着と不一致
+  ];
+  const r = DB.validateRelayLegs(broken);
+  assert.equal(r.ok, false);
+  assert.equal(r.issues[0].type, 'handoff_gap');
+});
+
+check('中継検証：同一ドライバーが時間重複する2区間なら driver_overlap', () => {
+  const dup = [
+    { legNo: 1, driverName: '松本 十郎', relayFrom: 'A', relayTo: 'B', startTime: '06:00', endTime: '12:00' },
+    { legNo: 2, driverName: '松本 十郎', relayFrom: 'B', relayTo: 'C', startTime: '10:00', endTime: '14:00' }
+  ];
+  const r = DB.validateRelayLegs(dup);
+  assert.equal(r.ok, false);
+  assert.ok(r.issues.some(x => x.type === 'driver_overlap'));
+});
+
+check('中継検証：別ドライバーなら時間が重なっても ok（中継の正常形）', () => {
+  const ok = [
+    { legNo: 1, driverName: '松本 十郎', relayFrom: 'A', relayTo: 'B', startTime: '06:00', endTime: '10:30' },
+    { legNo: 2, driverName: '山田 一郎', relayFrom: 'B', relayTo: 'C', startTime: '10:00', endTime: '14:30' }
+  ];
+  assert.equal(DB.validateRelayLegs(ok).ok, true);
+});
+
 check('決定性：同一案件を2回取込んでも同一タイムライン', () => {
   function build() {
     DB.resetSeq();

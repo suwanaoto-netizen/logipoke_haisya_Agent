@@ -12848,6 +12848,25 @@ function deriveAssignmentsView(tab) {
 }
 window.deriveAssignmentsView = deriveAssignmentsView;
 
+// 中継編集(c.legs)の書込検証を 正規化SSoT に委譲（課題C6・第5段）。書込面 c.legs は据え置き、
+// I9（引き継ぎ連続性）・同一ドライバーの時間重複を SSoT(validateRelayLegs) で判定しUIへ提示。
+// フラグON時のみ。これで残る書込経路（中継編集）の不変条件もSSoT権威下に入る。
+function _ssotValidateRelay(c) {
+  if (!window.__useOperationSSoT || typeof LogipokeDB === 'undefined'
+      || !c || c.vehicleMode !== 'relay' || !LogipokeDB.validateRelayLegs) return;
+  try {
+    const r = LogipokeDB.validateRelayLegs(c.legs || []);
+    if (!r.ok && typeof showToast === 'function') {
+      const f = r.issues[0];
+      const msg = f.type === 'handoff_gap'
+        ? '中継の引き継ぎ地点が不連続です（区間' + f.seq + '：' + f.detail + '）'
+        : '同一ドライバーが時間重複する区間を担当しています（' + f.detail + '）';
+      showToast('⚠ ' + msg, 'warn');
+    }
+  } catch (e) { /* 検証失敗は黙ってスキップ（描画は壊さない） */ }
+}
+window._ssotValidateRelay = _ssotValidateRelay;
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  ページ・フェーズ切替
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -16880,6 +16899,7 @@ function addRelayLeg(caseIdx) {
   if (lastLeg) {
     lastLeg.relayTo = lastLeg.relayTo === c.to ? '中継地点（未設定）' : lastLeg.relayTo;
   }
+  _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
 
@@ -16893,6 +16913,7 @@ function removeRelayLeg(caseIdx, legIdx) {
   c.legs.splice(legIdx, 1);
   // legNo を振り直し
   c.legs.forEach((l, i) => l.legNo = i + 1);
+  _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
 
@@ -16908,6 +16929,7 @@ function updateRelayLeg(caseIdx, legIdx, field, value) {
   } else if (field === 'relayFrom' && legIdx > 0) {
     c.legs[legIdx - 1].relayTo = value;
   }
+  _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
 
@@ -16923,6 +16945,7 @@ function setRelayLegVehicle(caseIdx, legIdx, vehicleIdx) {
   leg.driverName = v.driver;
   leg.capacity = v.cap;
   leg.lawOk = v.law ? v.law.items.every(it=>it.ok) : true;
+  _ssotValidateRelay(c);
   renderProcessingDetail(caseIdx);
 }
 
@@ -20723,45 +20746,17 @@ function validateAssignment(target) {
   };
 }
 
-// 書込先SSoT化（課題C6・第4段）：フラグON時、差し替えは 正規化SSoT へ適用し、
-// フラット層 assignments[] を SSoT から再導出（フラット層を派生に降格）。失敗時はレガシーへ縮退。
-// I6 積載量は反映後の対象でアプリ層チェックを補完（reassignLeg は I1/I2 のみ）。
-function _reassignViaSSoT(assignmentId, change) {
-  LogipokeDB.resetSeq();
-  const db = LogipokeDB.createDB();
-  LogipokeDB.ingestAssignments(db, assignments);
-  const r = LogipokeDB.reassignLeg(db, assignmentId, change);
-  if (r.reason) return { ok: false, reason: r.reason };
-  const round = LogipokeDB.toAssignments(db);            // SSoT → フラット層へ射影
-  assignments.length = 0; round.forEach(a => assignments.push(a));
-  rebuildAssignmentIndex();
-  const tgt = getAssignmentById(assignmentId);
-  const validation = {
-    ok: r.ok, conflicts: {
-      driver: r.conflicts.driver.map(id => getAssignmentById(id)).filter(Boolean),
-      vehicle: r.conflicts.vehicle.map(id => getAssignmentById(id)).filter(Boolean),
-      capacity: null, license: null
-    }
-  };
-  // I6（積載量）はアプリ層で補完
-  const v = tgt && getVehicleById(tgt.vehicleId);
-  if (v && tgt.goods) { const m = String(tgt.goods).match(/([\d,]+)\s*kg/);
-    if (m) { const kg = parseInt(m[1].replace(/,/g, ''), 10); if (kg > v.maxLoad) { validation.capacity = { needed: kg, max: v.maxLoad }; validation.ok = false; } } }
-  return { ok: true, validation };
-}
-// 更新系API：ドライバーだけ差し替え / 車両だけ差し替え / 両方
+// 更新系API：ドライバーだけ差し替え / 車両だけ差し替え。
+// 不変条件 I1/I2 の判定は validateAssignment（フラグON時に正規化SSoTへ委譲済み）が権威。
+// 変更はリッチな assignments[] レコードに in-place 適用し、拡張フィールド
+// （effectiveBaseId/crossBase/ownerId/caseIds 等）を保持する（ロスレス）。
 function reassignDriver(assignmentId, newDriverId) {
   const a = getAssignmentById(assignmentId);
   if (!a) return { ok: false, reason: 'assignment not found' };
   if (!getDriverById(newDriverId)) return { ok: false, reason: 'driver not found' };
   const before = a.driverId;
-  if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined') {
-    try { const s = _reassignViaSSoT(assignmentId, { driverId: newDriverId });
-      if (s.ok) return { ok: true, before, after: newDriverId, validation: s.validation, via: 'ssot' };
-    } catch (e) { /* レガシーへ縮退 */ }
-  }
   a.driverId = newDriverId;
-  const r = validateAssignment(a);
+  const r = validateAssignment(a);   // I1/I2 は SSoT 権威（__useOperationSSoT ON時）
   rebuildAssignmentIndex();
   return { ok: true, before, after: newDriverId, validation: r };
 }
@@ -20770,13 +20765,8 @@ function reassignVehicle(assignmentId, newVehicleId) {
   if (!a) return { ok: false, reason: 'assignment not found' };
   if (!getVehicleById(newVehicleId)) return { ok: false, reason: 'vehicle not found' };
   const before = a.vehicleId;
-  if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined') {
-    try { const s = _reassignViaSSoT(assignmentId, { vehicleId: newVehicleId });
-      if (s.ok) return { ok: true, before, after: newVehicleId, validation: s.validation, via: 'ssot' };
-    } catch (e) { /* レガシーへ縮退 */ }
-  }
   a.vehicleId = newVehicleId;
-  const r = validateAssignment(a);
+  const r = validateAssignment(a);   // I1/I2 は SSoT 権威（__useOperationSSoT ON時）
   rebuildAssignmentIndex();
   return { ok: true, before, after: newVehicleId, validation: r };
 }
@@ -21242,7 +21232,7 @@ window.__notifyDndChange = function(action) {
       crossBase = true;
     }
     const ownerId = masterD ? masterD.defaultOwnerId : null;
-    assignments.push({
+    const _added = {
       id: _newAssignmentId(),
       tab: 'planning',
       date: action.dateKey || '2026-05-27',
@@ -21264,8 +21254,16 @@ window.__notifyDndChange = function(action) {
       relatedReturnId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    });
+    };
+    assignments.push(_added);
     rebuildAssignmentIndex();
+    // 課題C6・第5段：D&D配車も書込時点で SSoT 不変条件(I1/I2)を判定（非ブロッキング・フラグON時）。
+    if (window.__useOperationSSoT) {
+      try { const vr = validateAssignment(_added);
+        if (vr && !vr.ok && (vr.conflicts.driver.length || vr.conflicts.vehicle.length))
+          console.warn('[SSoT] D&D配車に時間重複の可能性', { driver: vr.conflicts.driver.length, vehicle: vr.conflicts.vehicle.length });
+      } catch (e) { /* 検証失敗は無視 */ }
+    }
   }
 
   else if (action.type === 'remove') {

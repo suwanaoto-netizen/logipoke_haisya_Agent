@@ -76,12 +76,21 @@ SSoT 未接続のままでした）。
   `reassignVehicle` をフラグON時に**SSoTへ書込→`toAssignments` でフラット層を再導出**（フラット層を
   派生に降格）。I6 積載量は車両マスタ参照のためアプリ層に残置（deep-dive §2）。失敗時はレガシーへ縮退。
   `verify_operation.mjs`（計19件）で I1/I2 検出・書込後の射影・非重複時OK を検証。
+- ✅ **運行層SSoT 書込側の完結（課題C6・第5段）**: 残る書込経路の不変条件もSSoT権威下へ。
+  (1) **中継編集**（`addRelayLeg` / `removeRelayLeg` / `updateRelayLeg` / `setRelayLegVehicle` → `c.legs`）に
+  `LogipokeDB.validateRelayLegs`（I9 引き継ぎ連続性／同一ドライバーの時間重複）を接続し、編集のたびに
+  SSoT検証して不整合をUI提示。(2) **D&D配車**（`dndTrackDrop` → `__notifyDndChange` → `assignments[]`）は
+  追加時点で SSoT 委譲済みの `validateAssignment`（I1/I2）を通すよう接続。あわせて第4段の `reassign*` を
+  **ロスレス化**（`toAssignments` 全置換をやめ、`assignments[]` の拡張フィールド
+  effectiveBaseId/crossBase/ownerId/caseIds を保持したまま in-place 変更＋SSoT検証）。
+  これで **reassign / D&D / 中継編集 の全書込経路で不変条件が正規化SSoTに集約**された
+  （`verify_operation.mjs` 計23件）。書込面（リッチな編集レコード）は据え置き＝SSoTが「不変条件の権威」。
 - 🔜 **本体ではまだ未接続（順次対応）**: 他マスタ（取引先 / 協力会社 / ユーザー / 定期便）、
   受付（旧 `logipoke_ai_intake_queue` → `logipoke_db_receptions_v1` 未切替）、案件4分割
-  （`unprocessed` / `processing` / `processed`）。運行層の書込は `reassign*` を SSoT 権威化したが、
-  **DnDのドラッグ&ドロップ（`dndTrackDrop` / `dndAssignments`）と中継編集（`renderRelayList` → `c.legs`）の
-  書込**はまだレガシー直書きで、これらを `reassignLeg` 同様にSSoT経由へ寄せれば書込側の一本化が完了する。
-  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
+  （`unprocessed` / `processing` / `processed`）。運行層は**読取＝SSoT派生・書込検証＝SSoT権威**まで到達。
+  残るは「正規化モデルが拡張フィールドまで吸収し**唯一の物理ストア**になる」完全インバージョン（現状は
+  リッチなレガシーレコードを編集面に残す折衷）と、上記マスタ/受付/案件層の接続。`vehicleMasterData` は
+  固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

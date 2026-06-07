@@ -503,6 +503,31 @@
     return { ok: conflicts.driver.length === 0 && conflicts.vehicle.length === 0, conflicts: conflicts, legId: legId };
   }
 
+  // 中継編集(c.legs)の書込検証：I9（引き継ぎ連続性＝前区間の着=次区間の発）と、
+  // 同一ドライバーが時間重複する2区間を担当（I1相当）を検出。書込面 c.legs はそのまま、
+  // この検証を権威にしてUIへ不整合を提示する（書込側の不変条件をSSoT層に集約）。
+  function validateRelayLegs(legs) {
+    legs = legs || [];
+    var issues = [];
+    for (var i = 0; i < legs.length - 1; i++) {
+      var cur = legs[i], nxt = legs[i + 1];
+      if (cur.relayTo && nxt.relayFrom && String(cur.relayTo) !== String(nxt.relayFrom)) {
+        issues.push({ type: 'handoff_gap', seq: cur.legNo || (i + 1), detail: cur.relayTo + ' ≠ ' + nxt.relayFrom });
+      }
+    }
+    for (var a = 0; a < legs.length; a++) {
+      for (var b = a + 1; b < legs.length; b++) {
+        var la = legs[a], lb = legs[b];
+        if (!la.driverName || la.driverName !== lb.driverName) continue;
+        var s1 = _hhmmMin(la.startTime), e1 = _hhmmMin(la.endTime);
+        var s2 = _hhmmMin(lb.startTime), e2 = _hhmmMin(lb.endTime);
+        if (s1 == null || e1 == null || s2 == null || e2 == null) continue;
+        if (s1 < e2 && s2 < e1) issues.push({ type: 'driver_overlap', detail: la.driverName });
+      }
+    }
+    return { ok: issues.length === 0, issues: issues };
+  }
+
   /* ───────────────────────── 公開API ─────────────────────────────────────── */
   return {
     // helpers / value objects
@@ -524,6 +549,8 @@
     // ④ operation：旧 assignments[]（ガント/DnD正準層）の SSoT ロスレス往復（課題C6・第3段）
     ingestAssignments: ingestAssignments, toAssignments: toAssignments,
     // ④ operation：書込先SSoT化＋不変条件 I1/I2 の強制（課題C6・第4段）
-    checkLegConflicts: checkLegConflicts, reassignLeg: reassignLeg
+    checkLegConflicts: checkLegConflicts, reassignLeg: reassignLeg,
+    // ④ operation：中継編集(c.legs)の書込検証 I9/ドライバー重複（課題C6・第5段）
+    validateRelayLegs: validateRelayLegs
   };
 });
