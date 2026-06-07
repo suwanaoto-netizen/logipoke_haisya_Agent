@@ -12363,9 +12363,17 @@ function calcAIScoreBreakdown(vehicleId, caseObj, vehicle) {
   const SO = window.LogipokeScaleOut;
 
   // ① 距離効率：候補拠点→集荷地の回送(空車)距離が短いほど高い（50km毎に約30点減）
+  // 第2段：拠点ID解決→拠点間距離マスタ(getBaseDistance)を優先し、解決不能時のみ estimateDistance に縮退。
   let distance = fb.distance;
-  const deadheadKm = (typeof estimateDistance === 'function' && vehicle.base && caseObj.from)
-    ? estimateDistance(vehicle.base, caseObj.from) : null;
+  let deadheadKm = null;
+  if (typeof window.resolveBaseIdByAlias === 'function' && typeof getBaseDistance === 'function') {
+    const vBaseId = window.resolveBaseIdByAlias(vehicle.base);
+    const cBaseId = window.resolveBaseIdByAlias(caseObj.from);
+    if (vBaseId && cBaseId) { const d = getBaseDistance(vBaseId, cBaseId); if (d != null) deadheadKm = d; }
+  }
+  if (deadheadKm == null && typeof estimateDistance === 'function' && vehicle.base && caseObj.from) {
+    deadheadKm = estimateDistance(vehicle.base, caseObj.from);
+  }
   if (deadheadKm != null) distance = clampScore(100 - deadheadKm * 0.6);
 
   // ② 積載量適合度：積載率を 0.85 頂点の山型で評価。容量不足は0（＝増車判定の対象）
@@ -12746,6 +12754,54 @@ const processedCases = [
     billingConfirmed: true, billingConfirmedAt: '2024/05/24 18:30', billingConfirmedBy: '配車 太郎'
   },
 ];
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  顧客相性（customerAffinity）― 完了案件の実績から荷主×車両の相性を実データ算出
+//  calcAIScoreBreakdown の ⑤顧客相性 が参照する注入フック。未定義なら即応性で代替される。
+// ===== AI-AFFINITY-START =====
+const _customerAffinityIndex = (function () {
+  const idx = {};   // clientName → { vehDigits → { jobs, onTime, marginSum } }
+  function digits(s) { const m = String(s == null ? '' : s).match(/(\d{3,})/); return m ? m[1] : null; }
+  try {
+    (typeof processedCases !== 'undefined' ? processedCases : []).forEach(function (c) {
+      if (!c.client) return;
+      const vd = digits(c.vehicle);
+      if (!vd) return;
+      const cm = (idx[c.client] = idx[c.client] || {});
+      const e = (cm[vd] = cm[vd] || { jobs: 0, onTime: 0, marginSum: 0 });
+      e.jobs += 1;
+      if (!c.delay || /なし/.test(String(c.delay))) e.onTime += 1;
+      if (typeof c.margin === 'number') e.marginSum += c.margin;
+    });
+  } catch (e) { /* 履歴なしは空インデックス */ }
+  return idx;
+})();
+
+// 荷主タイプ→関係性の基礎点（定期/チャーター＝継続関係が強い）
+const _clientTierScore = { '定期': 70, 'チャーター': 65, '特殊': 55, '冷蔵': 55, 'スポット': 45 };
+
+// window.customerAffinity(vehicleId, clientName) → 0..100。荷主タイプ＋（あれば）取引実績で算出。
+window.customerAffinity = function (vehicleId, clientName, _deps) {
+  const D = _deps || {};
+  const clamp = D.clampScore || (typeof clampScore === 'function' ? clampScore : function (n) { return Math.max(0, Math.min(100, Math.round(n))); });
+  const clients = D.clientMasterData || (typeof clientMasterData !== 'undefined' ? clientMasterData : []);
+  const index = D.index || _customerAffinityIndex;
+  if (!clientName) return 50;
+  // ① 荷主タイプの基礎点
+  let tier = 50;
+  const cm = (clients || []).find(function (x) { return x.name === clientName; });
+  if (cm && _clientTierScore[cm.type] != null) tier = _clientTierScore[cm.type];
+  // ② 取引実績（リピート×定時遵守×粗利）。実績が無ければ荷主タイプのみ。
+  const vd = (String(vehicleId == null ? '' : vehicleId).match(/(\d{3,})/) || [])[1];
+  const hist = (vd && index[clientName]) ? index[clientName][vd] : null;
+  if (!hist || !hist.jobs) return clamp(tier);
+  const repeat = Math.min(30, hist.jobs * 12);                       // リピート 最大+30
+  const onTimeRate = hist.onTime / hist.jobs;                        // 0..1
+  const avgMargin = hist.marginSum / hist.jobs;                      // %
+  const quality = onTimeRate * 10 + Math.max(0, avgMargin - 50) * 0.4; // 定時遵守＋粗利の上振れ
+  return clamp(tier * 0.6 + repeat + quality);
+};
+// ===== AI-AFFINITY-END =====
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  ページ・フェーズ切替

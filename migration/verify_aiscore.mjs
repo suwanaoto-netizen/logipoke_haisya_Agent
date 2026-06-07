@@ -36,13 +36,32 @@ function estimateDistance(_base, from) {
   if (String(from).includes('FAR')) return 300;
   return 50;
 }
+// getBaseDistance スタブ：拠点IDが解決できた場合の距離マスタ参照（第2段の精度向上）
+function getBaseDistance(a, b) { return (a === 'BX' && b === 'BX') ? 5 : null; }
 
 const factory = new Function(
-  'window', 'VEHICLE_RAW_SCORES', 'VEHICLE_PROFIT', 'estimateDistance',
+  'window', 'VEHICLE_RAW_SCORES', 'VEHICLE_PROFIT', 'estimateDistance', 'getBaseDistance',
   code + '\n; return { clampScore, calcAIScoreBreakdown, calcAIScore };'
 );
 const { clampScore, calcAIScoreBreakdown, calcAIScore } =
-  factory(win, VEHICLE_RAW_SCORES, VEHICLE_PROFIT, estimateDistance);
+  factory(win, VEHICLE_RAW_SCORES, VEHICLE_PROFIT, estimateDistance, getBaseDistance);
+
+// ── AI-AFFINITY ブロック（customerAffinity）を抽出 ──
+const aStart = html.indexOf('// ===== AI-AFFINITY-START =====');
+const aEnd = html.indexOf('// ===== AI-AFFINITY-END =====');
+assert.ok(aStart > 0 && aEnd > aStart, 'index.html から customerAffinity ブロックを抽出できること');
+const aCode = html.slice(aStart, aEnd);
+const affWin = {};
+const affProcessed = [
+  { client: '株式会社A', vehicle: '1245',     delay: 'なし',     margin: 64 },
+  { client: '株式会社A', vehicle: '1245',     delay: 'なし',     margin: 60 },
+  { client: '株式会社A', vehicle: '車両1123', delay: '15分遅延', margin: 40 },
+];
+const affClients = [{ name: '株式会社A', type: '定期' }, { name: 'スポット社', type: 'スポット' }];
+new Function('window', 'processedCases', 'clientMasterData', 'clampScore', aCode)(
+  affWin, affProcessed, affClients, clampScore
+);
+const customerAffinity = affWin.customerAffinity;
 
 const lawOk = { status: 'ok', items: [
   { ok: true, title: '日間運転時間' }, { ok: true, title: '拘束時間' },
@@ -139,6 +158,46 @@ check('決定性（同一入力で同一スコア）', () => {
   const c = { from: 'CLOSE', goods: 'パレット / 1,700kg / 常温', priority: '緊急' };
   const a = calcAIScore('V1', c, veh);
   for (let i = 0; i < 15; i++) assert.equal(calcAIScore('V1', c, veh), a);
+});
+
+// 距離効率 第2段：拠点ID解決→距離マスタが estimateDistance より優先される
+check('距離効率は拠点距離マスタを優先（estimateDistanceに縮退しない）', () => {
+  win.resolveBaseIdByAlias = function (t) { return String(t).includes('HUB') ? 'BX' : null; };
+  const veh = { id: 'V1', base: 'HUB', cap: '2,000kg', stars: 4, avail: '空車', law: lawOk };
+  const b = calcAIScoreBreakdown('V1', { from: 'HUB', goods: 'パレット / 1,700kg / 常温' }, veh);
+  // マスタ距離 5km → clamp(100-3)=97。estimateDistance なら 50km → 70 になるはず。
+  assert.equal(b.distance, 97, `master優先 (distance=${b.distance})`);
+  delete win.resolveBaseIdByAlias;
+});
+
+console.log('\n顧客相性（customerAffinity）\n');
+
+check('荷主タイプの基礎点（定期 > スポット）', () => {
+  const teiki = customerAffinity('9999', '株式会社A');  // 履歴なし定期 → 70
+  const spot  = customerAffinity('9999', 'スポット社');  // 履歴なしスポット → 45
+  assert.equal(teiki, 70);
+  assert.equal(spot, 45);
+});
+
+check('取引実績があるほど相性が高い', () => {
+  const base = customerAffinity('9999', '株式会社A');     // 実績なし
+  const withHist = customerAffinity('1245', '株式会社A'); // 2回・定時・高粗利
+  assert.ok(withHist > base, `実績車両が上振れ (hist=${withHist}, base=${base})`);
+  assert.ok(withHist <= 100);
+});
+
+check('定時遵守・高粗利の車両ほど相性が高い', () => {
+  const good = customerAffinity('1245', '株式会社A');     // 定時2/2・粗利62%
+  const poor = customerAffinity('1123', '株式会社A');     // 遅延1/1・粗利40%
+  assert.ok(good > poor, `good=${good}, poor=${poor}`);
+});
+
+check('未知の荷主は中立値(50)', () => {
+  assert.equal(customerAffinity('1245', '未登録商事'), 50);
+});
+
+check('clientName 無しは中立値(50)', () => {
+  assert.equal(customerAffinity('1245', null), 50);
 });
 
 console.log('\n' + (fail === 0
