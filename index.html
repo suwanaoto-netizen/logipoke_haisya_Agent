@@ -17322,21 +17322,21 @@ function _legOverlapConflicts(c) {
 // 案件の総荷量(kg)
 function _caseTotalKg(c) { return _caseNeededKg(c); }
 
-// 時刻 "HH:MM" → 分
-function _hhmmToMin(t) { if (!t) return null; const p = String(t).split(':'); const h = +p[0], m = +(p[1] || 0); return isNaN(h) ? null : h * 60 + (isNaN(m) ? 0 : m); }
+// 時刻 "HH:MM" → 分（null安全。既存の同名関数 _hhmmToMin と衝突しないよう別名にする）
+function _legHhmmToMin(t) { if (!t) return null; const p = String(t).split(':'); const h = +p[0], m = +(p[1] || 0); return isNaN(h) ? null : h * 60 + (isNaN(m) ? 0 : m); }
 
 // 案件横断の時間重複（I1/I2 を処理中の全案件にまたがって検出）。
 // 同一ドライバー/同一車両が、別案件の区間と時間重複していれば返す（同日前提）。
 function _legGlobalConflicts(c, leg) {
   const out = {};
   const dId = _legDriverId(leg), vId = _legVehicleId(leg);
-  const s = _hhmmToMin(leg.startTime), e = _hhmmToMin(leg.endTime);
+  const s = _legHhmmToMin(leg.startTime), e = _legHhmmToMin(leg.endTime);
   if ((!dId && !vId) || s == null || e == null) return [];
   const cases = (typeof processingCases !== 'undefined') ? processingCases : [];
   cases.forEach(oc => {
     if (!oc || oc.id === (c && c.id) || !Array.isArray(oc.legs)) return;   // 同一案件内は intra で別途検出
     oc.legs.forEach(ol => {
-      const os = _hhmmToMin(ol.startTime), oe = _hhmmToMin(ol.endTime);
+      const os = _legHhmmToMin(ol.startTime), oe = _legHhmmToMin(ol.endTime);
       if (os == null || oe == null) return;
       if (!(s < oe && os < e)) return;
       const odId = _legDriverId(ol), ovId = _legVehicleId(ol);
