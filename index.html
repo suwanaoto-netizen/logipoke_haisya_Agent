@@ -457,10 +457,10 @@ function _ssotDerive(seed, build){
     color: var(--text-secondary);
     transition: all .18s;
   }
-  /* 未処理・処理中のバッジは常に赤（0件時はグレー） */
+  /* 未処理・処理中のバッジは常にオレンジ（0件時はグレー） */
   .phase-tab.unprocessed .tab-count,
   .phase-tab.processing .tab-count {
-    background: var(--red);
+    background: var(--orange);
     color: #fff;
   }
   .phase-tab.unprocessed .tab-count[data-zero="true"],
@@ -3740,7 +3740,7 @@ function _ssotDerive(seed, build){
   .comm-tab-badge {
     display:inline-flex; align-items:center; justify-content:center;
     min-width:16px; height:16px; padding:0 4px; margin-left:1px;
-    border-radius:8px; background:var(--red); color:#fff;
+    border-radius:8px; background:var(--orange); color:#fff;
     font-size:9px; font-weight:800; font-family:'Inter',sans-serif; line-height:1;
   }
   .comm-new-badge {
@@ -5865,7 +5865,7 @@ function _ssotDerive(seed, build){
     display: flex; align-items: center; gap: 6px;
   }
   .fax-left-title-count {
-    background: var(--red); color: #fff;
+    background: var(--orange); color: #fff;
     font-size: 10px; font-weight: 800; padding: 1px 6px;
     border-radius: 10px; font-family: 'Inter', sans-serif;
   }
@@ -5902,7 +5902,7 @@ function _ssotDerive(seed, build){
   .fax-type-badge.fax  { background: #fef3c7; color: #92400e; }
   .fax-addr-unread {
     margin-left: auto;
-    background: var(--red); color: #fff;
+    background: var(--orange); color: #fff;
     font-size: 10px; font-weight: 700; min-width: 18px; height: 18px;
     border-radius: 9px; display: flex; align-items: center; justify-content: center;
     padding: 0 5px; font-family: 'Inter', sans-serif;
