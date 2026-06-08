@@ -427,10 +427,17 @@ interface Leg extends Auditable {
   id:          Id<'leg'>;      // 旧 legId "relay-104-1"
   tripId:      Id<'trip'>;
   sequenceNo:  number;         // 旧 legNo / sequenceNo（1始まり）
-  driverId:    Id<'drv'>;      // ID参照（旧 driverName 文字列→C3）
-  vehicleId:   Id<'veh'>;      // ID参照（旧 "車両2580"→C3）
-  effectiveBaseId: Id<'base'>; // 当日の実働拠点（旧 effectiveBaseId）
-  crossBase:   boolean;        // クロス配車か（旧 isCrossBaseAssignment の結果）
+  driverId:    Id<'drv'>;      // ID参照（旧 driverName 文字列→C3）。ドライバーは車両と独立に選択
+  vehicleId?:  Id<'veh'>;      // ID参照（旧 "車両2580"→C3）。傭車(isHired)時は未設定＝自社マスタ外
+  // 傭車（協力会社車両）。プロト leg.partnerVehicle。vehicleId は持たず協力会社・傭車運賃・POを伴う
+  isHired?:    boolean;
+  hiredCompanyId?: Id<'co'>;   // 傭車先（kind='partner'）
+  hiredCharge?: Money;         // 傭車運賃（協力会社 partnerRates: base + perKm×距離）
+  purchaseOrderNo?: string;    // 傭車の発注書番号（PO）
+  effectiveBaseId: Id<'base'>; // 当日の実働拠点（旧 effectiveBaseId。既定＝車両拠点）
+  crossBase:   boolean;        // クロス配車か（ドライバー拠点≠実働拠点。旧 isCrossBaseAssignment）
+  // 便ごとの積載按分は Assignment.loadedWeightKg（Order×Leg）で表現（プロト leg.loadKg）。
+  // 相積みは複数 Assignment の loadedWeightKg 合算 ≦ 車両最大積載。温度帯は VehicleType.tempZones と照合。
 
   role:        LegRole;        // 旧 role
   startDateTime: IsoDateTime;  // 旧 startTime/startDateTime（日付込みで日跨ぎ対応→C5）
