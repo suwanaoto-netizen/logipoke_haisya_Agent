@@ -8260,6 +8260,15 @@ function _ssotDerive(seed, build){
                 <span id="dnd-sort-weight-label">重量順</span>
                 <span class="dnd-sort-arrow" id="dnd-sort-weight-arrow"></span>
               </button>
+              <!-- 車両並び替えボタン（未確定優先：重量順とは独立トグル） -->
+              <button class="dnd-sort-btn" id="dnd-sort-tentative-btn"
+                      onclick="dndToggleTentativeFirst()"
+                      title="D&D済みで未確定（仮）の案件がある車両を上位に表示">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                  <path d="M3 4h18l-7 8v6l-4 2v-8z"/>
+                </svg>
+                <span id="dnd-sort-tentative-label">未確定優先</span>
+              </button>
               <div class="dnd-right-stats">
                 <div class="dnd-stat">割当済 <span class="dnd-stat-val" id="dnd-stat-assigned">0</span></div>
                 <div class="dnd-stat">稼働率 <span class="dnd-stat-val" id="dnd-stat-rate">0%</span></div>
@@ -27609,21 +27618,54 @@ function saveDndEditModal() {
 //  - asc      : maxLoad 昇順
 //  - custom   : ユーザーが D&D で手動並び替えした
 let dndVehicleSortMode = 'original';
+// 未確定優先トグル（重量順とは独立。ON時は「未確定（仮）案件を持つ行」をプライマリキーで上位へ）
+let dndTentativeFirst = false;
 // 初期順を保存しておく（custom やソート解除時に復元するため）
 const _DND_DRIVERS_ORIGINAL_ORDER = dndDrivers.map(d => d.id);
 
+// 行（ドライバー/車両）が「D&D済みだが仮確定していない案件」を持つか。
+// 判定式はブロック描画側の isTentativeBlock（!confirmed && !preset && !locked）と一致させる。
+function dndRowHasTentative(driverId) {
+  const blocks = (typeof dndAssignmentsFor === 'function')
+    ? (dndAssignmentsFor(driverId, currentDateKey) || [])
+    : [];
+  return blocks.some(a => !a.confirmed && !a.isPreset && !a.locked);
+}
+
 function dndApplyVehicleSort() {
   // dndDrivers は const だがミドルクオートで配列中身は変更可能。インプレースで並び替える。
-  if (dndVehicleSortMode === 'original') {
-    // 初期順に戻す
-    const idx = new Map(_DND_DRIVERS_ORIGINAL_ORDER.map((id, i) => [id, i]));
-    dndDrivers.sort((a, b) => (idx.get(a.id) ?? 0) - (idx.get(b.id) ?? 0));
-  } else if (dndVehicleSortMode === 'desc') {
-    dndDrivers.sort((a, b) => (b.maxLoad || 0) - (a.maxLoad || 0));
+  // 2段ソート：プライマリ＝未確定優先（トグルON時のみ）／セカンダリ＝重量順 or 初期順 or 手動順。
+
+  // セカンダリ比較関数（従来の重量順ロジックを踏襲）。
+  // - desc/asc : maxLoad 降順/昇順
+  // - original : マスタ初期順
+  // - custom   : 現在の手動順を維持（並び替え前の dndDrivers 順をスナップショット）
+  let cmpSecondary;
+  if (dndVehicleSortMode === 'desc') {
+    cmpSecondary = (a, b) => (b.maxLoad || 0) - (a.maxLoad || 0);
   } else if (dndVehicleSortMode === 'asc') {
-    dndDrivers.sort((a, b) => (a.maxLoad || 0) - (b.maxLoad || 0));
+    cmpSecondary = (a, b) => (a.maxLoad || 0) - (b.maxLoad || 0);
+  } else if (dndVehicleSortMode === 'custom') {
+    // 手動順を壊さないよう、現在順をインデックス化してセカンダリキーにする。
+    const idx = new Map(dndDrivers.map((d, i) => [d.id, i]));
+    cmpSecondary = (a, b) => (idx.get(a.id) ?? 0) - (idx.get(b.id) ?? 0);
+  } else {
+    // original
+    const idx = new Map(_DND_DRIVERS_ORIGINAL_ORDER.map((id, i) => [id, i]));
+    cmpSecondary = (a, b) => (idx.get(a.id) ?? 0) - (idx.get(b.id) ?? 0);
   }
-  // 'custom' の場合は何もしない（既に dndDrivers が手動順序になっている）
+
+  // 未確定優先トグルOFFかつ custom の場合は、既に手動順なので何もしない（従来挙動を維持）。
+  if (!dndTentativeFirst && dndVehicleSortMode === 'custom') return;
+
+  dndDrivers.sort((a, b) => {
+    if (dndTentativeFirst) {
+      const ta = dndRowHasTentative(a.id) ? 0 : 1;
+      const tb = dndRowHasTentative(b.id) ? 0 : 1;
+      if (ta !== tb) return ta - tb;   // 未確定（仮）案件を持つ行を上位グループへ
+    }
+    return cmpSecondary(a, b);
+  });
 }
 
 function dndUpdateSortBtnUI() {
@@ -27634,6 +27676,15 @@ function dndUpdateSortBtnUI() {
   // 確定済みタブでは並び替えの意味が薄いのでボタンを隠す
   const isConfirmedTab = (typeof currentDispatchTab !== 'undefined' && currentDispatchTab === 'confirmed');
   btn.style.display = isConfirmedTab ? 'none' : '';
+  // 未確定優先トグルも同じく確定済みタブでは非表示＋active状態を反映
+  const tBtn = document.getElementById('dnd-sort-tentative-btn');
+  if (tBtn) {
+    tBtn.style.display = isConfirmedTab ? 'none' : '';
+    tBtn.classList.toggle('active', dndTentativeFirst);
+    tBtn.title = dndTentativeFirst
+      ? '現在：未確定（仮）案件のある車両を上位表示中。クリックで解除'
+      : 'D&D済みで未確定（仮）の案件がある車両を上位に表示';
+  }
   if (isConfirmedTab) return;
   if (dndVehicleSortMode === 'desc') {
     btn.classList.add('active');
@@ -27671,6 +27722,14 @@ function dndCycleVehicleSort() {
   dndUpdateSortBtnUI();
   // renderDndTimeline は v1/v2 IIFE 側でフックされており、
   // 担当バッジ・拠点バッジ・確定済みブロック等の装飾が自動で再適用される。
+  renderDndTimeline();
+}
+
+function dndToggleTentativeFirst() {
+  // 重量順とは独立したトグル。ON時は未確定（仮）案件を持つ行をプライマリキーで上位へ。
+  dndTentativeFirst = !dndTentativeFirst;
+  dndApplyVehicleSort();
+  dndUpdateSortBtnUI();
   renderDndTimeline();
 }
 
