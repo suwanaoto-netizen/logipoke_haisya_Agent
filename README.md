@@ -164,8 +164,14 @@ SSoT 未接続のままでした）。
   live 配列となり runtime 変異（受付取込の unshift・`recalcAllScores`・`selectedVehicleIdx`・relay編集 等）は
   従来どおり。実ブラウザQA（既定ON）で 3配列が SSoT 派生・relay案件(legs2)保持・未処理/処理中詳細/配車ボード
   描画・運行層整合 true・アプリエラー0 を確認。
-- 🔜 **C7 残（任意・最終形）**: 4配列を init 派生だけでなく「単一ストアの**ライブ派生ビュー**」へ降格し、
-  全 case writer（受付 unshift・billing 確定・scaleout 等）を store-first 化（運行層と同じ read派生＋write後同期）。
+- ✅ **C7 最終形の足場：永続ケースストア `createCaseStore()`**: 運行層の `createOperationStore` と同型の
+  永続ケースストア（`syncFromCases`／`getUnprocessed`/`getProcessing`/`getProcessed`/`getMaster`／`overview`）を
+  資産に追加。`verify_cases.mjs`（10件）でロスレス保持・再同期を検証。**資産のみ・本体UI非変更**。
+- 🔜 **C7 最終形（残・大規模・段階適用）**: 上記ストアを本体に常設し、4配列を「単一ストアの**ライブ派生
+  ビュー**」へ降格、全 case writer を store-first 化する。ただし案件の**構造変異だけで27箇所**（フェーズ間
+  移動 push/unshift/splice）＋要素変異（`recalcAllScores`/billing 確定/scaleout）が**UI全域・複数スコープ**
+  （`allCasesMasterData` は別スコープ・window 非公開）に分散するため、運行層と同様に **writer 1つずつ＋
+  フェーズ遷移フローの実ブラウザQA** で慎重に進める必要がある（一括変換は高リスク）。
   `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
