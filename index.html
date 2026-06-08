@@ -27796,8 +27796,10 @@ const _DND_DRIVERS_ORIGINAL_ORDER = dndDrivers.map(d => d.id);
 // 行（ドライバー/車両）が「D&D済みだが仮確定していない案件」を持つか。
 // 判定式はブロック描画側の isTentativeBlock（!confirmed && !preset && !locked）と一致させる。
 function dndRowHasTentative(driverId) {
+  // currentDateKey はグローバルに存在しないため、毎回 dndGetCurrentDateKey() で解決する。
+  const dateKey = (typeof dndGetCurrentDateKey === 'function') ? dndGetCurrentDateKey() : null;
   const blocks = (typeof dndAssignmentsFor === 'function')
-    ? (dndAssignmentsFor(driverId, currentDateKey) || [])
+    ? (dndAssignmentsFor(driverId, dateKey) || [])
     : [];
   return blocks.some(a => !a.confirmed && !a.isPreset && !a.locked);
 }
