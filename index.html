@@ -29479,6 +29479,9 @@ function renderDndTimeline() {
         : '';
       return `<div class="dnd-block ${isNew ? 'new-arrival' : ''} ${a.confirmed ? 'is-confirmed' : (isTentativeBlock ? 'is-tentative' : '')} ${blockKaizenCls} ${relayLegCls} ${multiDayCls}"
                    style="left:${left}%;width:${width}%;background:${a.color}"
+                   data-driver-id="${d.id}"
+                   data-block-start="${a.start}"
+                   data-case-id="${a.caseId != null ? a.caseId : ''}"
                    ${relayLegAttr}
                    ${interactiveForBlock ? `draggable="true"
                    onmousedown="dndBlockMouseDown(event,'${d.id}',${idx})"
@@ -39197,6 +39200,24 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
 .bulk-confirm-status.ok { background: #d1fae5; color: #065f46; }
 .bulk-confirm-status.warn { background: #fef3c7; color: #92400e; }
 
+/* 違反・注意の行はクリックで該当カードへ遷移できることを示す */
+.bulk-confirm-item.clickable { cursor: pointer; transition: background .12s ease, box-shadow .12s ease; }
+.bulk-confirm-item.clickable:hover { background: #fef3c7; box-shadow: inset 3px 0 0 #f59e0b; }
+.bulk-confirm-item.clickable:focus-visible { outline: 2px solid #f59e0b; outline-offset: -2px; }
+.bulk-confirm-status.warn.jump { transition: background .12s ease; }
+.bulk-confirm-item.clickable:hover .bulk-confirm-status.warn.jump { background: #fde68a; }
+
+/* 遷移先の差配カードを一時的にハイライト */
+@keyframes dndBlockFlash {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+  15%, 70% { box-shadow: 0 0 0 3px #f59e0b, 0 0 12px 2px rgba(245, 158, 11, .6); }
+}
+.dnd-block.dnd-block-flash,
+.dnd-row.dnd-block-flash {
+  animation: dndBlockFlash 2s ease-in-out;
+  z-index: 30 !important;
+}
+
 /* ── キーボードショートカットヘルプ ── */
 .kbd-help-modal-overlay {
   position: fixed;
@@ -40110,14 +40131,21 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
 
     // リスト
     const listEl = document.getElementById('bulk-confirm-list');
-    listEl.innerHTML = targets.map(t => {
+    listEl.innerHTML = targets.map((t, i) => {
       const driver = (window.dndDrivers || []).find(d => d.id === t.driverId);
+      // 違反・注意は差配カードへジャンプできるよう、ステータスをボタン化
       const lawStatus = t.kaizenLevel === 'violation'
-        ? `<span class="bulk-confirm-status warn">⚠ 違反</span>`
+        ? `<span class="bulk-confirm-status warn jump" title="該当の差配カードへ移動">⚠ 違反 ›</span>`
         : t.kaizenLevel === 'warn'
-        ? `<span class="bulk-confirm-status warn">! 注意</span>`
+        ? `<span class="bulk-confirm-status warn jump" title="該当の差配カードへ移動">! 注意 ›</span>`
         : `<span class="bulk-confirm-status ok">✓ 適合</span>`;
-      return `<div class="bulk-confirm-item ${t.kaizenLevel !== 'ok' ? 'has-warn' : ''}">
+      // 違反・注意のある案件は行全体をクリックで該当カードへ遷移
+      const clickable = t.kaizenLevel !== 'ok';
+      const cls = `bulk-confirm-item ${t.kaizenLevel !== 'ok' ? 'has-warn' : ''}${clickable ? ' clickable' : ''}`;
+      const clickAttr = clickable
+        ? ` role="button" tabindex="0" title="クリックで該当の差配カードへ移動" onclick="dndFocusBulkTarget(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();dndFocusBulkTarget(${i});}"`
+        : '';
+      return `<div class="${cls}"${clickAttr}>
         <div class="bulk-confirm-color" style="background:${t.a.color}"></div>
         <div class="bulk-confirm-main">
           <div class="bulk-confirm-client">${t.a.client || t.a.label}</div>
@@ -40130,6 +40158,58 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
     }).join('');
 
     document.getElementById('bulk-confirm-modal').classList.add('open');
+  };
+
+  // 一括仮確定モーダルの行（違反・注意）クリック → 該当の差配カードへ遷移
+  window.dndFocusBulkTarget = function(i) {
+    const targets = window._bulkConfirmTargets || [];
+    const t = targets[i];
+    if (!t) return;
+    // モーダルを閉じてボードを見せる
+    if (typeof window.closeModal === 'function') window.closeModal('bulk-confirm-modal');
+    else document.getElementById('bulk-confirm-modal').classList.remove('open');
+
+    // 計画中タブに戻す（確定済みタブだと未確定カードが出ないため）
+    if (typeof currentDispatchTab !== 'undefined' && currentDispatchTab === 'confirmed'
+        && typeof window.switchDispatchTab === 'function') {
+      try { window.switchDispatchTab('planning'); } catch (e) { /* noop */ }
+    }
+    // 差配カード（dnd-block）はDnDサブタブにのみ存在するため、表示を切替
+    if (typeof currentDispatchSubtab !== 'undefined' && currentDispatchSubtab !== 'dnd'
+        && typeof window.switchDispatchSubtab === 'function') {
+      try { window.switchDispatchSubtab('dnd'); } catch (e) { /* noop */ }
+    }
+
+    const focus = () => {
+      const caseId = (t.a && t.a.caseId != null) ? String(t.a.caseId) : '';
+      const start = (t.a && t.a.start) ? t.a.start : '';
+      // 該当ブロックを driverId + 開始時刻（+ caseId）で特定
+      let block = null;
+      const candidates = Array.from(document.querySelectorAll(
+        `.dnd-track[data-driver-id="${t.driverId}"] .dnd-block[data-block-start="${start}"]`
+      ));
+      block = candidates.find(b => (b.getAttribute('data-case-id') || '') === caseId)
+              || candidates[0] || null;
+
+      const row = block
+        ? block.closest('.dnd-row')
+        : document.querySelector(`.dnd-track[data-driver-id="${t.driverId}"]`)?.closest('.dnd-row');
+      if (!row) {
+        if (typeof showDndToast === 'function') showDndToast('該当の差配カードが見つかりませんでした', true);
+        return;
+      }
+      // 担当/拠点フィルターで隠れている場合は一時的に表示
+      if (row.classList.contains('dimmed-by-filter')) {
+        row.style.setProperty('display', 'grid', 'important');
+      }
+      (block || row).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const flashEl = block || row;
+      flashEl.classList.add('dnd-block-flash');
+      setTimeout(() => { flashEl.classList.remove('dnd-block-flash'); }, 2000);
+    };
+
+    // モーダルのクローズ／タブ切替の描画が落ち着いてからフォーカス
+    requestAnimationFrame(() => requestAnimationFrame(focus));
   };
 
   window.executeBulkConfirm = function() {
