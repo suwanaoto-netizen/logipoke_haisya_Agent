@@ -13003,6 +13003,8 @@ function deriveRelayLegsView(c) {
       var src = (c.legs && c.legs[i]) || {};
       return { legId: r.legId, legNo: r.sequenceNo, driverName: r.driverName,
         vehicleId: r.vehicleLabel, vehicleName: src.vehicleName || r.vehicleLabel,
+        driverRefId: src.driverRefId || null, vehicleRefId: src.vehicleRefId || null,  // 論点F：ID参照を引継ぎ
+        partnerVehicle: !!src.partnerVehicle,
         startTime: r.start, endTime: r.end, relayFrom: r.from, relayTo: r.to, role: r.role,
         vehicleType: src.vehicleType, capacity: src.capacity, lawOk: src.lawOk, vehicleIdx: src.vehicleIdx };
     });
@@ -17155,12 +17157,20 @@ function _syncLegDisplayFromRefs(c, leg) {
   const d = leg.driverRefId ? getDriverById(leg.driverRefId) : null;
   const v = leg.vehicleRefId ? getVehicleById(leg.vehicleRefId) : null;
   if (d) leg.driverName = d.name;
-  if (v) {
-    leg.vehicleId = v.id;                 // 権威マスタID（'V####'）
-    leg.vehicleName = v.plate || v.id;    // 表示用ナンバープレート
+  if (leg.partnerVehicle) {                 // 論点H：協力会社車両（傭車・自社マスタ外）
+    leg.vehicleId = null;
+    leg.vehicleName = '傭車（協力会社）';
+    leg.capacity = leg.capacity || '—';
+  } else if (v) {
+    leg.vehicleId = v.id;                   // 権威マスタID（'V####'）
+    leg.vehicleName = v.plate || v.id;      // 表示用ナンバープレート
     leg.capacity = (typeof v.maxLoad === 'number') ? (v.maxLoad.toLocaleString() + 'kg') : leg.capacity;
   }
   leg.lawOk = _driverLawOk(c, leg.driverRefId);  // 論点C：ドライバー基準
+  // 論点E：実働拠点（既定=車両拠点）とクロス配車フラグを確定して保存
+  const cb = _legCrossBase(leg);
+  leg.effectiveBaseId = cb.effectiveBaseId;
+  leg.crossBase = cb.cross;
   return leg;
 }
 
@@ -17186,7 +17196,11 @@ function _ensureLegRefs(c, leg) {
       if (v) vehicleId = v.id;
     }
   }
-  if (!vehicleId && driverId) vehicleId = _opVehicleIdForDriverId(driverId);
+  if (!vehicleId && driverId) {
+    const dd = getDriverById(driverId);
+    if (dd && dd.partner) { leg.partnerVehicle = true; }   // 論点H：協力会社は傭車（自社車両を当てない）
+    else vehicleId = _opVehicleIdForDriverId(driverId);
+  }
   leg.driverRefId = driverId;
   leg.vehicleRefId = vehicleId;
   _syncLegDisplayFromRefs(c, leg);
@@ -17201,26 +17215,71 @@ function _candidateRefs(c, idx) {
   return { driverId: v.driverId || null, vehicleId: v.vehicleId || null };
 }
 
-// 論点A：1区間のドライバー×車両の整合検証（免許/積載/法令）
+// 論点F：区間のドライバーIDをID参照で解決（無ければ氏名→ID。名前参照の段階的撤廃）
+function _legDriverId(leg) {
+  if (!leg) return null;
+  if (leg.driverRefId) return leg.driverRefId;
+  if (leg.driverName) { const d = drivers.find(x => x.name === leg.driverName); if (d) return d.id; }
+  return null;
+}
+// 論点F：区間の車両IDをID参照で解決（無ければ表示ラベル→ID）
+function _legVehicleId(leg) {
+  if (!leg) return null;
+  if (leg.vehicleRefId) return leg.vehicleRefId;
+  const ref = leg.vehicleId || leg.vehicleName;
+  if (ref && typeof resolveVehicleRef === 'function') { const v = resolveVehicleRef(ref); if (v) return v.id; }
+  return null;
+}
+
+// 論点E：区間のドライバー拠点×車両拠点からクロス配車を判定。既定の実働拠点=車両拠点。
+function _legCrossBase(leg) {
+  const res = { cross: false, effectiveBaseId: null, driverBaseName: null, vehicleBaseName: null, distanceKm: null };
+  const d = leg.driverRefId ? getDriverById(leg.driverRefId) : null;
+  const v = leg.vehicleRefId ? getVehicleById(leg.vehicleRefId) : null;
+  if (v) res.effectiveBaseId = v.baseId || null;     // 既定の実働拠点は車両拠点（isCrossBaseAssignment と整合）
+  if (!d || !v || d.partner) return res;             // 協力会社ドライバーは対象外（論点3/H）
+  const dBase = d.baseId, vBase = v.baseId;
+  if (dBase && vBase && dBase !== vBase) {
+    res.cross = true;
+    const db = (typeof getBaseById === 'function') ? getBaseById(dBase) : null;
+    const vb = (typeof getBaseById === 'function') ? getBaseById(vBase) : null;
+    res.driverBaseName = db ? db.name : dBase;
+    res.vehicleBaseName = vb ? vb.name : vBase;
+    if (typeof getBaseDistance === 'function') { const dist = getBaseDistance(dBase, vBase); if (dist != null) res.distanceKm = dist; }
+  }
+  return res;
+}
+
+// 論点A：1区間のドライバー×車両の整合検証（免許/積載/法令 + 論点E:クロス配車情報 / 論点H:協力会社）
 // applyLoad=false のときは積載チェックを行わない（複数台=相積みは積載按分が未管理のため誤警告を避ける）
 function _validateLegCombo(c, leg, applyLoad) {
   const issues = [];
   const d = leg.driverRefId ? getDriverById(leg.driverRefId) : null;
   const v = leg.vehicleRefId ? getVehicleById(leg.vehicleRefId) : null;
-  if (!d) issues.push({ type: 'driver', msg: 'ドライバーが未選択です' });
-  if (!v) issues.push({ type: 'vehicle', msg: '車両が未選択です' });
-  if (d && v && !_driverCanDrive(d, v)) {
-    const need = _vehicleRequiredLicense(v);
-    issues.push({ type: 'license', msg: `免許不足：${d.name}（${(Array.isArray(d.license) ? d.license.join('/') : d.license)}）は ${v.ton}t車に${need}免許が必要` });
-  }
-  if (applyLoad && v) {
-    const needKg = _caseNeededKg(c);
-    if (needKg > 0 && v.maxLoad < needKg) {
-      issues.push({ type: 'load', msg: `積載超過：荷量 ${needKg.toLocaleString()}kg ＞ ${v.plate} の最大積載 ${v.maxLoad.toLocaleString()}kg` });
+  if (!d) issues.push({ type: 'driver', level: 'error', msg: 'ドライバーが未選択です' });
+  // 論点H：協力会社車両（傭車）は自社マスタ外。車両未選択扱いにせず、免許/積載/拠点チェックは対象外。
+  if (leg.partnerVehicle) {
+    issues.push({ type: 'partner', level: 'info', msg: `協力会社（傭車）：${d ? d.name : ''}／車両は自社マスタ外のため免許・積載・拠点チェックは対象外` });
+  } else {
+    if (!v) issues.push({ type: 'vehicle', level: 'error', msg: '車両が未選択です' });
+    if (d && v && !_driverCanDrive(d, v)) {
+      const need = _vehicleRequiredLicense(v);
+      issues.push({ type: 'license', level: 'error', msg: `免許不足：${d.name}（${(Array.isArray(d.license) ? d.license.join('/') : d.license)}）は ${v.ton}t車に${need}免許が必要` });
+    }
+    if (applyLoad && v) {
+      const needKg = _caseNeededKg(c);
+      if (needKg > 0 && v.maxLoad < needKg) {
+        issues.push({ type: 'load', level: 'error', msg: `積載超過：荷量 ${needKg.toLocaleString()}kg ＞ ${v.plate} の最大積載 ${v.maxLoad.toLocaleString()}kg` });
+      }
+    }
+    // 論点E：クロス配車は情報提示（エラーではない）。実働拠点は車両拠点。
+    const cb = _legCrossBase(leg);
+    if (cb.cross) {
+      issues.push({ type: 'cross', level: 'info', msg: `クロス配車：${cb.driverBaseName}のドライバー × ${cb.vehicleBaseName}の車両${cb.distanceKm != null ? `（回送 約${cb.distanceKm}km）` : ''}／実働拠点＝${cb.vehicleBaseName}` });
     }
   }
   if (leg.driverRefId && !_driverLawOk(c, leg.driverRefId)) {
-    issues.push({ type: 'law', msg: `改善基準告示：${d ? d.name : ''} は要確認` });
+    issues.push({ type: 'law', level: 'error', msg: `改善基準告示：${d ? d.name : ''} は要確認` });
   }
   return issues;
 }
@@ -17283,9 +17342,15 @@ function _vehicleSelectHtml(c, caseIdx, legIdx) {
   const rec = vehicles.filter(v => recIds.has(v.id));
   const others = vehicles.filter(v => !recIds.has(v.id));
   const unknown = (sel && !vehicles.some(v => v.id === sel)) ? `<option value="${sel}" selected>（未登録車両）</option>` : '';
+  // 論点H：協力会社ドライバーは自社車両を持たないため「傭車」を選択肢に出す
+  const isPartner = !!(driver && driver.partner);
+  const partnerOpt = isPartner
+    ? `<optgroup label="協力会社"><option value="__partner__" ${leg.partnerVehicle ? 'selected' : ''}>🤝 協力会社車両（傭車・自社マスタ外）</option></optgroup>`
+    : '';
   return `<select class="leg-vehicle-select" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 9px;font-size:12px;font-family:'Noto Sans JP',sans-serif;background:#fff;cursor:pointer"
       onchange="setLegVehicle(${caseIdx}, ${legIdx}, this.value)">
     ${unknown}
+    ${partnerOpt}
     ${rec.length ? `<optgroup label="AI推薦">${rec.map(opt).join('')}</optgroup>` : ''}
     <optgroup label="全車両">${others.map(opt).join('')}</optgroup>
   </select>`;
@@ -17295,9 +17360,18 @@ function _vehicleSelectHtml(c, caseIdx, legIdx) {
 function _legDriverVehiclePickerHtml(c, caseIdx, legIdx, applyLoad) {
   const leg = c.legs[legIdx];
   const issues = _validateLegCombo(c, leg, applyLoad);
-  const banner = issues.length
-    ? `<div style="margin-top:6px;padding:5px 8px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:10px;color:#b91c1c;line-height:1.5">${issues.map(it => '⚠ ' + it.msg).join('<br>')}</div>`
-    : `<div style="margin-top:6px;padding:4px 8px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;font-size:10px;color:#047857">✅ ドライバー・車両・法令の整合OK</div>`;
+  const errs = issues.filter(it => it.level !== 'info');
+  const infos = issues.filter(it => it.level === 'info');
+  let banner = '';
+  if (errs.length) {
+    banner += `<div style="margin-top:6px;padding:5px 8px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:10px;color:#b91c1c;line-height:1.5">${errs.map(it => '⚠ ' + it.msg).join('<br>')}</div>`;
+  }
+  if (infos.length) {
+    banner += `<div style="margin-top:6px;padding:5px 8px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;font-size:10px;color:#9a3412;line-height:1.5">${infos.map(it => 'ℹ ' + it.msg).join('<br>')}</div>`;
+  }
+  if (!errs.length && !infos.length) {
+    banner = `<div style="margin-top:6px;padding:4px 8px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;font-size:10px;color:#047857">✅ ドライバー・車両・法令の整合OK</div>`;
+  }
   return `<div class="leg-dv-picker">
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
       <span style="font-size:10px;font-weight:700;color:var(--text-secondary);width:48px;flex-shrink:0">👤 ドライバー</span>
@@ -17336,15 +17410,21 @@ function setLegDriver(caseIdx, legIdx, driverId) {
   if (!leg) return;
   const autoVehicle = !leg._vehicleManual;
   leg.driverRefId = driverId;
-  if (!leg.vehicleRefId || autoVehicle) {
-    const def = _opVehicleIdForDriverId(driverId);
-    if (def) { leg.vehicleRefId = def; leg._vehicleManual = false; }
+  const dObj = getDriverById(driverId);
+  if (dObj && dObj.partner) {
+    // 論点H：協力会社ドライバーの既定は傭車（手動で自社車両を指定済みなら尊重）
+    if (autoVehicle) { leg.partnerVehicle = true; leg.vehicleRefId = null; }
+  } else {
+    if (leg.partnerVehicle) { leg.partnerVehicle = false; leg.vehicleRefId = null; }  // 自社ドライバーへ戻す
+    if (!leg.vehicleRefId || autoVehicle) {
+      const def = _opVehicleIdForDriverId(driverId);
+      if (def) { leg.vehicleRefId = def; leg._vehicleManual = false; }
+    }
   }
   _syncLegDisplayFromRefs(c, leg);
   _afterLegEdit(c, caseIdx);
-  const d = getDriverById(driverId);
   const unit = c.vehicleMode === 'relay' ? '区間' : '便';
-  showToast(`第${legIdx + 1}${unit}のドライバーを ${d ? d.name : driverId} に変更しました`, 'success');
+  showToast(`第${legIdx + 1}${unit}のドライバーを ${dObj ? dObj.name : driverId} に変更しました`, 'success');
 }
 
 // ── 区間の車両変更（ドライバーは保持。手動指定フラグを立てる） ──
@@ -17352,13 +17432,19 @@ function setLegVehicle(caseIdx, legIdx, vehicleId) {
   const c = processingCases[caseIdx];
   const leg = c.legs[legIdx];
   if (!leg) return;
-  leg.vehicleRefId = vehicleId;
   leg._vehicleManual = true;
+  if (vehicleId === '__partner__') {              // 論点H：協力会社車両（傭車）
+    leg.partnerVehicle = true;
+    leg.vehicleRefId = null;
+  } else {
+    leg.partnerVehicle = false;
+    leg.vehicleRefId = vehicleId;
+  }
   _syncLegDisplayFromRefs(c, leg);
   _afterLegEdit(c, caseIdx);
-  const v = getVehicleById(vehicleId);
   const unit = c.vehicleMode === 'relay' ? '区間' : '便';
-  showToast(`第${legIdx + 1}${unit}の車両を ${v ? v.plate : vehicleId} に変更しました`, 'success');
+  const label = leg.partnerVehicle ? '傭車（協力会社）' : (getVehicleById(vehicleId) ? getVehicleById(vehicleId).plate : vehicleId);
+  showToast(`第${legIdx + 1}${unit}の車両を ${label} に変更しました`, 'success');
 }
 
 // リレー輸送のレッグリストを描画
@@ -28844,10 +28930,11 @@ function renderDndTimeline() {
         if (c.vehicleMode !== 'relay' || !c.legs) return;
         // 読取専用ビュー：SSoT派生（フラグON時）or レガシー c.legs（既定）
         deriveRelayLegsView(c).forEach((leg, _li, _legsV) => {
-          if (!leg.driverName) return;
-          // ドライバー名のマッチング（姓のみで判定）
-          const legFirstName = leg.driverName.split(' ')[0];
-          if (legFirstName !== driverFirstName) return;
+          if (!leg.driverName && !leg.driverRefId) return;
+          // 論点F：ドライバーはID参照で照合（refが無い場合のみ姓で代替）
+          const legDid = _legDriverId(leg);
+          if (legDid && d._driverId) { if (legDid !== d._driverId) return; }
+          else if ((leg.driverName || '').split(' ')[0] !== driverFirstName) return;
           // 重複防止：同じレッグが既に注入済みかチェック
           const dup = assigned.some(a => a._relayLegId === leg.legId);
           if (dup) return;
@@ -28886,8 +28973,11 @@ function renderDndTimeline() {
       processingCases.forEach(c => {
         if (c.vehicleMode !== 'multi' || !c.legs) return;
         c.legs.forEach(leg => {
-          if (!leg.driverName) return;
-          if (leg.driverName.split(' ')[0] !== driverFirstNameM) return;
+          if (!leg.driverName && !leg.driverRefId) return;
+          // 論点F：ドライバーはID参照で照合（refが無い場合のみ姓で代替）
+          const legDidM = _legDriverId(leg);
+          if (legDidM && d._driverId) { if (legDidM !== d._driverId) return; }
+          else if ((leg.driverName || '').split(' ')[0] !== driverFirstNameM) return;
           if (assigned.some(a => a._multiLegId === leg.legId)) return;
           assigned.push({
             id: 'multi-' + leg.legId,
