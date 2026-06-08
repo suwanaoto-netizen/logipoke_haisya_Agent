@@ -17230,7 +17230,7 @@ function _ensureLegRefs(c, leg) {
     vehicleId = cand.vehicleId || null;
   }
   if (!driverId && leg.driverName) {
-    const d = drivers.find(x => x.name === leg.driverName);
+    const d = resolveDriverRef(leg.driverName);
     if (d) driverId = d.id;
   }
   if (!vehicleId) {
@@ -17263,7 +17263,7 @@ function _candidateRefs(c, idx) {
 function _legDriverId(leg) {
   if (!leg) return null;
   if (leg.driverRefId) return leg.driverRefId;
-  if (leg.driverName) { const d = drivers.find(x => x.name === leg.driverName); if (d) return d.id; }
+  if (leg.driverName) { const d = resolveDriverRef(leg.driverName); if (d) return d.id; }
   return null;
 }
 // 論点F：区間の車両IDをID参照で解決（無ければ表示ラベル→ID）
@@ -17538,7 +17538,7 @@ function _caseDispatcher() {
 // 案件の主担当ドライバーの dnd id（='V####'。driverOwners/driverLocks のキー）
 function _casePrimaryDriverDndId(c) {
   let d = (c && c.legs && c.legs.length) ? c.legs[0].driverRefId : null;
-  if (!d && c && c.driver) { const dd = drivers.find(x => x.name === c.driver); if (dd) d = dd.id; }
+  if (!d && c && c.driver) { const dd = resolveDriverRef(c.driver); if (dd) d = dd.id; }
   if (!d) return null;
   return (typeof _opVehicleIdForDriverId === 'function') ? _opVehicleIdForDriverId(d) : null;
 }
@@ -21112,6 +21112,27 @@ function resolveVehicleRef(ref) {
   return null;
 }
 window.resolveVehicleRef = resolveVehicleRef;
+
+// 旧ID/氏名/車両参照（あらゆる形）→ 正規 drivers エントリ の単一解決窓口（C2/C3：名前参照の撤廃）
+//  受理: 'D###' / ドライバー氏名 / 'V####'(=対の車両→同index driver) / '車両####' / '####'
+function resolveDriverRef(ref) {
+  if (ref == null) return null;
+  ref = String(ref).trim();
+  if (ref === '' || ref === '未割当') return null;
+  if (_driverById[ref]) return _driverById[ref];                        // 正規 'D###'
+  var byName = drivers.find(function (x) { return x.name === ref; });   // 氏名
+  if (byName) return byName;
+  // 車両参照（'V####'/'車両####'/'####'/plate）→ 同 index のドライバー
+  var v = (typeof resolveVehicleRef === 'function') ? resolveVehicleRef(ref) : null;
+  if (v) { var i = vehicles.indexOf(v); if (i >= 0 && drivers[i]) return drivers[i]; }
+  // legacyIds（'DRV-001' 等）
+  var byLegacy = drivers.find(function (x) { return Array.isArray(x.legacyIds) && x.legacyIds.indexOf(ref) >= 0; });
+  return byLegacy || null;
+}
+window.resolveDriverRef = resolveDriverRef;
+// 表示用：あらゆる参照 → 現在のマスタ氏名（改名耐性。stale な保存名に依存しない）
+function driverNameByRef(ref) { var d = resolveDriverRef(ref); return d ? d.name : (ref == null ? '' : String(ref)); }
+window.driverNameByRef = driverNameByRef;
 // ═══════════════════════════════════════════════════════════════
 //  台帳1本化：車両・ドライバー固有データを drivers[]/vehicles[] へ吸収
 //  ----------------------------------------------------------------
@@ -21846,7 +21867,7 @@ function _resolveVehicleIdByPlate(plate) {
 
 function _resolveDriverIdByName(name) {
   if (!name) return null;
-  const d = drivers.find(d => d.name === name);
+  const d = (typeof resolveDriverRef === 'function') ? resolveDriverRef(name) : drivers.find(d => d.name === name);
   return d ? d.id : null;
 }
 
@@ -22796,7 +22817,7 @@ window.assignmentAPI = {
   changeDriver(assignmentId, newDriverIdOrName) {
     let newId = newDriverIdOrName;
     if (!getDriverById(newId)) {
-      const d = drivers.find(x => x.name === newDriverIdOrName);
+      const d = resolveDriverRef(newDriverIdOrName);
       if (d) newId = d.id;
     }
     const r = reassignDriver(assignmentId, newId);
@@ -23005,9 +23026,9 @@ function normalizeCaseVehicleEntry(entry) {
   } else if (entry.id === '未割当') {
     entry._isUnassigned = true;
   }
-  // driver名から driverId を逆引き
+  // driver名から driverId を逆引き（単一解決窓口 resolveDriverRef 経由）
   if (typeof entry.driver === 'string' && entry.driver !== '未割当') {
-    const d = drivers.find(x => x.name === entry.driver);
+    const d = (typeof resolveDriverRef === 'function') ? resolveDriverRef(entry.driver) : drivers.find(x => x.name === entry.driver);
     if (d) {
       entry.driverId = d.id;
     } else {
@@ -23060,9 +23081,9 @@ function normalizeAllCaseSamples() {
       if (entry._isUnassigned) unassigned++;
     });
 
-    // 案件トップレベルの driver / vehicle 文字列もID解決
+    // 案件トップレベルの driver / vehicle 文字列もID解決（単一窓口経由）
     if (typeof c.driver === 'string' && c.driver !== '未割当' && !c.driverId) {
-      const d = drivers.find(x => x.name === c.driver);
+      const d = (typeof resolveDriverRef === 'function') ? resolveDriverRef(c.driver) : drivers.find(x => x.name === c.driver);
       if (d) c.driverId = d.id;
     }
     if (typeof c.vehicle === 'string' && c.vehicle !== '未割当' && !c.vehicleId) {
@@ -23129,8 +23150,7 @@ window.caseAssignAPI = {
     if (!entry) return { ok: false, reason: 'entry not found' };
     normalizeCaseVehicleEntry(entry);
     let newId = newDriverIdOrName;
-    let d = getDriverById(newId);
-    if (!d) d = drivers.find(x => x.name === newDriverIdOrName);
+    let d = getDriverById(newId) || resolveDriverRef(newDriverIdOrName);
     if (!d) return { ok: false, reason: 'driver not found' };
     const before = { driverId: entry.driverId, driver: entry.driver };
     entry.driverId = d.id;
