@@ -11078,6 +11078,9 @@ function _ssotDerive(seed, build){
       <button class="reg-tab" onclick="switchRegTab('manual')" id="regtab-manual">
         <span>✏️</span> 自分で入力
       </button>
+      <button class="reg-tab" onclick="switchRegTab('csv')" id="regtab-csv">
+        <span>📑</span> CSV一括登録
+      </button>
     </div>
 
     <div class="reg-body">
@@ -11562,6 +11565,76 @@ function _ssotDerive(seed, build){
         </div>
       </div>
 
+      <!-- ── CSV一括登録パネル ── -->
+      <div class="reg-panel" id="regpanel-csv">
+
+        <!-- ① サンプルCSVダウンロード -->
+        <div class="bcm-sample-card">
+          <div class="bcm-sample-card-hd">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>① サンプルCSVをダウンロード</span>
+          </div>
+          <div class="bcm-sample-card-body">
+            <p class="bcm-sample-desc">
+              「自分で入力」と同じ項目を列にしたサンプルです。<span style="color:#0D4A3A;font-weight:700">★必須列</span>（緑）は必ず入力してください。<br>
+              <strong>案件種別</strong>列に <code>定期</code> と入力した行は<strong>配車計画表へ直接反映</strong>されます（<code>通常</code> は未割当案件／個別案件処理へ）。
+            </p>
+            <div class="bcm-sample-cols" id="ccsv-col-chips"><!-- JSで生成 --></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="bcm-dl-btn" onclick="downloadCaseSampleCsv('normal')">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                通常案件サンプル
+              </button>
+              <button class="bcm-dl-btn" style="background:#0D4A3A" onclick="downloadCaseSampleCsv('teiki')">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                定期案件サンプル（テンプレ反映）
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ② CSVアップロード -->
+        <div class="bcm-upload-card" style="margin-top:16px">
+          <div class="bcm-upload-card-hd">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--sidebar-bg)" stroke-width="2">
+              <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+            </svg>
+            <span>② CSVファイルをアップロード</span>
+          </div>
+          <div class="bcm-upload-card-body">
+            <div class="bcm-drop-zone" id="ccsv-drop-zone"
+                 ondragover="caseCsvDragOver(event)" ondragleave="caseCsvDragLeave(event)" ondrop="caseCsvDrop(event)">
+              <input type="file" accept=".csv,text/csv" onchange="caseCsvFileSelected(this.files[0])" id="ccsv-file-input">
+              <div class="bcm-drop-icon">📂</div>
+              <div class="bcm-drop-title">CSVファイルをドラッグ＆ドロップ</div>
+              <div class="bcm-drop-sub">または <strong>クリックしてファイルを選択</strong>（.csv形式）</div>
+            </div>
+
+            <div class="bcm-err-banner" id="ccsv-err-banner">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span id="ccsv-err-text"></span>
+            </div>
+
+            <div class="bcm-preview-wrap" id="ccsv-preview-wrap">
+              <div class="bcm-preview-bar">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <span class="bcm-preview-count" id="ccsv-preview-count">0 件 読み込み済み</span>
+                <span class="bcm-preview-err" id="ccsv-preview-err-count"></span>
+                <button onclick="caseCsvClearFile()" style="margin-left:auto;border:none;background:none;font-size:11px;color:var(--text-muted);cursor:pointer;padding:2px 6px;border-radius:4px">✕ クリア</button>
+              </div>
+              <div class="bcm-preview-table-wrap">
+                <table class="bcm-preview-table">
+                  <thead id="ccsv-preview-thead"></thead>
+                  <tbody id="ccsv-preview-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /reg-body -->
 
     <div class="modal-footer" style="justify-content:space-between">
@@ -11600,6 +11673,46 @@ function _ssotDerive(seed, build){
       </button>
     </div>
   </div>
+</div>
+
+<!-- CSV一括登録 確認モーダル -->
+<div class="modal-overlay" id="csv-import-confirm-modal">
+  <div class="modal" style="width:560px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header" style="background:linear-gradient(135deg,#0D4A3A 0%,#1a7a5e 100%);color:#fff">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4 6v6c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V6l-8-4z"/><polyline points="9 12 11 14 15 10"/></svg>
+      <span class="modal-title">一括登録内容の確認</span>
+      <button class="modal-close" onclick="closeCaseCsvConfirm()" style="color:#fff">✕</button>
+    </div>
+    <div class="modal-body" style="padding:18px 20px;overflow-y:auto">
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;padding:9px 12px;background:var(--accent-pale);border-left:3px solid var(--accent);border-radius:4px">
+        以下の内容で一括登録します。<strong style="color:var(--text-primary)">案件種別「定期」</strong>の案件は<strong style="color:var(--text-primary)">配車計画表へ直接反映</strong>されます。内容をご確認ください。
+      </div>
+      <div id="ccsv-confirm-content"></div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between;flex-shrink:0">
+      <button class="btn btn-secondary" onclick="closeCaseCsvConfirm()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+        戻って修正する
+      </button>
+      <button class="btn btn-primary" onclick="executeCaseCsvImport()" style="background:#1a7a5e">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span id="ccsv-confirm-submit-label">この内容で一括登録する</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- CSV一括登録 アップロードプログレスバー（画面右下） -->
+<div id="csv-upload-progress" style="display:none;position:fixed;right:24px;bottom:24px;z-index:9960;width:300px;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.22);border:1px solid var(--border);padding:14px 16px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0D4A3A" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+    <span style="font-size:13px;font-weight:700;color:var(--text-primary)" id="csv-upload-progress-title">案件を取込中…</span>
+    <span style="margin-left:auto;font-size:11px;font-weight:700;color:#16a34a" id="csv-upload-progress-count">0 / 0</span>
+  </div>
+  <div style="height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden">
+    <div id="csv-upload-progress-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#1a7a5e,#3BB888);transition:width .2s"></div>
+  </div>
+  <div style="font-size:10px;color:var(--text-muted);margin-top:6px" id="csv-upload-progress-sub">アップロード中です。しばらくお待ちください。</div>
 </div>
 
 <!-- 協力会社依頼モーダル -->
@@ -18692,6 +18805,7 @@ function openRegisterModal() {
   resetUpload();
   resetImageUpload();
   clearManualForm();
+  if (typeof caseCsvClearFile === 'function') caseCsvClearFile();
 }
 
 function switchRegTab(tab) {
@@ -18701,12 +18815,27 @@ function switchRegTab(tab) {
   document.getElementById('regtab-' + tab).classList.add('active');
   document.getElementById('regpanel-' + tab).classList.add('active');
 
-  // 画像OCRタブの場合はモーダルを横長に
+  // 画像OCR / CSVタブの場合はモーダルを横長に
   const modal = document.querySelector('#register-modal .reg-modal');
   if (modal) {
-    if (tab === 'image') modal.classList.add('ocr-wide');
+    if (tab === 'image' || tab === 'csv') modal.classList.add('ocr-wide');
     else modal.classList.remove('ocr-wide');
   }
+
+  // フッターの登録ボタン：CSVタブでは一括登録用に切替（パース完了まで無効）
+  const submitBtn = document.getElementById('reg-submit-btn');
+  if (submitBtn) {
+    if (tab === 'csv') {
+      submitBtn.lastChild.textContent = ' 確認して一括登録';
+      submitBtn.disabled = !(typeof _caseCsvParsedRows !== 'undefined' && _caseCsvParsedRows.some(r => r._errors.length === 0));
+    } else {
+      submitBtn.lastChild.textContent = ' 個別案件処理へ登録';
+      submitBtn.disabled = false;
+    }
+  }
+
+  // CSVタブを開いたら列チップを初期化
+  if (tab === 'csv') renderCaseCsvColChips();
 }
 
 // ── 画像OCR ──
@@ -19007,6 +19136,12 @@ function submitNewCase() {
   let caseData = null;
   const missing = [];
 
+  // CSV一括登録タブ：確認モーダルへ
+  if (currentRegTab === 'csv') {
+    openCaseCsvConfirm();
+    return;
+  }
+
   if (currentRegTab === 'rec') {
     const ext = recExtracted;
     if (!ext) { showToast('録音してAI解析を完了してください', 'warn'); return; }
@@ -19175,6 +19310,307 @@ function confirmRegisterCase() {
   updatePhaseCounts();
   showToast('案件「'+caseData.client+'」を未処理リスト / 配車計画表の未割当案件 に登録しました', 'success');
   _pendingCaseData = null;
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  CSV一括登録（新規登録モーダル「📑 CSV一括登録」タブ）
+//  ・「自分で入力」と同じ項目をCSV列にして一括登録
+//  ・通常案件 → 未割当案件 / 個別案件処理（未処理）へ反映
+//  ・定期案件 → 配車計画表へ直接反映（assignments）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 「自分で入力」フォーム項目に対応した列定義
+var CASE_CSV_COLUMNS = [
+  { key: 'client',   label: '取引先名',       required: true  },
+  { key: 'phone',    label: '取引先電話番号',  required: false },
+  { key: 'from',     label: '発地',           required: true  },
+  { key: 'to',       label: '着地',           required: true  },
+  { key: 'goods',    label: '荷物・品名',      required: false },
+  { key: 'weight',   label: '重量',           required: false },
+  { key: 'deadline', label: '希望納期',        required: true  },
+  { key: 'vehicle',  label: '車格',           required: false },
+  { key: 'note',     label: '条件・備考',      required: false },
+  { key: 'channel',  label: '受付チャネル',     required: false },
+  { key: 'kind',     label: '案件種別',        required: false }, // 通常 / 定期
+];
+
+var _caseCsvParsedRows = [];
+
+// 列チップを描画
+function renderCaseCsvColChips() {
+  var chips = document.getElementById('ccsv-col-chips');
+  if (!chips) return;
+  chips.innerHTML = CASE_CSV_COLUMNS.map(function(col) {
+    return '<span class="bcm-col-chip' + (col.required ? ' required' : '') + '">'
+      + (col.required ? '★ ' : '') + col.label + '</span>';
+  }).join('');
+}
+
+// ── ドラッグ＆ドロップ ──
+function caseCsvDragOver(e) { e.preventDefault(); var z = document.getElementById('ccsv-drop-zone'); if (z) z.classList.add('dragover'); }
+function caseCsvDragLeave(e) { var z = document.getElementById('ccsv-drop-zone'); if (z) z.classList.remove('dragover'); }
+function caseCsvDrop(e) {
+  e.preventDefault();
+  var z = document.getElementById('ccsv-drop-zone'); if (z) z.classList.remove('dragover');
+  var file = e.dataTransfer.files[0];
+  if (file) caseCsvFileSelected(file);
+}
+
+function caseCsvFileSelected(file) {
+  if (!file) return;
+  if (!file.name.match(/\.csv$/i)) { caseCsvShowError('CSVファイル（.csv）を選択してください'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try { caseCsvParseAndPreview(e.target.result); }
+    catch (err) { caseCsvShowError('CSVの読み込みに失敗しました: ' + err.message); }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function caseCsvClearFile() {
+  _caseCsvParsedRows = [];
+  var inp = document.getElementById('ccsv-file-input'); if (inp) inp.value = '';
+  var wrap = document.getElementById('ccsv-preview-wrap'); if (wrap) wrap.classList.remove('show');
+  var err = document.getElementById('ccsv-err-banner'); if (err) err.classList.remove('show');
+  var btn = document.getElementById('reg-submit-btn'); if (btn && currentRegTab === 'csv') btn.disabled = true;
+}
+
+function caseCsvShowError(msg) {
+  var err = document.getElementById('ccsv-err-banner');
+  var txt = document.getElementById('ccsv-err-text');
+  if (err && txt) { txt.textContent = msg; err.classList.add('show'); }
+  var btn = document.getElementById('reg-submit-btn'); if (btn && currentRegTab === 'csv') btn.disabled = true;
+}
+
+function caseCsvParseAndPreview(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // BOM除去
+  var lines = text.replace(/\r/g, '').split('\n').filter(function(l){ return l.trim() !== ''; });
+  if (lines.length < 2) { caseCsvShowError('データ行がありません（ヘッダー行 + 1行以上必要です）'); return; }
+
+  var headers = bcmParseCsvLine(lines[0]); // 既存の純パーサを共用
+  var requiredLabels = CASE_CSV_COLUMNS.filter(function(c){ return c.required; }).map(function(c){ return c.label; });
+  var missingCols = requiredLabels.filter(function(r){ return headers.indexOf(r) === -1; });
+  if (missingCols.length) { caseCsvShowError('必須列が見つかりません: ' + missingCols.join(', ')); return; }
+
+  var err = document.getElementById('ccsv-err-banner'); if (err) err.classList.remove('show');
+
+  var rows = []; var errCount = 0;
+  for (var i = 1; i < lines.length; i++) {
+    var vals = bcmParseCsvLine(lines[i]);
+    var row = { _rowNum: i + 1, _errors: [] };
+    headers.forEach(function(h, idx) {
+      var colDef = CASE_CSV_COLUMNS.find(function(c){ return c.label === h; });
+      if (colDef) row[colDef.key] = (vals[idx] || '').trim();
+    });
+    CASE_CSV_COLUMNS.filter(function(c){ return c.required; }).forEach(function(col) {
+      if (!row[col.key]) row._errors.push(col.label + 'が空です');
+    });
+    if (row._errors.length) errCount++;
+    rows.push(row);
+  }
+  _caseCsvParsedRows = rows;
+
+  // プレビュー
+  var previewKeys = ['client','from','to','deadline','vehicle'];
+  var thead = document.getElementById('ccsv-preview-thead');
+  var tbody = document.getElementById('ccsv-preview-tbody');
+  if (thead) {
+    thead.innerHTML = '<tr><th>状態</th><th>種別</th>'
+      + previewKeys.map(function(k){ var c = CASE_CSV_COLUMNS.find(function(x){return x.key===k;}); return '<th>' + (c?c.label:k) + '</th>'; }).join('')
+      + '</tr>';
+  }
+  if (tbody) {
+    tbody.innerHTML = rows.map(function(row) {
+      var ok = row._errors.length === 0;
+      var isTeiki = (row.kind || '').indexOf('定期') >= 0;
+      var kindBadge = isTeiki
+        ? '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#0D4A3A;color:#6DD5A8;font-weight:700">定期</span>'
+        : '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#EAF5F0;color:#0D4A3A;font-weight:700">通常</span>';
+      return '<tr class="' + (ok ? 'row-ok' : 'row-warn') + '">'
+        + '<td>' + (ok ? '✅' : '⚠️ ' + row._errors[0]) + '</td>'
+        + '<td>' + kindBadge + '</td>'
+        + previewKeys.map(function(k){ return '<td>' + _esc(row[k] || '') + '</td>'; }).join('')
+        + '</tr>';
+    }).join('');
+  }
+
+  var wrap = document.getElementById('ccsv-preview-wrap'); if (wrap) wrap.classList.add('show');
+  var cnt = document.getElementById('ccsv-preview-count'); if (cnt) cnt.textContent = rows.length + ' 件 読み込み済み';
+  var errCnt = document.getElementById('ccsv-preview-err-count'); if (errCnt) errCnt.textContent = errCount > 0 ? '⚠️ ' + errCount + ' 件にエラー' : '';
+
+  var validCount = rows.length - errCount;
+  var btn = document.getElementById('reg-submit-btn');
+  if (btn && currentRegTab === 'csv') btn.disabled = validCount === 0;
+}
+
+// ── サンプルCSVダウンロード（kind: 'normal' | 'teiki'） ──
+function downloadCaseSampleCsv(kind) {
+  var headers = CASE_CSV_COLUMNS.map(function(c){ return c.label; });
+  var enc = function(v){ v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; };
+  var rowFromMap = function(map){ return CASE_CSV_COLUMNS.map(function(c){ return enc(map[c.key] || ''); }).join(','); };
+
+  var sampleRows, fname;
+  if (kind === 'teiki' && typeof TEIKI_SAMPLES !== 'undefined') {
+    var freqJa = { weekly:'毎週', biweekly:'隔週', monthly:'毎月', daily:'毎日' };
+    sampleRows = TEIKI_SAMPLES.map(function(t){
+      return rowFromMap({
+        client: t.client, phone: '', from: t.from, to: t.to,
+        goods: '定期案件 / ' + t.name, weight: '',
+        deadline: '定期便（' + (freqJa[t.freq] || t.freq || '') + '）',
+        vehicle: t.vehicle, note: t.note || '', channel: 'その他', kind: '定期'
+      });
+    });
+    fname = 'logipoke_case_teiki_sample.csv';
+  } else {
+    sampleRows = [
+      rowFromMap({ client:'株式会社○○商事', phone:'03-1234-5678', from:'埼玉県川口市', to:'神奈川県横浜市',
+                   goods:'パレット', weight:'800kg', deadline:'05/25 AM指定', vehicle:'2tトラック',
+                   note:'時間厳守 / バース予約済み', channel:'電話', kind:'通常' }),
+      rowFromMap({ client:'△△物流株式会社', phone:'06-9876-5432', from:'大阪府大阪市', to:'愛知県名古屋市',
+                   goods:'段ボール 30箱', weight:'1.2t', deadline:'05/26 終日', vehicle:'4tウィング',
+                   note:'リフト荷役', channel:'メール', kind:'通常' })
+    ];
+    fname = 'logipoke_case_normal_sample.csv';
+  }
+
+  var csv = '﻿' + headers.join(',') + '\n' + sampleRows.join('\n');
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  showToast((kind === 'teiki' ? '定期案件' : '通常案件') + 'サンプルCSVをダウンロードしました', 'success');
+}
+
+// ── 確認モーダル：通常/定期を2グループで表示 ──
+function openCaseCsvConfirm() {
+  var valid = _caseCsvParsedRows.filter(function(r){ return r._errors.length === 0; });
+  if (!valid.length) { showToast('登録できる行がありません。CSVを読み込んでください', 'warn'); return; }
+
+  var teikiRows  = valid.filter(function(r){ return (r.kind || '').indexOf('定期') >= 0; });
+  var normalRows = valid.filter(function(r){ return (r.kind || '').indexOf('定期') < 0; });
+
+  var rowLine = function(r){
+    return '<div style="display:flex;gap:8px;font-size:11px;padding:5px 0;border-bottom:1px dashed var(--border)">'
+      + '<span style="font-weight:700;color:var(--text-primary);min-width:120px">' + _esc(r.client) + '</span>'
+      + '<span style="color:var(--text-secondary)">' + _esc(r.from) + ' → ' + _esc(r.to) + '</span>'
+      + '<span style="margin-left:auto;color:var(--text-muted)">' + _esc(r.deadline) + (r.vehicle ? ' / ' + _esc(r.vehicle) : '') + '</span>'
+      + '</div>';
+  };
+
+  var html = '';
+  html += '<div style="margin-bottom:14px">'
+    + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
+    + '<span style="font-size:13px;font-weight:700;color:#0D4A3A">📋 未割当案件 / 個別案件処理へ登録</span>'
+    + '<span style="font-size:11px;font-weight:700;color:#16a34a">' + normalRows.length + ' 件</span></div>'
+    + (normalRows.length ? normalRows.map(rowLine).join('') : '<div style="font-size:11px;color:var(--text-muted);padding:4px 0">対象なし</div>')
+    + '</div>';
+
+  html += '<div>'
+    + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
+    + '<span style="font-size:13px;font-weight:700;color:#0D4A3A">🚚 配車計画表へ直接反映（定期案件）</span>'
+    + '<span style="font-size:11px;font-weight:700;color:#16a34a">' + teikiRows.length + ' 件</span></div>'
+    + (teikiRows.length ? teikiRows.map(rowLine).join('') : '<div style="font-size:11px;color:var(--text-muted);padding:4px 0">対象なし</div>')
+    + '</div>';
+
+  document.getElementById('ccsv-confirm-content').innerHTML = html;
+  var lbl = document.getElementById('ccsv-confirm-submit-label');
+  if (lbl) lbl.textContent = valid.length + ' 件を一括登録する';
+  document.getElementById('csv-import-confirm-modal').classList.add('open');
+}
+function closeCaseCsvConfirm() {
+  document.getElementById('csv-import-confirm-modal').classList.remove('open');
+}
+
+// ── 通常案件1件をCSV行から登録（未処理 + 未割当案件） ──
+function _registerNormalCaseFromCsv(row, idx) {
+  var now = new Date();
+  var pad = function(n){ return String(n).padStart(2,'0'); };
+  var newId = now.getFullYear().toString().slice(2) + pad(now.getMonth()+1) + pad(now.getDate())
+            + String(500 + idx).slice(-3);
+  var goods = (row.goods || '') + (row.weight ? ' / ' + row.weight : '');
+  var chMap = { '電話':'tel', 'メール':'mail', 'FAX':'fax', 'その他':'other' };
+  var ch = chMap[row.channel] || (row.channel || 'tel');
+
+  var caseObj = {
+    id: newId, status: '未解析', client: row.client, from: row.from, to: row.to,
+    goods: goods || '—', deadline: row.deadline, conditions: row.note || '',
+    ch: ch, time: pad(now.getHours()) + ':' + pad(now.getMinutes()),
+    analyzed: false, casePattern: null, vehicles: []
+  };
+  unprocessedCases.unshift(caseObj);
+  if (typeof autoDetectPattern === 'function') unprocessedCases[0].casePattern = autoDetectPattern(unprocessedCases[0]);
+  if (typeof addToDispatchUnassigned === 'function') {
+    addToDispatchUnassigned(newId, { client: row.client, from: row.from, to: row.to, goods: goods || '—', deadline: row.deadline });
+  }
+  return newId;
+}
+
+// ── 定期案件1件をCSV行から配車計画表へ直接反映（assignments） ──
+function _reflectTeikiCaseFromCsv(row, slotIdx) {
+  if (typeof createAssignment !== 'function' || typeof dndDrivers === 'undefined' || !dndDrivers.length) return null;
+  var pick = dndDrivers[slotIdx % dndDrivers.length];
+  if (!pick || !pick._driverId) return null;
+
+  var pad = function(n){ return String(n).padStart(2,'0'); };
+  var startH = 8 + (slotIdx % 6) * 2;             // 08:00 起点に2hずつずらして重複回避
+  var start = pad(startH) + ':00';
+  var end   = pad(Math.min(startH + 2, 23)) + ':00';
+  var color = DND_AUTO_COLORS[_dndAutoColorIdx % DND_AUTO_COLORS.length]; _dndAutoColorIdx++;
+
+  return createAssignment({
+    tab: 'planning', date: '2026-05-27',
+    driverId: pick._driverId, vehicleId: pick.id,
+    start: start, end: end, status: '計画中',
+    client: row.client, from: row.from, to: row.to,
+    goods: (row.goods || '定期案件') + (row.weight ? ' / ' + row.weight : ''),
+    deadline: row.deadline || '定期便',
+    label: row.client, color: color
+  });
+}
+
+// ── 一括登録実行（右下プログレスバー） ──
+function executeCaseCsvImport() {
+  var validRows = _caseCsvParsedRows.filter(function(r){ return r._errors.length === 0; });
+  if (!validRows.length) { showToast('登録できる行がありません', 'info'); return; }
+  closeCaseCsvConfirm();
+
+  var prog = document.getElementById('csv-upload-progress');
+  var bar  = document.getElementById('csv-upload-progress-bar');
+  var cnt  = document.getElementById('csv-upload-progress-count');
+  var sub  = document.getElementById('csv-upload-progress-sub');
+  var total = validRows.length;
+  if (prog) prog.style.display = 'block';
+  if (bar) bar.style.width = '0%';
+  if (cnt) cnt.textContent = '0 / ' + total;
+  if (sub) sub.textContent = 'アップロード中です。しばらくお待ちください。';
+
+  var i = 0, normalN = 0, teikiN = 0, teikiSlot = 0;
+  function step() {
+    if (i >= total) {
+      if (bar) bar.style.width = '100%';
+      if (cnt) cnt.textContent = total + ' / ' + total;
+      if (sub) sub.textContent = '取込が完了しました';
+      if (typeof renderUnprocessedList === 'function') { try { renderUnprocessedList(); } catch (e) {} }
+      if (typeof updatePhaseCounts === 'function') { try { updatePhaseCounts(); } catch (e) {} }
+      if (typeof updateDispatchNavBadge === 'function') { try { updateDispatchNavBadge(); } catch (e) {} }
+      if (typeof renderDndList === 'function') { try { renderDndList(); } catch (e) {} }
+      if (teikiN && typeof renderDispatchContent === 'function') { try { renderDispatchContent(); } catch (e) {} }
+      closeModal('register-modal');
+      showToast(normalN + ' 件を未割当案件／個別案件処理に、' + teikiN + ' 件を配車計画表へ直接反映しました', 'success');
+      setTimeout(function(){ if (prog) prog.style.display = 'none'; }, 1400);
+      return;
+    }
+    var row = validRows[i];
+    if ((row.kind || '').indexOf('定期') >= 0) { _reflectTeikiCaseFromCsv(row, teikiSlot++); teikiN++; }
+    else { _registerNormalCaseFromCsv(row, i); normalN++; }
+    i++;
+    if (bar) bar.style.width = Math.round(i / total * 100) + '%';
+    if (cnt) cnt.textContent = i + ' / ' + total;
+    setTimeout(step, 60);
+  }
+  step();
 }
 
 
