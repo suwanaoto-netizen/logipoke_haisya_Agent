@@ -12578,12 +12578,39 @@ function recalcAllScores() {
     if (!c.vehicles) return;
     c.vehicles.forEach(v => {
       v.score = calcAIScore(v.id, c, v);
+      const ax = calcAxisScores(v.id, c, v);   // 論点B：2軸化
+      v.driverScore = ax.driverScore;
+      v.vehicleScore = ax.vehicleScore;
     });
     // スコア降順で rank を振り直す
     c.vehicles.sort((a,b) => b.score - a.score);
     c.vehicles.forEach((v,i) => { v.rank = i+1; });
   });
 }
+
+// 論点B：AI推薦の2軸化。総合スコアを「車両軸(距離+積載+顧客相性)」と
+// 「ドライバー軸(実績+法令余裕)」に分離評価する。独立選択を意味づけるための指標。
+function calcAxisScores(vehicleId, caseObj, vehicle) {
+  const raw = calcAIScoreBreakdown(vehicleId, caseObj, vehicle);
+  const w = window.AI_WEIGHTS;
+  const vehW = w.distance + w.load + w.customer;   // 車両・経路・荷に関する軸
+  const drvW = w.driver + w.law;                    // ドライバー個人に関する軸
+  const vehicleScore = vehW ? Math.round((raw.distance * w.distance + raw.load * w.load + raw.customer * w.customer) / vehW) : 0;
+  const driverScore  = drvW ? Math.round((raw.driver * w.driver + raw.law * w.law) / drvW) : 0;
+  return { driverScore, vehicleScore, breakdown: raw };
+}
+window.calcAxisScores = calcAxisScores;
+
+// 候補の2軸スコアを取得（未計算なら都度算出してフォールバック）
+function axisScoresFor(c, v) {
+  if (!v) return { driverScore: null, vehicleScore: null };
+  if (typeof v.driverScore === 'number' && typeof v.vehicleScore === 'number') {
+    return { driverScore: v.driverScore, vehicleScore: v.vehicleScore };
+  }
+  try { const ax = calcAxisScores(v.id, c, v); return { driverScore: ax.driverScore, vehicleScore: ax.vehicleScore }; }
+  catch (e) { return { driverScore: null, vehicleScore: null }; }
+}
+window.axisScoresFor = axisScoresFor;
 
 const _unprocessedSeed = [
   { id:'20240524001', status:'未解析', client:'株式会社○○商事', from:'埼玉県川口市', to:'神奈川県横浜市', goods:'パレット / 800kg / 常温', deadline:'05/25 AM指定', ch:'tel', time:'09:15', analyzed:true,
@@ -12982,6 +13009,44 @@ function deriveRelayLegsView(c) {
   } catch (e) { return c.legs || []; }
 }
 window.deriveRelayLegsView = deriveRelayLegsView;
+
+// ═══════════════════════════════════════════════════════════════
+//  論点D：DnDボードのブロック単位の車両解決（driver×vehicle ペア固定からの脱却）
+//  ----------------------------------------------------------------
+//  従来ボードは「1行＝1ドライバー×1車両（固定ペア）」で、ブロックは行の車両を暗黙利用していた。
+//  ドライバーと車両の分離（論点A/C）により、同じドライバーでも便ごとに別車両を使えるため、
+//  ブロックが自身の vehicleId を持てるようにし、行の既定と異なる場合は「別車両」を明示表示する。
+// ═══════════════════════════════════════════════════════════════
+
+// 行(dndDrivers エントリ)の既定車両ID（ペア由来）
+function _dndRowDefaultVehicleId(d) {
+  if (!d) return null;
+  if (d._vehicleId) return d._vehicleId;
+  if (d._driverId && typeof _opVehicleIdForDriverId === 'function') return _opVehicleIdForDriverId(d._driverId);
+  return null;
+}
+// 車両IDからナンバープレート表示
+function _dndVehiclePlate(vId) {
+  if (!vId) return '';
+  const v = (typeof getVehicleById === 'function') ? getVehicleById(vId) : null;
+  return v ? (v.plate || v.id) : String(vId);
+}
+// プレート短縮（末尾の3〜4桁の数字。無ければ '車両'/'V' を除去）
+function _dndPlateShort(plate) {
+  if (!plate) return '';
+  const m = String(plate).match(/(\d{3,4})(?!.*\d)/);
+  return m ? m[1] : String(plate).replace(/^車両/, '').replace(/^V/, '');
+}
+// ブロックの実効車両情報。block.vehicleId が行の既定と異なれば override=true。
+function _dndBlockVehicleInfo(d, block) {
+  const def = _dndRowDefaultVehicleId(d);
+  const own = (block && block.vehicleId) ? block.vehicleId : null;
+  const eff = own || def;
+  const override = !!(own && def && own !== def);
+  return { effectiveId: eff, override: override, plate: _dndVehiclePlate(eff), shortPlate: _dndPlateShort(_dndVehiclePlate(eff)) };
+}
+window._dndBlockVehicleInfo = _dndBlockVehicleInfo;
+window._dndRowDefaultVehicleId = _dndRowDefaultVehicleId;
 
 // 正準フラット層 assignments[] を 正規化SSoT(Trip>Leg>Stop) 経由でロスレス往復した結果を返す。
 // フラグON時、ガント(buildScheduleViewFromAssignments)はこの「SSoTに裏付けられた」配列を使う。
@@ -16137,6 +16202,13 @@ function renderProcessingDetail(i) {
       <div class="vcard-right">
         <div class="vcard-score">${v.score}</div>
         <div class="vcard-score-label">AIスコア</div>
+        ${(function(){ var ax = (typeof axisScoresFor==='function') ? axisScoresFor(c, v) : {driverScore:null,vehicleScore:null};
+          return (ax.driverScore!=null && ax.vehicleScore!=null)
+            ? `<div class="vcard-axis" style="display:flex;gap:4px;justify-content:flex-end;margin-top:2px;font-size:9px;font-weight:700">
+                 <span title="車両軸：距離・積載・顧客相性" style="background:#eff6ff;color:#1d4ed8;border-radius:4px;padding:1px 4px">🚚${ax.vehicleScore}</span>
+                 <span title="ドライバー軸：実績・法令余裕" style="background:#f0fdf4;color:#15803d;border-radius:4px;padding:1px 4px">👤${ax.driverScore}</span>
+               </div>`
+            : ''; })()}
         <div class="vcard-stars">${'★'.repeat(v.stars)}${'☆'.repeat(5-v.stars)}</div>
       </div>
       ${isSel ? `<div class="vcard-check"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>` : ''}
@@ -17175,7 +17247,12 @@ function _legOverlapConflicts(c) {
 function _driverSelectHtml(c, caseIdx, legIdx) {
   const sel = c.legs[legIdx].driverRefId || '';
   const recIds = new Set((c.vehicles || []).map(v => { if (typeof normalizeCaseVehicleEntry === 'function') normalizeCaseVehicleEntry(v); return v.driverId; }).filter(Boolean));
-  const opt = d => `<option value="${d.id}" ${d.id === sel ? 'selected' : ''}>${d.name}（${d.id}・${(Array.isArray(d.license) ? d.license.join('/') : d.license)}${d.partner ? '・協力会社' : ''}）</option>`;
+  const opt = d => {
+    const cand = (c.vehicles || []).find(v => v.driverId === d.id);
+    const ax = cand ? axisScoresFor(c, cand) : null;
+    const sc = (ax && ax.driverScore != null) ? ` ★推${ax.driverScore}` : '';
+    return `<option value="${d.id}" ${d.id === sel ? 'selected' : ''}>${d.name}（${d.id}・${(Array.isArray(d.license) ? d.license.join('/') : d.license)}${d.partner ? '・協力会社' : ''}）${sc}</option>`;
+  };
   const rec = drivers.filter(d => recIds.has(d.id));
   const others = drivers.filter(d => !recIds.has(d.id));
   const unknown = (sel && !drivers.some(d => d.id === sel)) ? `<option value="${sel}" selected>（未登録ドライバー）</option>` : '';
@@ -17198,7 +17275,10 @@ function _vehicleSelectHtml(c, caseIdx, legIdx) {
     const mark = [];
     if (driver && !_driverCanDrive(driver, v)) mark.push('⚠免許');
     if (needKg > 0 && v.maxLoad < needKg) mark.push('⚠積載');
-    return `<option value="${v.id}" ${v.id === sel ? 'selected' : ''}>${v.plate}（${v.type} ${v.ton}t/${v.maxLoad.toLocaleString()}kg）${mark.length ? ' ' + mark.join('') : ''}</option>`;
+    const cand = (c.vehicles || []).find(x => x.vehicleId === v.id);
+    const ax = cand ? axisScoresFor(c, cand) : null;
+    const sc = (ax && ax.vehicleScore != null) ? ` ★推${ax.vehicleScore}` : '';
+    return `<option value="${v.id}" ${v.id === sel ? 'selected' : ''}>${v.plate}（${v.type} ${v.ton}t/${v.maxLoad.toLocaleString()}kg）${sc}${mark.length ? ' ' + mark.join('') : ''}</option>`;
   };
   const rec = vehicles.filter(v => recIds.has(v.id));
   const others = vehicles.filter(v => !recIds.has(v.id));
@@ -28778,6 +28858,7 @@ function renderDndTimeline() {
             _relayLegNo: leg.legNo,
             _relayTotalLegs: _legsV.length,
             _relayCaseId: c.id,
+            vehicleId: leg.vehicleRefId || null,   // 論点D：区間で独立選択された車両
             start: leg.startTime || '00:00',
             end: leg.endTime || '00:00',
             client: c.client,
@@ -28814,6 +28895,7 @@ function renderDndTimeline() {
             _multiCaseId: c.id,
             _multiLegNo: leg.legNo,
             _multiTotalLegs: c.legs.length,
+            vehicleId: leg.vehicleRefId || null,   // 論点D：増車便で独立選択された車両
             start: leg.startTime || '08:00',
             end: leg.endTime || '12:00',
             client: c.client, from: c.from, to: c.to,
@@ -28889,6 +28971,11 @@ function renderDndTimeline() {
         : (a.confirmed
             ? `<span class="dnd-block-status confirmed" title="仮確定済みの配車">✓ 確定</span>`
             : `<span class="dnd-block-status tentative" title="未確定（ドラッグ＆ドロップで仮割当・仮確定前）"><span class="so-dot"></span>仮</span>`);
+      // 論点D：ブロック固有車両が行の既定と異なる場合は「別車両」チップを表示
+      const _vehInfo = _dndBlockVehicleInfo(d, a);
+      const vehChip = _vehInfo.override
+        ? `<span class="dnd-block-veh" title="この便は既定と異なる車両：${_vehInfo.plate.replace(/"/g, '&quot;')}" style="font-size:9px;font-weight:700;background:rgba(255,255,255,.28);border:1px solid rgba(255,255,255,.5);border-radius:3px;padding:0 3px;margin-left:4px">🚚${_vehInfo.shortPlate}</span>`
+        : '';
       return `<div class="dnd-block ${isNew ? 'new-arrival' : ''} ${a.confirmed ? 'is-confirmed' : (isTentativeBlock ? 'is-tentative' : '')} ${blockKaizenCls} ${relayLegCls} ${multiDayCls}"
                    style="left:${left}%;width:${width}%;background:${a.color}"
                    ${relayLegAttr}
@@ -28902,7 +28989,7 @@ function renderDndTimeline() {
         ${segmentsHtml}
         ${statusChip}
         ${leftMarker}
-        <div class="dnd-block-title">${a.label}${mdm.sequenceTotal > 1 ? `<span class="dnd-block-seq">${mdm.sequenceCurrent}/${mdm.sequenceTotal}</span>` : ''}</div>
+        <div class="dnd-block-title">${a.label}${mdm.sequenceTotal > 1 ? `<span class="dnd-block-seq">${mdm.sequenceCurrent}/${mdm.sequenceTotal}</span>` : ''}${vehChip}</div>
         <div class="dnd-block-sub">${a.start}〜${a.end}${a.sub ? ' · ' + a.sub : ''}</div>
         ${rightMarker}
         ${interactiveForBlock ? `<button class="dnd-block-remove" onclick="event.stopPropagation();dndRemoveAssignment('${d.id}',${idx})" title="割当解除">×</button>` : ''}
@@ -28912,6 +28999,12 @@ function renderDndTimeline() {
     const busy = assigned.length > 0;
     const statusCls = busy ? 'busy' : 'available';
     const statusTxt = busy ? '配車あり' : '空き';
+
+    // 論点D：一部の便が行の既定と異なる車両を使う場合のマーカー（ヘッダー車両表示に付与）
+    const _vehOverride = assigned.some(a => _dndBlockVehicleInfo(d, a).override);
+    const vehOverrideMark = _vehOverride
+      ? `<span class="dnd-driver-veh-mark" title="一部の便で既定と異なる車両を使用しています" style="color:#b45309;font-weight:800;margin-left:2px">＊</span>`
+      : '';
 
     // 改善基準告示の表示（ドライバー欄に小バッジ）
     let kaizenBadgeHtml = '';
@@ -28947,7 +29040,7 @@ function renderDndTimeline() {
 
     const _dvLine2 = (dvd('status') || dvd('vehicle') || dvd('capacity')) ? `<div class="dnd-driver-line2">
           ${dvd('status') ? `<span class="dnd-driver-status ${statusCls}">${statusTxt}</span>` : ''}
-          ${dvd('vehicle') ? `<span class="dnd-driver-vehicle">${d.vehicle.replace(/\s*車両/, '').replace(/^V?(\d+)/, '$1')}</span>` : ''}
+          ${dvd('vehicle') ? `<span class="dnd-driver-vehicle">${d.vehicle.replace(/\s*車両/, '').replace(/^V?(\d+)/, '$1')}${vehOverrideMark}</span>` : ''}
           ${dvd('capacity') ? `<span class="dnd-driver-capacity">${d.type}/${(d.maxLoad/1000).toFixed(0)}t</span>` : ''}
         </div>` : '';
     return `<div class="dnd-row">
@@ -28981,22 +29074,23 @@ function renderDndTimeline() {
       const driverChain = legs
         .map(l => (l.driverName || '—').split(' ')[0])
         .join(' → ');
-      const vehicleList = legs.map(l => l.vehicleId).join(' / ');
+      const vehicleList = legs.map(l => l.vehicleName || l.vehicleId).join(' / ');
       // 各区間のブロック
       const blocksHtml = legs.map(leg => {
         const left = timeToPercent(leg.startTime || '00:00');
         const width = durationToPercent(leg.startTime || '00:00', leg.endTime || '00:00');
-        const tip = `${c.client}\n区間${leg.legNo}: ${leg.relayFrom} → ${leg.relayTo}\n${leg.startTime} - ${leg.endTime}\n${leg.driverName} (${leg.vehicleId})`;
+        const _vlabel = leg.vehicleName || leg.vehicleId || '';
+        const tip = `${c.client}\n区間${leg.legNo}: ${leg.relayFrom} → ${leg.relayTo}\n${leg.startTime} - ${leg.endTime}\n${leg.driverName} (${_vlabel})`;
         return `<div class="dnd-block dnd-block-relay-leg"
                      data-leg-no="${leg.legNo}/${legs.length}"
                      style="left:${left}%;width:${width}%;background:#0d9488"
                      title="${tip.replace(/"/g, '&quot;').replace(/\n/g, ' / ')}">
-          <div class="dnd-block-title">${(leg.driverName || '').split(' ')[0]}</div>
+          <div class="dnd-block-title">${(leg.driverName || '').split(' ')[0]}<span style="font-size:9px;font-weight:600;opacity:.85;margin-left:3px">🚚${_dndPlateShort(_vlabel)}</span></div>
           <div class="dnd-block-sub">${leg.startTime}〜${leg.endTime}</div>
         </div>`;
       }).join('');
-      // 車両IDから"車両"プレフィックスを除去（通常行と同じ表示形式）
-      const vehicleListShort = legs.map(l => (l.vehicleId || '').replace('車両', '')).join('/');
+      // 車両表示はプレート短縮（通常行と同じ表示形式）
+      const vehicleListShort = legs.map(l => _dndPlateShort(l.vehicleName || l.vehicleId || '')).join('/');
       // 取引先名（長すぎる場合は省略）
       const clientShort = (c.client || '').length > 8
         ? c.client.substring(0, 7) + '…'
