@@ -103,6 +103,24 @@ check('フェーズ内の順序が保持される', () => {
   assert.deepEqual(u.map(c => c.id), ['20240524001', '20240524002']);
 });
 
+check('永続ケースストア createCaseStore：4フェーズをロスレス保持・getX/overview', () => {
+  const store = DB.createCaseStore().syncFromCases({ unprocessed, processing, processed, master });
+  assert.deepEqual(store.getUnprocessed(), unprocessed);
+  assert.deepEqual(store.getProcessing(), processing);
+  assert.deepEqual(store.getProcessed(), processed);
+  assert.deepEqual(store.getMaster(), master);
+  assert.equal(store.overview().length, unprocessed.length + processing.length + processed.length + master.length);
+});
+
+check('永続ケースストア：syncFromCases 再同期で前回状態が残らない', () => {
+  const store = DB.createCaseStore();
+  store.syncFromCases({ unprocessed, processing, processed, master });
+  store.syncFromCases({ unprocessed: [unprocessed[0]] });   // 1フェーズ1件に縮小
+  assert.equal(store.getUnprocessed().length, 1);
+  assert.equal(store.getProcessing().length, 0);
+  assert.equal(store.getProcessed().length, 0);
+});
+
 check('決定性：2回取込んでも同一復元', () => {
   const a = JSON.stringify(DB.toProcessingCases(freshIngest()));
   const b = JSON.stringify(DB.toProcessingCases(freshIngest()));

@@ -716,6 +716,25 @@
     rows.sort(function (a, b) { return (a._seq || 0) - (b._seq || 0); });
     return rows.map(function (o) { return o.raw; });
   }
+  // 永続ケースストア（課題C7・最終形の足場）：4分割配列を保持する単一の正規化ストア。
+  // 運行層の createOperationStore と同型。syncFromCases で再構築、getX/overview でライブ派生。
+  // 将来、case writer を store-first 化して 4配列を本ストアの派生ビューへ降格するための基盤。
+  function createCaseStore() {
+    var db = createDB();
+    function _clearC7() {
+      var del = []; db.orders.forEach(function (o, k) { if (o && o._c7) del.push(k); });
+      del.forEach(function (k) { db.orders.delete(k); });
+    }
+    return {
+      db: db,
+      syncFromCases: function (byPhase) { _clearC7(); ingestCases(db, byPhase || {}); return this; },
+      getUnprocessed: function () { return toUnprocessedCases(db); },
+      getProcessing: function () { return toProcessingCases(db); },
+      getProcessed: function () { return toProcessedCases(db); },
+      getMaster: function () { return toAllCasesMaster(db); },
+      overview: function () { return toCaseOverview(db); }
+    };
+  }
   function toUnprocessedCases(db) { return _toCasePhase(db, 'unprocessed'); }
   function toProcessingCases(db) { return _toCasePhase(db, 'processing'); }
   function toProcessedCases(db) { return _toCasePhase(db, 'processed'); }
@@ -762,6 +781,7 @@
     createOperationStore: createOperationStore,
     // ③ 案件層 統合（課題C7）：4分割配列の単一ストア統合＋per-phase ロスレス復元
     ingestCases: ingestCases, toUnprocessedCases: toUnprocessedCases, toProcessingCases: toProcessingCases,
-    toProcessedCases: toProcessedCases, toAllCasesMaster: toAllCasesMaster, toCaseOverview: toCaseOverview
+    toProcessedCases: toProcessedCases, toAllCasesMaster: toAllCasesMaster, toCaseOverview: toCaseOverview,
+    createCaseStore: createCaseStore
   };
 });
