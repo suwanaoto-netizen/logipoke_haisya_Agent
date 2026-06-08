@@ -19988,25 +19988,46 @@ function _opVehicleIdForDriverId(dId) {
 }
 
 // 射影ビュー：単一情報源(drivers[]/vehicles[]) → 旧 vehicleMasterData/driverMasterData 形。
-// id は V####/D### に寄せ、legacyId に旧ID。driverName/vehicleId は固定参照ではなく派生値。
+// 表示件数は正規化マスタ(drivers[]/vehicles[])と一致（全件）。台帳12件は _led の実データ、
+// 残りは運行データから既定値を合成して表示する。id は V####/D###、driverName/vehicleId は派生値。
+function _baseLabel(baseId) {
+  if (!baseId) return '';
+  var b = (typeof getBaseById === 'function') ? getBaseById(baseId) : null;
+  return b ? b.name : String(baseId);
+}
 function _vehicleLedgerView(v) {
   var dId = _opDriverIdForVehicleId(v.id);
   var d = dId ? _driverById[dId] : null;
-  return Object.assign({}, v._led, {
-    id: v.id, legacyId: (v._led && v._led.id) || null,
+  var num = String(v.id).replace(/^V/, '');
+  // _led（台帳実データ）が無い運行車両は、運行フィールドから既定の台帳ビューを合成
+  var led = v._led || {
+    id: num, plate: v.plate, type: (v.ton ? (v.ton + 't') : '') + (v.type || ''),
+    cap: v.maxLoad || (v.ton ? v.ton * 1000 : 0), base: _baseLabel(v.baseId),
+    status: '空車', inspection: '', fuel: '軽油', note: '',
+    maker: '', model: '', regdate: '', mileage: 0, fuelLogs: [], costLogs: []
+  };
+  return Object.assign({}, led, {
+    id: v.id, legacyId: led.id != null ? led.id : num,
     driverName: d ? d.name : '', __ref: v
   });
 }
 function _driverLedgerView(d) {
   var vId = _opVehicleIdForDriverId(d.id);
-  return Object.assign({}, d._led, {
+  // _led（台帳実データ）が無い運行ドライバーは、運行フィールドから既定の台帳ビューを合成
+  var led = d._led || {
+    id: d.id, name: d.name, empNo: '', tel: d.tel || '',
+    license: Array.isArray(d.license) ? d.license.join('・') : (d.license || ''),
+    stars: 3, avail: '空車', base: _baseLabel(d.baseId || d.homeBaseId),
+    note: d.partner ? ('協力会社：' + (d.partnerName || '')) : ''
+  };
+  return Object.assign({}, led, {
     id: d.id, legacyId: (d._led && d._led.id) || null, name: d.name,
     vehicleId: vId || '', __ref: d
   });
 }
 function rebuildLedgerViews() {
-  window.vehicleMasterData = vehicles.filter(function (v) { return v._ledger; }).map(_vehicleLedgerView);
-  window.driverMasterData  = drivers.filter(function (d) { return d._ledger; }).map(_driverLedgerView);
+  window.vehicleMasterData = vehicles.map(_vehicleLedgerView);
+  window.driverMasterData  = drivers.map(_driverLedgerView);
 }
 window.rebuildLedgerViews = rebuildLedgerViews;
 
@@ -20016,8 +20037,8 @@ function _pickVehLed(rec) { var o = {}; _VEH_LED_KEYS.forEach(function (k) { if 
 function vehicleMasterUpsert(rec, idx) {
   rec = rec || {};
   if (typeof idx === 'number' && idx >= 0 && window.vehicleMasterData && window.vehicleMasterData[idx]) {
-    var ref = window.vehicleMasterData[idx].__ref;                 // 既存：運行レコードの _led を更新
-    if (ref) { ref._led = Object.assign({}, ref._led, _pickVehLed(rec)); if (rec.plate) ref.plate = rec.plate; }
+    var ref = window.vehicleMasterData[idx].__ref;                 // 既存：運行レコードの _led を更新（無ければ生成）
+    if (ref) { ref._ledger = true; ref._led = Object.assign({}, ref._led, _pickVehLed(rec)); if (rec.plate) ref.plate = rec.plate; }
   } else {
     var num = String(rec.id || '').replace(/^V/, '').replace(/^車両/, '') || String(1000 + ((vehicles.length * 137 + 245) % 9000));
     var vid = 'V' + num;
@@ -20037,9 +20058,9 @@ function vehicleMasterRemove(idx) {
   if (!window.vehicleMasterData || !window.vehicleMasterData[idx]) return null;
   var removed = window.vehicleMasterData[idx];
   var ref = removed.__ref;
-  if (ref) {
-    if (ref._ledgerNew) { var vi = vehicles.indexOf(ref); if (vi >= 0) vehicles.splice(vi, 1); delete _vehicleById[ref.id]; }
-    else { delete ref._ledger; delete ref._led; }   // 既存運行車両は盤に残し、台帳からのみ外す
+  if (ref) {                                          // 単一情報源から実削除（表示=正規化マスタと一致）
+    var vi = vehicles.indexOf(ref); if (vi >= 0) vehicles.splice(vi, 1);
+    delete _vehicleById[ref.id];
   }
   rebuildLedgerViews();
   return removed;
@@ -20133,8 +20154,9 @@ function _pickDrvLed(rec) { var o = {}; _DRV_LED_KEYS.forEach(function (k) { if 
 function driverMasterUpsert(rec, idx) {
   rec = rec || {};
   if (typeof idx === 'number' && idx >= 0 && window.driverMasterData && window.driverMasterData[idx]) {
-    var ref = window.driverMasterData[idx].__ref;                 // 既存：運行レコードの _led / 氏名を更新
+    var ref = window.driverMasterData[idx].__ref;                 // 既存：運行レコードの _led / 氏名を更新（無ければ生成）
     if (ref) {
+      ref._ledger = true;
       ref._led = Object.assign({}, ref._led, _pickDrvLed(rec));
       if (rec.name) ref.name = rec.name;
       if (rec.tel) ref.tel = rec.tel;
@@ -20157,9 +20179,9 @@ function driverMasterRemove(idx) {
   if (!window.driverMasterData || !window.driverMasterData[idx]) return null;
   var removed = window.driverMasterData[idx];
   var ref = removed.__ref;
-  if (ref) {
-    if (ref._ledgerNew) { var di = drivers.indexOf(ref); if (di >= 0) drivers.splice(di, 1); delete _driverById[ref.id]; }
-    else { delete ref._ledger; delete ref._led; }
+  if (ref) {                                          // 単一情報源から実削除（表示=正規化マスタと一致）
+    var di = drivers.indexOf(ref); if (di >= 0) drivers.splice(di, 1);
+    delete _driverById[ref.id];
   }
   rebuildLedgerViews();
   return removed;
