@@ -357,10 +357,16 @@ CREATE TABLE leg (
   id               TEXT PRIMARY KEY,          -- 旧 legId "relay-104-1"
   trip_id          TEXT NOT NULL REFERENCES trip(id) ON DELETE CASCADE,
   sequence_no      INTEGER NOT NULL CHECK (sequence_no >= 1),  -- 旧 legNo/sequenceNo
-  driver_id        TEXT NOT NULL REFERENCES driver(id),        -- ID参照（旧 driverName 文字列）→ 課題C3
-  vehicle_id       TEXT NOT NULL REFERENCES vehicle(id),       -- ID参照（旧 "車両2580"）→ 課題C3
-  effective_base_id TEXT REFERENCES base(id),  -- 当日の実働拠点（旧 effectiveBaseId）
-  cross_base       BOOLEAN NOT NULL DEFAULT false,  -- クロス配車か（旧 isCrossBaseAssignment）
+  driver_id        TEXT NOT NULL REFERENCES driver(id),        -- ID参照（旧 driverName 文字列）→ 課題C3。プロト driverRefId に対応
+  -- 車両は通常は自社車両を必須。ただし協力会社の傭車（is_hired）は自社マスタ外のため NULL 可
+  -- （プロト vehicleRefId に対応。partnerVehicle=true のとき NULL ＝傭車）。
+  vehicle_id       TEXT REFERENCES vehicle(id),                -- ID参照（旧 "車両2580"）→ 課題C3。傭車時は NULL
+  is_hired         BOOLEAN NOT NULL DEFAULT false,             -- 傭車（協力会社車両）か。プロト leg.partnerVehicle
+  hired_company_id TEXT REFERENCES company(id),                -- 傭車先の協力会社（kind='partner'）
+  hired_charge_jpy BIGINT CHECK (hired_charge_jpy IS NULL OR hired_charge_jpy >= 0), -- 傭車運賃（partnerRates由来）
+  purchase_order_no TEXT,                                      -- 傭車の発注書番号（PO）。プロト leg.purchaseOrderNo
+  effective_base_id TEXT REFERENCES base(id),  -- 当日の実働拠点（旧 effectiveBaseId。既定=車両拠点）
+  cross_base       BOOLEAN NOT NULL DEFAULT false,  -- クロス配車か（旧 isCrossBaseAssignment / プロト crossBase）
   role             leg_role NOT NULL DEFAULT 'pickup_delivery',
   start_at         TIMESTAMPTZ NOT NULL,      -- 旧 startTime/startDateTime（日付込みで日跨ぎ対応）→ 課題C5
   end_at           TIMESTAMPTZ NOT NULL,
@@ -378,8 +384,13 @@ CREATE TABLE leg (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   version          INTEGER NOT NULL DEFAULT 1,
   UNIQUE (trip_id, sequence_no),
-  CHECK (end_at > start_at)
+  CHECK (end_at > start_at),
+  -- 傭車は自社車両を持たず協力会社・傭車運賃を伴う／自社便は車両必須・傭車情報なし
+  CHECK (is_hired = (vehicle_id IS NULL)),
+  CHECK (NOT is_hired OR hired_company_id IS NOT NULL)
 );
+-- 注: 複数台（増車）での1便ごとの積載按分は assignment.loaded_weight_kg（order×leg）で表現する
+--     （プロト leg.loadKg ＝ その便が運ぶ重量）。相積みは複数 assignment の loaded_weight_kg 合算 ≦ 車両最大積載。
 
 -- ★ DBレベルで「同一ドライバー/車両の時間重複」を禁止（旧 validateAssignment の overlap 判定を保証）
 ALTER TABLE leg ADD CONSTRAINT leg_driver_no_overlap

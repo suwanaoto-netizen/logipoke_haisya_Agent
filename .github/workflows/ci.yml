@@ -34,3 +34,5 @@ jobs:
         run: node migration/verify_operation.mjs
       - name: Verify case-layer unify (C7)
         run: node migration/verify_cases.mjs
+      - name: Verify leg → DDL mapping (driver/vehicle split, hire, load split)
+        run: node migration/verify_legmap.mjs

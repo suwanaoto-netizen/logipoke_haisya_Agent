@@ -283,6 +283,32 @@
   function addStop(db, s) { var id = (s && s.id) || mkId('stop'); var stop = Object.assign({ id: id, sequenceNo: 1, kind: 'pickup' }, s || {}, { id: id }); db.stops.set(id, stop); return stop; }
   function assign(db, a) { var id = (a && a.id) || mkId('asgn'); var as = Object.assign({ id: id }, a || {}, { id: id }); db.assignments.set(id, as); return as; }
 
+  // プロトタイプの区間(leg) → DDL(schema.sql の leg)カラムへの正式マッピング。
+  //  ドライバー/車両の分離(driverRefId/vehicleRefId)、傭車(partnerVehicle→is_hired/vehicle_id=NULL)、
+  //  実働拠点/クロス配車(effectiveBaseId/crossBase)、便ごと積載(loadKg→assignment.loaded_weight_kg)を反映。
+  function legToDDLRecord(leg, ctx) {
+    leg = leg || {}; ctx = ctx || {};
+    var hired = !!leg.partnerVehicle;
+    return {
+      id: leg.legId || leg.id || null,
+      trip_id: ctx.tripId || null,
+      sequence_no: leg.legNo || leg.sequenceNo || 1,
+      driver_id: leg.driverRefId || ctx.driverId || null,               // 分離：ドライバー
+      vehicle_id: hired ? null : (leg.vehicleRefId || null),            // 分離：車両（傭車は NULL）
+      is_hired: hired,                                                  // 傭車（協力会社車両）
+      hired_company_id: hired ? (leg.hiredCompanyId || ctx.hiredCompanyId || null) : null,
+      hired_charge_jpy: hired && typeof leg.partnerCharge === 'number' ? leg.partnerCharge : null,
+      purchase_order_no: hired ? (leg.purchaseOrderNo || null) : null,
+      effective_base_id: leg.effectiveBaseId || null,                  // 実働拠点（既定=車両拠点）
+      cross_base: !!leg.crossBase,                                     // クロス配車
+      role: leg.role || 'pickup_delivery',
+      start_at: leg.startAt || leg.startTime || null,
+      end_at: leg.endAt || leg.endTime || null,
+      // 便ごとの積載按分（DDL では assignment.loaded_weight_kg へ。相積みは複数 assignment 合算）
+      loaded_weight_kg: (typeof leg.loadKg === 'number' ? leg.loadKg : null)
+    };
+  }
+
   // 案件タイムライン（v_case_timeline 相当の派生）
   function deriveCaseTimeline(db, orderId) {
     var out = [];
@@ -766,6 +792,7 @@
     pushReception: pushReception, clearReceptions: clearReceptions,
     // ④ operation
     createTrip: createTrip, addLeg: addLeg, addStop: addStop, assign: assign, deriveCaseTimeline: deriveCaseTimeline,
+    legToDDLRecord: legToDDLRecord,
     // ④ operation：旧 case.legs[] → SSoT 取込 と SSoT → 3画面 派生（課題C6）
     ingestCaseLegs: ingestCaseLegs, toScheduleBlocks: toScheduleBlocks, toDndBoard: toDndBoard,
     toCaseTimeline: toCaseTimeline, toCaseLegs: toCaseLegs,
