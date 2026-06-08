@@ -16951,6 +16951,7 @@ function setVehicleMode(caseIdx, mode) {
       vehicleIdx: 0,
       lawOk: v.law ? v.law.items.every(it=>it.ok) : true,
     }];
+    _ensureLegRefs(c, c.legs[0]);   // driverRefId/vehicleRefId を付与（分離）
   } else if (mode === 'relay' && (!c.legs || c.legs.length === 0 || !c.legs[0].relayFrom)) {
     // リレー輸送の初期化：2区間を自動セットアップ
     const v1 = c.vehicles[0];
@@ -16995,6 +16996,7 @@ function setVehicleMode(caseIdx, mode) {
         lawOk: v2.law ? v2.law.items.every(it=>it.ok) : true,
       }
     ];
+    c.legs.forEach(l => _ensureLegRefs(c, l));   // 各区間に driverRefId/vehicleRefId を付与（分離）
     // jobIdを割り当て
     if (!c.jobId) c.jobId = 'J-' + (c.id || 'NEW') + '-' + Date.now();
   }
@@ -17029,15 +17031,265 @@ function _suggestRelayMidpoint(from, to) {
   return '中継地点（未設定）';
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  ドライバーと車両の分離（Step1〜4 ＋ 論点A：免許/積載/時間重複・論点C：法令はドライバー基準）
+//  ----------------------------------------------------------------
+//  区間(leg)の権威フィールドを driverRefId / vehicleRefId（マスタID）に分離する。
+//  従来の driverName / vehicleId(表示) / vehicleName / capacity / lawOk は派生値（同期）。
+//  ・ドライバー選択 → 既定で紐づく車両(_opVehicleIdForDriverId)を補完。両者は独立変更可。
+//  ・論点A：免許(I7)・積載(I6)・同一案件内の時間重複(I1/I2)を検証して提示。
+//  ・論点C：改善基準告示(lawOk)は車両ではなくドライバーに帰属させる。
+// ═══════════════════════════════════════════════════════════════
+
+// 案件の必要積載量(kg)を goods から抽出（I6）
+function _caseNeededKg(c) {
+  const m = String((c && c.goods) || '').match(/([\d,]+)\s*kg/);
+  return m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
+}
+
+// 車両の車格(ton)から必要免許クラスを判定（I7。マスタは中型/大型運用）
+function _vehicleRequiredLicense(v) {
+  if (!v) return null;
+  return (Number(v.ton) || 0) > 5 ? '大型' : '中型';
+}
+
+// ドライバーが当該車両を運転できるか（保有免許 ≧ 必要免許）
+function _driverCanDrive(driver, vehicle) {
+  if (!driver || !vehicle) return true;
+  const RANK = { '準中型': 0, '中型': 1, '大型': 2, '牽引': 2 };
+  const have = Array.isArray(driver.license)
+    ? driver.license
+    : (driver.license ? String(driver.license).split(/[・,/\s]+/) : []);
+  const haveRank = have.reduce((mx, l) => Math.max(mx, RANK[String(l).trim()] || 0), 0);
+  const needRank = RANK[_vehicleRequiredLicense(vehicle)] || 0;
+  return haveRank >= needRank;
+}
+
+// 論点C：法令(改善基準告示)はドライバーに帰属。案件の推薦候補lawをドライバー名で引く。
+function _driverLawForCase(c, driverId) {
+  if (!c || !driverId) return null;
+  const d = getDriverById(driverId);
+  const name = d ? d.name : null;
+  const cand = (c.vehicles || []).find(v => v.driverId === driverId || (name && v.driver === name));
+  return cand ? cand.law : null;
+}
+function _driverLawOk(c, driverId) {
+  const law = _driverLawForCase(c, driverId);
+  return law ? law.items.every(it => it.ok) : true;
+}
+
+// 区間の表示用フィールドを driverRefId/vehicleRefId（権威）から再生成
+function _syncLegDisplayFromRefs(c, leg) {
+  const d = leg.driverRefId ? getDriverById(leg.driverRefId) : null;
+  const v = leg.vehicleRefId ? getVehicleById(leg.vehicleRefId) : null;
+  if (d) leg.driverName = d.name;
+  if (v) {
+    leg.vehicleId = v.id;                 // 権威マスタID（'V####'）
+    leg.vehicleName = v.plate || v.id;    // 表示用ナンバープレート
+    leg.capacity = (typeof v.maxLoad === 'number') ? (v.maxLoad.toLocaleString() + 'kg') : leg.capacity;
+  }
+  leg.lawOk = _driverLawOk(c, leg.driverRefId);  // 論点C：ドライバー基準
+  return leg;
+}
+
+// レガシー leg（vehicleIdx/driverName/vehicleId 由来）に refs を補完（一度きりの移行）
+function _ensureLegRefs(c, leg) {
+  if (!leg) return leg;
+  if (leg.driverRefId || leg.vehicleRefId) { _syncLegDisplayFromRefs(c, leg); return leg; }
+  let driverId = null, vehicleId = null;
+  if (typeof leg.vehicleIdx === 'number' && c.vehicles && c.vehicles[leg.vehicleIdx]) {
+    const cand = c.vehicles[leg.vehicleIdx];
+    if (typeof normalizeCaseVehicleEntry === 'function') normalizeCaseVehicleEntry(cand);
+    driverId = cand.driverId || null;
+    vehicleId = cand.vehicleId || null;
+  }
+  if (!driverId && leg.driverName) {
+    const d = drivers.find(x => x.name === leg.driverName);
+    if (d) driverId = d.id;
+  }
+  if (!vehicleId) {
+    const ref = leg.vehicleId || leg.vehicleName;
+    if (ref && typeof resolveVehicleRef === 'function') {
+      const v = resolveVehicleRef(ref);
+      if (v) vehicleId = v.id;
+    }
+  }
+  if (!vehicleId && driverId) vehicleId = _opVehicleIdForDriverId(driverId);
+  leg.driverRefId = driverId;
+  leg.vehicleRefId = vehicleId;
+  _syncLegDisplayFromRefs(c, leg);
+  return leg;
+}
+
+// 推薦候補(c.vehicles[idx]) → {driverId, vehicleId}
+function _candidateRefs(c, idx) {
+  const v = c.vehicles && c.vehicles[idx];
+  if (!v) return { driverId: null, vehicleId: null };
+  if (typeof normalizeCaseVehicleEntry === 'function') normalizeCaseVehicleEntry(v);
+  return { driverId: v.driverId || null, vehicleId: v.vehicleId || null };
+}
+
+// 論点A：1区間のドライバー×車両の整合検証（免許/積載/法令）
+// applyLoad=false のときは積載チェックを行わない（複数台=相積みは積載按分が未管理のため誤警告を避ける）
+function _validateLegCombo(c, leg, applyLoad) {
+  const issues = [];
+  const d = leg.driverRefId ? getDriverById(leg.driverRefId) : null;
+  const v = leg.vehicleRefId ? getVehicleById(leg.vehicleRefId) : null;
+  if (!d) issues.push({ type: 'driver', msg: 'ドライバーが未選択です' });
+  if (!v) issues.push({ type: 'vehicle', msg: '車両が未選択です' });
+  if (d && v && !_driverCanDrive(d, v)) {
+    const need = _vehicleRequiredLicense(v);
+    issues.push({ type: 'license', msg: `免許不足：${d.name}（${(Array.isArray(d.license) ? d.license.join('/') : d.license)}）は ${v.ton}t車に${need}免許が必要` });
+  }
+  if (applyLoad && v) {
+    const needKg = _caseNeededKg(c);
+    if (needKg > 0 && v.maxLoad < needKg) {
+      issues.push({ type: 'load', msg: `積載超過：荷量 ${needKg.toLocaleString()}kg ＞ ${v.plate} の最大積載 ${v.maxLoad.toLocaleString()}kg` });
+    }
+  }
+  if (leg.driverRefId && !_driverLawOk(c, leg.driverRefId)) {
+    issues.push({ type: 'law', msg: `改善基準告示：${d ? d.name : ''} は要確認` });
+  }
+  return issues;
+}
+
+// 論点A（I1/I2）：同一案件の区間間で「同一ドライバー／同一車両の時間重複」を検出
+function _legOverlapConflicts(c) {
+  const legs = c.legs || [];
+  const toMin = t => { if (!t) return null; const p = String(t).split(':'); const h = +p[0], m = +(p[1] || 0); return isNaN(h) ? null : h * 60 + (isNaN(m) ? 0 : m); };
+  const out = [];
+  for (let a = 0; a < legs.length; a++) {
+    for (let b = a + 1; b < legs.length; b++) {
+      const la = legs[a], lb = legs[b];
+      const s1 = toMin(la.startTime), e1 = toMin(la.endTime), s2 = toMin(lb.startTime), e2 = toMin(lb.endTime);
+      if (s1 == null || e1 == null || s2 == null || e2 == null) continue;
+      if (!(s1 < e2 && s2 < e1)) continue;  // 重複なし
+      if (la.driverRefId && la.driverRefId === lb.driverRefId) out.push({ type: 'driver', a, b, name: (getDriverById(la.driverRefId) || {}).name });
+      if (la.vehicleRefId && la.vehicleRefId === lb.vehicleRefId) out.push({ type: 'vehicle', a, b, plate: (getVehicleById(la.vehicleRefId) || {}).plate });
+    }
+  }
+  return out;
+}
+
+// ドライバー選択 <select> のHTML（AI推薦を先頭、続けて全ドライバー）
+function _driverSelectHtml(c, caseIdx, legIdx) {
+  const sel = c.legs[legIdx].driverRefId || '';
+  const recIds = new Set((c.vehicles || []).map(v => { if (typeof normalizeCaseVehicleEntry === 'function') normalizeCaseVehicleEntry(v); return v.driverId; }).filter(Boolean));
+  const opt = d => `<option value="${d.id}" ${d.id === sel ? 'selected' : ''}>${d.name}（${d.id}・${(Array.isArray(d.license) ? d.license.join('/') : d.license)}${d.partner ? '・協力会社' : ''}）</option>`;
+  const rec = drivers.filter(d => recIds.has(d.id));
+  const others = drivers.filter(d => !recIds.has(d.id));
+  const unknown = (sel && !drivers.some(d => d.id === sel)) ? `<option value="${sel}" selected>（未登録ドライバー）</option>` : '';
+  return `<select class="leg-driver-select" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 9px;font-size:12px;font-family:'Noto Sans JP',sans-serif;background:#fff;cursor:pointer"
+      onchange="setLegDriver(${caseIdx}, ${legIdx}, this.value)">
+    ${unknown}
+    ${rec.length ? `<optgroup label="AI推薦">${rec.map(opt).join('')}</optgroup>` : ''}
+    <optgroup label="全ドライバー">${others.map(opt).join('')}</optgroup>
+  </select>`;
+}
+
+// 車両選択 <select> のHTML（AI推薦を先頭、続けて全車両。現ドライバーで運転不可/積載不足を印字）
+function _vehicleSelectHtml(c, caseIdx, legIdx) {
+  const leg = c.legs[legIdx];
+  const sel = leg.vehicleRefId || '';
+  const driver = leg.driverRefId ? getDriverById(leg.driverRefId) : null;
+  const needKg = _caseNeededKg(c);
+  const recIds = new Set((c.vehicles || []).map(v => { if (typeof normalizeCaseVehicleEntry === 'function') normalizeCaseVehicleEntry(v); return v.vehicleId; }).filter(Boolean));
+  const opt = v => {
+    const mark = [];
+    if (driver && !_driverCanDrive(driver, v)) mark.push('⚠免許');
+    if (needKg > 0 && v.maxLoad < needKg) mark.push('⚠積載');
+    return `<option value="${v.id}" ${v.id === sel ? 'selected' : ''}>${v.plate}（${v.type} ${v.ton}t/${v.maxLoad.toLocaleString()}kg）${mark.length ? ' ' + mark.join('') : ''}</option>`;
+  };
+  const rec = vehicles.filter(v => recIds.has(v.id));
+  const others = vehicles.filter(v => !recIds.has(v.id));
+  const unknown = (sel && !vehicles.some(v => v.id === sel)) ? `<option value="${sel}" selected>（未登録車両）</option>` : '';
+  return `<select class="leg-vehicle-select" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 9px;font-size:12px;font-family:'Noto Sans JP',sans-serif;background:#fff;cursor:pointer"
+      onchange="setLegVehicle(${caseIdx}, ${legIdx}, this.value)">
+    ${unknown}
+    ${rec.length ? `<optgroup label="AI推薦">${rec.map(opt).join('')}</optgroup>` : ''}
+    <optgroup label="全車両">${others.map(opt).join('')}</optgroup>
+  </select>`;
+}
+
+// ドライバー＋車両の2軸選択UI（論点A検証バナー付き）。multi/relay 共通。
+function _legDriverVehiclePickerHtml(c, caseIdx, legIdx, applyLoad) {
+  const leg = c.legs[legIdx];
+  const issues = _validateLegCombo(c, leg, applyLoad);
+  const banner = issues.length
+    ? `<div style="margin-top:6px;padding:5px 8px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:10px;color:#b91c1c;line-height:1.5">${issues.map(it => '⚠ ' + it.msg).join('<br>')}</div>`
+    : `<div style="margin-top:6px;padding:4px 8px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;font-size:10px;color:#047857">✅ ドライバー・車両・法令の整合OK</div>`;
+  return `<div class="leg-dv-picker">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
+      <span style="font-size:10px;font-weight:700;color:var(--text-secondary);width:48px;flex-shrink:0">👤 ドライバー</span>
+      ${_driverSelectHtml(c, caseIdx, legIdx)}
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span style="font-size:10px;font-weight:700;color:var(--text-secondary);width:48px;flex-shrink:0">🚚 車両</span>
+      ${_vehicleSelectHtml(c, caseIdx, legIdx)}
+    </div>
+    ${banner}
+  </div>`;
+}
+
+// 案件全体の時間重複バナー（I1/I2）
+function _legOverlapBannerHtml(c) {
+  const cf = _legOverlapConflicts(c);
+  if (!cf.length) return '';
+  const unit = c.vehicleMode === 'relay' ? '区間' : '便';
+  const msgs = cf.map(x => x.type === 'driver'
+    ? `ドライバー「${x.name || '?'}」が${unit}${x.a + 1}と${unit}${x.b + 1}で時間重複`
+    : `車両「${x.plate || '?'}」が${unit}${x.a + 1}と${unit}${x.b + 1}で時間重複`);
+  return `<div style="margin:0 0 8px;padding:7px 10px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;font-size:11px;color:#9a3412;line-height:1.6">${[...new Set(msgs)].map(m => '⚠ ' + m).join('<br>')}</div>`;
+}
+
+// 書込（SSoT）＋検証＋再描画の共通後処理
+function _afterLegEdit(c, caseIdx) {
+  _opStoreWriteCaseLegs(c);
+  _ssotValidateRelay(c);
+  renderProcessingDetail(caseIdx);
+}
+
+// ── 区間のドライバー変更（車両は未指定 or 連動中なら既定車両を補完） ──
+function setLegDriver(caseIdx, legIdx, driverId) {
+  const c = processingCases[caseIdx];
+  const leg = c.legs[legIdx];
+  if (!leg) return;
+  const autoVehicle = !leg._vehicleManual;
+  leg.driverRefId = driverId;
+  if (!leg.vehicleRefId || autoVehicle) {
+    const def = _opVehicleIdForDriverId(driverId);
+    if (def) { leg.vehicleRefId = def; leg._vehicleManual = false; }
+  }
+  _syncLegDisplayFromRefs(c, leg);
+  _afterLegEdit(c, caseIdx);
+  const d = getDriverById(driverId);
+  const unit = c.vehicleMode === 'relay' ? '区間' : '便';
+  showToast(`第${legIdx + 1}${unit}のドライバーを ${d ? d.name : driverId} に変更しました`, 'success');
+}
+
+// ── 区間の車両変更（ドライバーは保持。手動指定フラグを立てる） ──
+function setLegVehicle(caseIdx, legIdx, vehicleId) {
+  const c = processingCases[caseIdx];
+  const leg = c.legs[legIdx];
+  if (!leg) return;
+  leg.vehicleRefId = vehicleId;
+  leg._vehicleManual = true;
+  _syncLegDisplayFromRefs(c, leg);
+  _afterLegEdit(c, caseIdx);
+  const v = getVehicleById(vehicleId);
+  const unit = c.vehicleMode === 'relay' ? '区間' : '便';
+  showToast(`第${legIdx + 1}${unit}の車両を ${v ? v.plate : vehicleId} に変更しました`, 'success');
+}
+
 // リレー輸送のレッグリストを描画
 function renderRelayList(caseIdx, c) {
   const legs = c.legs || [];
   if (legs.length === 0) {
     return '<div style="padding:14px;text-align:center;color:#9ca3af;font-size:11px">区間がまだ設定されていません</div>';
   }
-  return legs.map((leg, li) => {
+  return _legOverlapBannerHtml(c) + legs.map((leg, li) => {
     const isLast = li === legs.length - 1;
-    const v = c.vehicles[leg.vehicleIdx || 0];
+    _ensureLegRefs(c, leg);
     const lawOk = leg.lawOk !== false;
     return `
       <div class="relay-leg-card">
@@ -17071,11 +17323,8 @@ function renderRelayList(caseIdx, c) {
                      onchange="updateRelayLeg(${caseIdx}, ${li}, 'endTime', this.value)">
             </label>
           </div>
-          <div class="relay-leg-driver-row">
-            <select onchange="setRelayLegVehicle(${caseIdx}, ${li}, this.value)" class="relay-leg-vselect">
-              ${c.vehicles.map((vv, vi) => `<option value="${vi}" ${vi === (leg.vehicleIdx||0) ? 'selected' : ''}>${vv.driver}（${vv.id} ${vv.cap}）${vv.law && vv.law.items.every(it=>it.ok) ? ' ✅' : ' ⚠️'}</option>`).join('')}
-            </select>
-            ${!lawOk ? '<span class="relay-leg-warn">⚠️ 改善基準告示で要確認</span>' : '<span class="relay-leg-ok">✅ 法令適合</span>'}
+          <div class="relay-leg-driver-row" style="flex-direction:column;align-items:stretch;gap:0">
+            ${_legDriverVehiclePickerHtml(c, caseIdx, li, true)}
           </div>
         </div>
         ${!isLast ? `
@@ -17128,6 +17377,7 @@ function addRelayLeg(caseIdx) {
     vehicleIdx: c.vehicles.indexOf(nextV) >= 0 ? c.vehicles.indexOf(nextV) : 0,
     lawOk: nextV.law ? nextV.law.items.every(it=>it.ok) : true,
   });
+  _ensureLegRefs(c, c.legs[c.legs.length - 1]);   // driverRefId/vehicleRefId を付与（分離）
   // 前区間の到着地と新区間の出発地を連動させる
   if (lastLeg) {
     lastLeg.relayTo = lastLeg.relayTo === c.to ? '中継地点（未設定）' : lastLeg.relayTo;
@@ -17218,6 +17468,7 @@ function addLeg(caseIdx) {
     vehicleIdx: c.vehicles.indexOf(nextV),
     lawOk: nextV.law ? nextV.law.items.every(it=>it.ok) : true,
   });
+  _ensureLegRefs(c, c.legs[c.legs.length - 1]);   // driverRefId/vehicleRefId を付与（分離）
   renderProcessingDetail(caseIdx);
 }
 
@@ -17261,16 +17512,11 @@ function renderLegList(caseIdx, c) {
     </div>`;
   }
   const legHtml = legs.map((leg, li) => {
-    const v = c.vehicles[leg.vehicleIdx] || c.vehicles[0];
+    _ensureLegRefs(c, leg);
     const lawIcon = leg.lawOk ? '✅ 法令クリア' : '⚠️ 法令要確認';
     const lawCls  = leg.lawOk ? 'background:#d1fae5;color:#065f46' : 'background:#fef2f2;color:#dc2626';
 
-    // 車両選択プルダウン（AI推薦3候補）
-    const vehicleOpts = c.vehicles.map((vv, vi) =>
-      `<option value="${vi}" ${leg.vehicleIdx===vi?'selected':''}>${vv.driver}（${vv.id}） ${vv.cap} スコア:${vv.score}</option>`
-    ).join('');
-
-    return `<div class="leg-block ${leg.vehicleId?'leg-confirmed':''}" id="leg-block-${caseIdx}-${li}">
+    return `<div class="leg-block ${leg.vehicleRefId?'leg-confirmed':''}" id="leg-block-${caseIdx}-${li}">
       <div class="leg-block-header">
         <div class="leg-no-badge ${li===0?'':'sub'}">${li+1}</div>
         <span style="font-size:12px;font-weight:600;color:var(--text-primary)">第${li+1}便</span>
@@ -17286,13 +17532,9 @@ function renderLegList(caseIdx, c) {
           </button>` : ''}
         </div>
       </div>
-      <!-- 車両選択 -->
+      <!-- ドライバー・車両を独立選択（分離） -->
       <div style="padding:8px 12px;background:#fafafa;border-bottom:1px solid #f3f4f6">
-        <div style="font-size:10px;font-weight:600;color:var(--text-secondary);margin-bottom:4px">AI推薦候補から選択</div>
-        <select style="width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:12px;font-family:'Noto Sans JP',sans-serif;background:#fff;outline:none;cursor:pointer"
-          onchange="updateLegVehicle(${caseIdx},${li},this.value)">
-          ${vehicleOpts}
-        </select>
+        ${_legDriverVehiclePickerHtml(c, caseIdx, li, legs.length <= 1)}
       </div>
       <!-- 選択中サマリー -->
       <div class="leg-selected-summary">
@@ -17311,7 +17553,7 @@ function renderLegList(caseIdx, c) {
   }).join('');
 
   const addDisabled = legs.length >= 3;
-  return legHtml + `
+  return _legOverlapBannerHtml(c) + legHtml + `
     <button class="add-leg-btn" onclick="addLeg(${caseIdx})" ${addDisabled?'disabled':''}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       第${legs.length+1}便を追加${addDisabled?' （上限3台）':''}
