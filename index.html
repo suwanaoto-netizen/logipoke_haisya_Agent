@@ -17590,6 +17590,80 @@ function takeOverCaseLock(caseIdx) {
   if (typeof showToast === 'function') showToast('編集ロックを引き継ぎました', 'success');
   renderProcessingDetail(caseIdx);
 }
+
+// ── #3 確定後フェーズの権限付き再編集 ───────────────────────────
+// 確定済み案件の再編集可否：他者ロック中 or 自分が担当でない場合は不可（担当=driverOwners）。
+function _processedEditState(c) {
+  const me = _caseDispatcher();
+  const lock = _caseLock(c);
+  if (lock.byOther) return { editable: false, reason: 'lock', who: lock.name };
+  const col = window.__dispatchCollab;
+  let ownerId = null, ownerName = null;
+  if (col && col.ownerOf) {
+    const dnd = _casePrimaryDriverDndId(c);
+    if (dnd) { ownerId = col.ownerOf(dnd); const m = ownerId && col.member ? col.member(ownerId) : null; ownerName = m ? m.name : null; }
+  }
+  if (ownerId && ownerId !== me.id) return { editable: false, reason: 'owner', who: ownerName, ownerName: ownerName };
+  return { editable: true, ownerName: ownerName };
+}
+function takeOverProcessedLock(i) {
+  const c = processedCases[i]; if (!c || !c.id) return;
+  const me = _caseDispatcher();
+  window.__caseEditLocks[c.id] = { userId: me.id, userName: me.name, at: Date.now() };
+  if (typeof showToast === 'function') showToast('編集ロックを引き継ぎました', 'success');
+  renderProcessedDetail(i);
+}
+function reeditProcessedDriver(i, driverId) {
+  const c = processedCases[i]; if (!c) return;
+  const st = _processedEditState(c);
+  if (!st.editable) { if (typeof showToast === 'function') showToast(`再編集は担当者${st.who ? '（' + st.who + '）' : ''}のみ可能です`, 'warn'); return; }
+  const d = getDriverById(driverId) || resolveDriverRef(driverId); if (!d) return;
+  _acquireCaseLock(c);
+  c.driverId = d.id; c.driver = d.name; c._reedited = true;
+  renderProcessedDetail(i);
+  if (typeof showToast === 'function') showToast(`確定後の再編集：ドライバーを ${d.name} に変更しました`, 'success');
+}
+function reeditProcessedVehicle(i, vehicleId) {
+  const c = processedCases[i]; if (!c) return;
+  const st = _processedEditState(c);
+  if (!st.editable) { if (typeof showToast === 'function') showToast(`再編集は担当者${st.who ? '（' + st.who + '）' : ''}のみ可能です`, 'warn'); return; }
+  const v = getVehicleById(vehicleId) || resolveVehicleRef(vehicleId); if (!v) return;
+  _acquireCaseLock(c);
+  c.vehicleId = v.id; c.vehicle = v.plate || v.id; c._reedited = true;
+  renderProcessedDetail(i);
+  if (typeof showToast === 'function') showToast(`確定後の再編集：車両を ${v.plate} に変更しました`, 'success');
+}
+// 確定後再編集カードのHTML（権限ゲート付き）
+function _processedReeditCardHtml(c, i) {
+  const st = _processedEditState(c);
+  const curDrvId = (c.driverId) || (resolveDriverRef(c.driver) || {}).id || '';
+  const curVehId = (c.vehicleId) || (resolveVehicleRef(c.vehicle) || {}).id || '';
+  const ownerLine = st.ownerName ? `<span style="font-size:11px;color:#64748b">🗂 担当：${st.ownerName}</span>` : '';
+  let body;
+  if (!st.editable) {
+    const why = st.reason === 'lock' ? `「${st.who}」さんが編集中` : `担当者（${st.who || '別の担当'}）のみ再編集可`;
+    body = `<div style="padding:8px 10px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;font-size:11px;color:#475569;line-height:1.7">
+      🔒 確定済み・読み取り専用（${why}）
+      <button onclick="takeOverProcessedLock(${i})" style="margin-left:6px;font-size:10px;font-weight:700;color:#fff;background:#0d9488;border:none;border-radius:5px;padding:3px 8px;cursor:pointer">編集を引き継ぐ</button>
+      <div style="margin-top:4px">現在：👤 ${driverNameByRef(c.driver) || '—'} ／ 🚚 ${c.vehicle || '—'}</div>
+    </div>`;
+  } else {
+    const dopt = d => `<option value="${d.id}" ${d.id === curDrvId ? 'selected' : ''}>${d.name}（${d.id}${d.partner ? '・協力会社' : ''}）</option>`;
+    const vopt = v => `<option value="${v.id}" ${v.id === curVehId ? 'selected' : ''}>${v.plate}（${v.type} ${v.ton}t）</option>`;
+    body = `<div style="display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;gap:6px;align-items:center"><span style="font-size:10px;font-weight:700;color:var(--text-secondary);width:48px">👤 ドライバー</span>
+        <select onchange="reeditProcessedDriver(${i}, this.value)" style="flex:1;border:1px solid var(--border);border-radius:6px;padding:6px 9px;font-size:12px;font-family:'Noto Sans JP',sans-serif;background:#fff;cursor:pointer">${drivers.map(dopt).join('')}</select></div>
+      <div style="display:flex;gap:6px;align-items:center"><span style="font-size:10px;font-weight:700;color:var(--text-secondary);width:48px">🚚 車両</span>
+        <select onchange="reeditProcessedVehicle(${i}, this.value)" style="flex:1;border:1px solid var(--border);border-radius:6px;padding:6px 9px;font-size:12px;font-family:'Noto Sans JP',sans-serif;background:#fff;cursor:pointer">${vehicles.map(vopt).join('')}</select></div>
+      ${c._reedited ? '<div style="font-size:10px;color:#9a3412">⚠ 確定後に再編集済み（請求/実績への反映に注意）</div>' : ''}
+    </div>`;
+  }
+  return `<div class="detail-card" style="margin-bottom:14px">
+    <div class="detail-card-header"><div class="detail-card-title">配車の再編集（確定後）</div><div style="margin-left:auto">${ownerLine}</div></div>
+    <div class="detail-card-body">${body}</div>
+  </div>`;
+}
+
 // デモ：末尾の処理中案件を別担当が編集中に（協調ロックの可視化）。一度だけ。
 let _demoLockSeeded = false;
 function _seedDemoCaseLockOnce() {
@@ -18707,6 +18781,9 @@ function renderProcessedDetail(i) {
     + '<div class="info-item"><div class="info-label">車両</div><div class="info-value">' + (c.vehicle||'—') + '</div></div>'
     + '<div class="info-item"><div class="info-label">配達完了</div><div class="info-value">✅</div></div>'
     + '</div></div></div>';
+
+  // ── #3 配車の再編集（確定後・権限ゲート付き） ──
+  html += _processedReeditCardHtml(c, i);
 
   // ── ★配送スケジュール（実績） ──
   html += renderCaseScheduleTimeline(c);
