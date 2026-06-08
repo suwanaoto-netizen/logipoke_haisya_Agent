@@ -12454,7 +12454,7 @@ function recalcAllScores() {
   });
 }
 
-const unprocessedCases = [
+const _unprocessedSeed = [
   { id:'20240524001', status:'未解析', client:'株式会社○○商事', from:'埼玉県川口市', to:'神奈川県横浜市', goods:'パレット / 800kg / 常温', deadline:'05/25 AM指定', ch:'tel', time:'09:15', analyzed:true,
     casePattern: '定期案件',
     aiResult:{ confidence:'高信頼度', client:'株式会社○○商事', from:'埼玉県川口市', to:'神奈川県横浜市', goods:'パレット / 800kg / 常温', deadline:'05/25 AM指定', conditions:'時間厳守 / バース予約済み', vehicle:'4tウィング', count:1 },
@@ -12476,8 +12476,12 @@ const unprocessedCases = [
     vehicles:[]
   },
 ];
+// 【案件層C7・reader接続②】未処理を統合ストア由来に derive（往復ロスレス時 LogipokeDB／失敗時 seed）。
+const unprocessedCases = _ssotDerive(_unprocessedSeed, function (DB) {
+  var db = DB.createDB(); DB.ingestCases(db, { unprocessed: _unprocessedSeed }); return DB.toUnprocessedCases(db);
+});
 
-const processingCases = [
+const _processingSeed = [
   { id:'20240524101', status:'処理中', priority:'緊急', casePattern:'定期案件', client:'株式会社○○商事', from:'埼玉県川口市', to:'神奈川県横浜市', goods:'パレット / 800kg / 常温', deadline:'05/25 AM', vehicle:'車両1245', driver:'山田 一郎', distance:'35km', selectedVehicleIdx:0,
     vehicleMode:'single', legs:[], multiReasons:[],
     vehicles:[
@@ -12701,8 +12705,12 @@ const processingCases = [
     ]
   },
 ];
+// 【案件層C7・reader接続③】処理中を統合ストア由来に derive。
+const processingCases = _ssotDerive(_processingSeed, function (DB) {
+  var db = DB.createDB(); DB.ingestCases(db, { processing: _processingSeed }); return DB.toProcessingCases(db);
+});
 
-const processedCases = [
+const _processedSeed = [
   { id:'20240524201-L1', status:'完了', casePattern:'スポット案件', partner: false,
     client:'テスト物流株式会社', from:'東京都品川区', to:'神奈川県横浜市', goods:'パレット / 1,200kg / 常温',
     completion:'2024/05/25 10:00 完了（第1便）', distance:'42km', delay:'なし',
@@ -12759,6 +12767,10 @@ const processedCases = [
     billingConfirmed: true, billingConfirmedAt: '2024/05/24 18:30', billingConfirmedBy: '配車 太郎'
   },
 ];
+// 【案件層C7・reader接続④】完了を統合ストア由来に derive。
+const processedCases = _ssotDerive(_processedSeed, function (DB) {
+  var db = DB.createDB(); DB.ingestCases(db, { processed: _processedSeed }); return DB.toProcessedCases(db);
+});
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  顧客相性（customerAffinity）― 完了案件の実績から荷主×車両の相性を実データ算出

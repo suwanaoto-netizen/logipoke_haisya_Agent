@@ -158,9 +158,15 @@ SSoT 未接続のままでした）。
   `toAllCasesMaster`）＋横断ビュー `toCaseOverview`。同一 id が複数フェーズに異なるシェイプで併存できる
   よう (phase, id) キーで保持。`verify_cases.mjs`（8件）でロスレス往復・フェーズ分離・順序保持・決定性を検証。
   **本体UIは未変更**（4配列の reader を派生へ接続するのが後続フェーズ＝段階適用・全画面QA）。
-- 🔜 **残（C7 後続）**: 本体の一覧/詳細 reader（未処理/処理中/完了/総覧）を `LogipokeDB` の per-phase 派生へ
-  1画面ずつ切替え、最終的に 4配列を「単一ストアの派生ビュー」に降格。`vehicleMasterData` は固有データを
-  持つ独立レジストリのため、物理統合はデータ判断を要します。
+- ✅ **案件層C7 reader 接続 完了（4配列すべて統合ストア由来）**: 総覧 `allCasesMasterData` に続き、
+  `unprocessedCases`/`processingCases`/`processedCases` も `_ssotDerive(seed, ingestCases→toX)` で
+  統合ストア由来に derive（往復ロスレス時 LogipokeDB／失敗時 seed フォールバック）。派生配列がそのまま
+  live 配列となり runtime 変異（受付取込の unshift・`recalcAllScores`・`selectedVehicleIdx`・relay編集 等）は
+  従来どおり。実ブラウザQA（既定ON）で 3配列が SSoT 派生・relay案件(legs2)保持・未処理/処理中詳細/配車ボード
+  描画・運行層整合 true・アプリエラー0 を確認。
+- 🔜 **C7 残（任意・最終形）**: 4配列を init 派生だけでなく「単一ストアの**ライブ派生ビュー**」へ降格し、
+  全 case writer（受付 unshift・billing 確定・scaleout 等）を store-first 化（運行層と同じ read派生＋write後同期）。
+  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）
