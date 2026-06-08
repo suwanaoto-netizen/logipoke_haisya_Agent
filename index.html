@@ -5546,6 +5546,8 @@ function _ssotDerive(seed, build){
     z-index:3;
   }
   .dnd-block:hover .dnd-block-remove { display:flex; }
+  .dnd-block:hover .dnd-block-edit { display:flex !important; }
+  .dnd-block-edit:hover { background:#fff; }
   .dnd-block-remove:hover { background:var(--red); }
 
   /* ━━ 配車ブロック内 セグメント表示（積込/走行/荷下ろし） ━━ */
@@ -29702,6 +29704,7 @@ function renderDndTimeline() {
         <div class="dnd-block-title">${a.label}${mdm.sequenceTotal > 1 ? `<span class="dnd-block-seq">${mdm.sequenceCurrent}/${mdm.sequenceTotal}</span>` : ''}${vehChip}</div>
         <div class="dnd-block-sub">${a.start}〜${a.end}${a.sub ? ' · ' + a.sub : ''}</div>
         ${rightMarker}
+        ${interactiveForBlock ? `<button class="dnd-block-edit" onclick="event.stopPropagation();openBoardBlockEditor('${d.id}',${idx})" title="ドライバー/車両を変更（独立選択）" style="position:absolute;top:2px;right:20px;width:15px;height:15px;border:none;border-radius:3px;background:rgba(255,255,255,.85);color:#0d4a3a;font-size:9px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center">🔧</button>` : ''}
         ${interactiveForBlock ? `<button class="dnd-block-remove" onclick="event.stopPropagation();dndRemoveAssignment('${d.id}',${idx})" title="割当解除">×</button>` : ''}
       </div>`;
     }).join('');
@@ -30655,6 +30658,19 @@ function evaluateDropContext(driverId, e) {
     result.reason = '改善基準告示違反';
     return result;
   }
+
+  // B: パネルと同じ検証(_validateLegCombo)に一本化（免許/温度帯/案件横断・確定済み重複）。
+  //   積載は上で既済、クロス配車は情報のためブロックしない。行のドライバー/車両ペアで合成 leg を評価。
+  try {
+    if (typeof _validateLegCombo === 'function') {
+      var _bdid = driver._driverId || (typeof _legacyDriverIdToNew === 'function' ? _legacyDriverIdToNew(driver.id) : null);
+      var _bvid = driver._vehicleId || driver.id;
+      var _bleg = { driverRefId: _bdid, vehicleRefId: _bvid, startTime: start, endTime: end };
+      var _bcase = { id: c.id || 'dnd', goods: c.goods, distance: c.distance, from: c.from, to: c.to, vehicles: [], vehicleMode: 'single' };
+      var _bissues = _validateLegCombo(_bcase, _bleg, true).filter(function (it) { return it.level === 'error' && it.type !== 'load'; });
+      if (_bissues.length) { result.reason = _bissues[0].msg; return result; }
+    }
+  } catch (e) { /* 検証失敗は黙ってスキップ（従来挙動に縮退） */ }
 
   result.canDrop = true;
   return result;
@@ -32652,6 +32668,104 @@ function dndTrackDrop(e, driverId) {
       });
     }, 50);  // renderDnd完了後にダイアログを出す
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  A: 配車計画表ボードの「独立編集」導線（ドライバー/車両を別々に変更）
+//  ブロックの🔧から2軸エディタ（モーダル）を開く。検証はパネルと同じ _validateLegCombo。
+//   ・車両変更 → block.vehicleId（override。行既定と同じなら解除）。同じ行のまま。
+//   ・ドライバー変更 → ブロックを対象ドライバー行へ移動（dndAssignments の付け替え）。
+// ═══════════════════════════════════════════════════════════════
+var _boardEdit = null;   // { fromDriverId, idx, dateKey, selRowId, selVehId }
+function _boardRowDriverId(rowId) { var r = dndDrivers.find(function (d) { return d.id === rowId; }); return r ? (r._driverId || (typeof _legacyDriverIdToNew === 'function' ? _legacyDriverIdToNew(r.id) : null)) : null; }
+function _boardRowDefVehId(rowId) { var r = dndDrivers.find(function (d) { return d.id === rowId; }); return r ? (r._vehicleId || r.id) : null; }
+function _boardEditBlock() {
+  if (!_boardEdit) return null;
+  var arr = (dndAssignments[_boardEdit.fromDriverId] && dndAssignments[_boardEdit.fromDriverId][_boardEdit.dateKey]) || [];
+  return arr[_boardEdit.idx] || null;
+}
+function openBoardBlockEditor(driverId, idx) {
+  if (typeof currentDispatchTab !== 'undefined' && currentDispatchTab === 'confirmed') return;
+  var dateKey = dndGetCurrentDateKey();
+  var arr = (dndAssignments[driverId] && dndAssignments[driverId][dateKey]) || [];
+  var blk = arr[idx];
+  if (!blk || blk.isPreset || blk.locked) { if (typeof showToast === 'function') showToast('この便はボードから編集できません（個別案件処理で操作）', 'warn'); return; }
+  _boardEdit = { fromDriverId: driverId, idx: idx, dateKey: dateKey, selRowId: driverId, selVehId: blk.vehicleId || _boardRowDefVehId(driverId) };
+  _renderBoardBlockEditor();
+}
+function closeBoardBlockEditor() { _boardEdit = null; var el = document.getElementById('board-block-editor'); if (el) el.remove(); }
+function _boardEditSetDriver(rowId) { if (!_boardEdit) return; _boardEdit.selRowId = rowId; if (!_boardEdit._vehManual) _boardEdit.selVehId = _boardRowDefVehId(rowId); _renderBoardBlockEditor(); }
+function _boardEditSetVehicle(vid) { if (!_boardEdit) return; _boardEdit.selVehId = vid; _boardEdit._vehManual = true; _renderBoardBlockEditor(); }
+function _renderBoardBlockEditor() {
+  if (!_boardEdit) return;
+  var blk = _boardEditBlock(); if (!blk) { closeBoardBlockEditor(); return; }
+  var did = _boardRowDriverId(_boardEdit.selRowId);
+  var defVeh = _boardRowDefVehId(_boardEdit.selRowId);
+  var synthLeg = { driverRefId: did, vehicleRefId: _boardEdit.selVehId, startTime: blk.start, endTime: blk.end };
+  var synthCase = { id: blk.caseId || 'dnd', goods: blk.goods, distance: blk.distance, from: blk.from, to: blk.to, vehicles: [], vehicleMode: 'single' };
+  var issues = (typeof _validateLegCombo === 'function') ? _validateLegCombo(synthCase, synthLeg, true) : [];
+  var errs = issues.filter(function (i) { return i.level === 'error'; });
+  var infos = issues.filter(function (i) { return i.level === 'info'; });
+  var needKg = (typeof _caseNeededKg === 'function') ? _caseNeededKg(synthCase) : 0;
+  var zone = (typeof _caseTempZone === 'function') ? _caseTempZone(synthCase) : 'ambient';
+  var driverObj = did ? getDriverById(did) : null;
+  // ドライバー選択肢（ボード行＝ドライバー×車両ペア）
+  var dopts = dndDrivers.map(function (r) {
+    return '<option value="' + r.id + '"' + (r.id === _boardEdit.selRowId ? ' selected' : '') + '>' + (r.driver || r.id) + '（' + (r.vehicle || '') + '）</option>';
+  }).join('');
+  // 車両選択肢（マスタ全車両。現ドライバーで運転不可/積載不足/温度不適合を印字）
+  var vopts = vehicles.map(function (v) {
+    var mark = [];
+    if (driverObj && typeof _driverCanDrive === 'function' && !_driverCanDrive(driverObj, v)) mark.push('⚠免許');
+    if (needKg > 0 && v.maxLoad < needKg) mark.push('⚠積載');
+    if (typeof _vehicleTempOk === 'function' && zone !== 'ambient' && !_vehicleTempOk(v, zone)) mark.push('⚠温度');
+    return '<option value="' + v.id + '"' + (v.id === _boardEdit.selVehId ? ' selected' : '') + '>' + v.plate + '（' + v.type + ' ' + v.ton + 't）' + (mark.length ? ' ' + mark.join('') : '') + '</option>';
+  }).join('');
+  var banner = errs.length
+    ? '<div style="margin-top:8px;padding:6px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:11px;color:#b91c1c;line-height:1.6">' + errs.map(function (i) { return '⚠ ' + i.msg; }).join('<br>') + '</div>'
+    : '<div style="margin-top:8px;padding:6px 9px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;font-size:11px;color:#047857">✅ ドライバー・車両・法令の整合OK</div>';
+  if (infos.length) banner += '<div style="margin-top:6px;padding:6px 9px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;font-size:11px;color:#9a3412;line-height:1.6">' + infos.map(function (i) { return 'ℹ ' + i.msg; }).join('<br>') + '</div>';
+  var moved = _boardEdit.selRowId !== _boardEdit.fromDriverId;
+  var html = '<div class="modal-overlay open" id="board-block-editor" style="z-index:10001" onclick="if(event.target===this)closeBoardBlockEditor()">'
+    + '<div class="modal" style="max-width:460px">'
+    + '<div class="modal-header" style="background:var(--sidebar-bg)"><span class="modal-title">便のドライバー/車両を変更</span><button class="modal-close" onclick="closeBoardBlockEditor()">✕</button></div>'
+    + '<div class="modal-body">'
+    + '<div style="font-size:12px;color:#374151;margin-bottom:10px"><b>' + (blk.client || blk.label || '便') + '</b>　' + (blk.start || '') + '〜' + (blk.end || '') + (blk.from ? '　' + blk.from + '→' + blk.to : '') + '</div>'
+    + '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><span style="font-size:11px;font-weight:700;color:var(--text-secondary);width:64px">👤 ドライバー</span>'
+    + '<select onchange="_boardEditSetDriver(this.value)" style="flex:1;border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:12px;font-family:\'Noto Sans JP\',sans-serif">' + dopts + '</select></div>'
+    + '<div style="display:flex;gap:6px;align-items:center"><span style="font-size:11px;font-weight:700;color:var(--text-secondary);width:64px">🚚 車両</span>'
+    + '<select onchange="_boardEditSetVehicle(this.value)" style="flex:1;border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:12px;font-family:\'Noto Sans JP\',sans-serif">' + vopts + '</select></div>'
+    + banner
+    + (moved ? '<div style="margin-top:6px;font-size:10px;color:#9a3412">⚠ ドライバー変更：この便を「' + (dndDrivers.find(function (d) { return d.id === _boardEdit.selRowId; }) || {}).driver + '」の行へ移動します</div>' : '')
+    + '</div>'
+    + '<div class="modal-footer"><button class="btn btn-secondary" onclick="closeBoardBlockEditor()">キャンセル</button>'
+    + '<button class="btn btn-orange" onclick="saveBoardBlockEdit()">この内容で変更</button></div>'
+    + '</div></div>';
+  var ex = document.getElementById('board-block-editor'); if (ex) ex.remove();
+  var wrap = document.createElement('div'); wrap.innerHTML = html; document.body.appendChild(wrap.firstChild);
+}
+function saveBoardBlockEdit() {
+  if (!_boardEdit) return;
+  var blk = _boardEditBlock(); if (!blk) { closeBoardBlockEditor(); return; }
+  var fromId = _boardEdit.fromDriverId, toId = _boardEdit.selRowId, dateKey = _boardEdit.dateKey;
+  // 車両 override（行既定と同じなら解除）
+  var defVeh = _boardRowDefVehId(toId);
+  if (_boardEdit.selVehId && _boardEdit.selVehId !== defVeh) blk.vehicleId = _boardEdit.selVehId; else delete blk.vehicleId;
+  // ドライバー変更＝行移動
+  if (toId !== fromId) {
+    var fromArr = (dndAssignments[fromId] && dndAssignments[fromId][dateKey]) || [];
+    if (fromArr[_boardEdit.idx]) fromArr.splice(_boardEdit.idx, 1);
+    if (typeof applyDndBlocksViaSSoT === 'function') applyDndBlocksViaSSoT(fromId, dateKey, fromArr);
+    if (!dndAssignments[toId]) dndAssignments[toId] = {};
+    if (!dndAssignments[toId][dateKey]) dndAssignments[toId][dateKey] = [];
+    dndAssignments[toId][dateKey].push(blk);
+    if (typeof applyDndBlocksViaSSoT === 'function') applyDndBlocksViaSSoT(toId, dateKey, dndAssignments[toId][dateKey]);
+  }
+  var vlabel = (getVehicleById(_boardEdit.selVehId) || {}).plate || _boardEdit.selVehId;
+  var dlabel = (dndDrivers.find(function (d) { return d.id === toId; }) || {}).driver || toId;
+  closeBoardBlockEditor();
+  if (typeof renderDndTimeline === 'function') { try { renderDndTimeline(); } catch (e) {} }
+  if (typeof showToast === 'function') showToast('便を ' + dlabel + ' ／ ' + vlabel + ' に変更しました', 'success');
 }
 
 function dndRemoveAssignment(driverId, idx) {
