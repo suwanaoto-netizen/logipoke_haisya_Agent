@@ -9382,7 +9382,9 @@ function _ssotDerive(seed, build){
     const partnerMasterData = _ssotDerive(_partnerMasterSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { partners: _partnerMasterSeed }); return DB.toPartnerMaster(db); });
 
     // 全案件一覧（未処理+処理中+処理済み+過去案件）
-    const allCasesMasterData = [
+    // 【案件層C7・reader接続 第1画面】総覧を統合ストア由来に derive（往復ロスレス時は LogipokeDB、
+    //  失敗時は seed フォールバック＝_ssotDerive が JSON 一致で自己検証）。マスタ群と同じ縦串パターン。
+    const _allCasesMasterSeed = [
       // 未処理
       { id:'20240524001', client:'株式会社○○商事',      from:'埼玉県川口市',   to:'神奈川県横浜市', pattern:'定期案件',    status:'未処理', deadline:'05/25 AM', sales:null },
       { id:'20240524002', client:'△△食品株式会社',      from:'千葉県船橋市',   to:'東京都大田区',   pattern:'特殊条件案件', status:'未処理', deadline:'05/24 PM', sales:null },
@@ -9408,6 +9410,9 @@ function _ssotDerive(seed, build){
       { id:'20240519065', client:'首都圏生活協同組合',   from:'東京都新宿区',   to:'千葉県千葉市',   pattern:'多地点配送',  status:'過去',    deadline:'05/19',    sales:47000 },
       { id:'20240518035', client:'東京精工株式会社',      from:'東京都大田区',   to:'埼玉県川口市',   pattern:'特殊条件案件', status:'過去',    deadline:'05/18',    sales:35000 },
     ];
+    const allCasesMasterData = _ssotDerive(_allCasesMasterSeed, function (DB) {
+      var db = DB.createDB(); DB.ingestCases(db, { master: _allCasesMasterSeed }); return DB.toAllCasesMaster(db);
+    });
 
     let currentCustTab = 'client';
     let selectedClientId = null;
@@ -19702,7 +19707,7 @@ function getBaseDistance(fromBaseId, toBaseId) {
 // ドライバーマスタ：車両を持たない
 // 論点3：協力会社ドライバーは baseId:null（拠点なし）
 // 論点P：通常ドライバーは単一拠点。複数拠点運用は車両側で表現
-const drivers = (function(){
+const _driversSeed = (function(){
   const NAMES = [
     '山田 一郎','鈴木 次郎','佐藤 三郎','田中 四郎','高橋 五郎','渡辺 六郎','伊藤 七郎','中村 八郎','小林 九郎','松本 十郎',
     '加藤 十一','吉田 十二','山本 十三','井上 十四','木村 十五','斉藤 十六','清水 十七','林  十八','山口 十九','森  二十',
@@ -19739,11 +19744,16 @@ const drivers = (function(){
     return obj;
   });
 })();
+// 【マスタ接続・C6後続】ドライバーマスタも SSoT 派生（client/partner/teiki/team と同様）。
+// 往復ロスレスなら LogipokeDB 由来、失敗時は seed フォールバック（_ssotDerive が JSON 一致検証）。
+const drivers = _ssotDerive(_driversSeed, function (DB) {
+  var db = DB.createDB(); DB.seedMasters(db, { drivers: _driversSeed }); return DB.toDriversArray(db);
+});
 
 // 車両マスタ：ドライバーを持たない
 // 論点P：車両は複数拠点に所属できる（baseIds:[]）。主拠点は baseId として保持
 // 論点3：自社車両のみ。協力会社の車両は管理外
-const vehicles = (function(){
+const _vehiclesSeed = (function(){
   const TYPES = [
     {type:'平ボディ', cap:[2,4,10]}, {type:'ウィング', cap:[4,10]},
     {type:'冷蔵',     cap:[2,4]},    {type:'冷凍',     cap:[2,4]},
@@ -19787,6 +19797,10 @@ const vehicles = (function(){
     };
   });
 })();
+// 車両マスタも SSoT 派生（往復ロスレスなら LogipokeDB 由来、失敗時は seed フォールバック）。
+const vehicles = _ssotDerive(_vehiclesSeed, function (DB) {
+  var db = DB.createDB(); DB.seedMasters(db, { vehicles: _vehiclesSeed }); return DB.toVehiclesArray(db);
+});
 
 // マスタ参照ヘルパー（O(1)アクセス用のインデックス）
 const _driverById = Object.fromEntries(drivers.map(d => [d.id, d]));
@@ -20099,8 +20113,11 @@ function createAssignment(input) {
   a.mainOwnerId = a.mainOwnerId || a.ownerId;
   a.crossBase = isCrossBaseAssignment(a);
 
-  assignments.push(a);
-  if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  // 【単方向化・C6仕上げ】store-first：store へ add → assignments[] を再導出。失敗時 legacy push。
+  if (!(typeof _opStoreWrite === 'function' && _opStoreWrite(() => window.__opStore.add(a)))) {
+    assignments.push(a);
+    if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  }
   _appendAssignmentLog(a.id, 'create', null, a, actorId);
   return a;
 }
@@ -20114,17 +20131,28 @@ function updateAssignment(id, patch, actorId) {
     'mainOwnerId','caseIds','start','end','status','client','from','to',
     'goods','deadline','label','color','legNo','parentAssignmentId',
     'relatedReturnId','isReturn','note','tab'];
+  // 【単方向化】patch を当てたレコードを構築し、store へ remove+add（store-first）。失敗時のみ in-place。
+  const patched = Object.assign({}, a);
   for (const key of ALLOWED) {
-    if (patch && Object.prototype.hasOwnProperty.call(patch, key)) {
-      a[key] = patch[key];
-    }
+    if (patch && Object.prototype.hasOwnProperty.call(patch, key)) patched[key] = patch[key];
   }
-  a.crossBase = isCrossBaseAssignment(a);
-  a.updatedAt = new Date().toISOString();
-  a.updatedBy = actorId || a.ownerId;
-  if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
-  _appendAssignmentLog(a.id, 'update', before, a, actorId);
-  return a;
+  patched.crossBase = isCrossBaseAssignment(patched);
+  patched.updatedAt = new Date().toISOString();
+  patched.updatedBy = actorId || patched.ownerId;
+  const viaStore = (typeof _opStoreWrite === 'function') &&
+    _opStoreWrite(() => { window.__opStore.remove(id); window.__opStore.add(patched); });
+  if (!viaStore) {
+    for (const key of ALLOWED) {
+      if (patch && Object.prototype.hasOwnProperty.call(patch, key)) a[key] = patch[key];
+    }
+    a.crossBase = isCrossBaseAssignment(a);
+    a.updatedAt = patched.updatedAt;
+    a.updatedBy = patched.updatedBy;
+    if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  }
+  const after = (typeof getAssignmentById === 'function') ? getAssignmentById(id) : patched;
+  _appendAssignmentLog(id, 'update', before, after, actorId);
+  return after;
 }
 
 function deleteAssignment(id, actorId) {
@@ -20132,8 +20160,11 @@ function deleteAssignment(id, actorId) {
   const idx = assignments.findIndex(a => a.id === id);
   if (idx < 0) return false;
   const before = assignments[idx];
-  assignments.splice(idx, 1);
-  if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  // 【単方向化】store-first：store から remove → 再導出。失敗時のみ legacy splice。
+  if (!(typeof _opStoreWrite === 'function' && _opStoreWrite(() => window.__opStore.remove(id)))) {
+    assignments.splice(idx, 1);
+    if (typeof rebuildAssignmentIndex === 'function') rebuildAssignmentIndex();
+  }
   _appendAssignmentLog(id, 'delete', before, null, actorId);
   return true;
 }
@@ -20792,14 +20823,42 @@ function rebuildAssignmentIndex() {
     (_assignByDriver[a.driverId] = _assignByDriver[a.driverId] || []).push(a);
     (_assignByVehicle[a.vehicleId] = _assignByVehicle[a.vehicleId] || []).push(a);
   });
-  // 物理統合（C6・第8段）：全 assignments 変更はここを通るため、単一同期点として
-  // 永続SSoTストアを再構築（完全ロスレス）。reader はこのストアからライブ派生する。
+  // 【単方向化・C6仕上げ】store を単一権威にする。全 writer は store-first（reassign/DnD/CRUD/中継）。
+  //  ・初回：store を生成し assignments で seed（一度きり）。
+  //  ・以降：store←assignments の常時 back-sync は行わない（単方向）。乖離（=store-firstを通らない
+  //    変異）を検出した時のみ自己修復で再同期＋warn（安全網）。__opStoreStrict=false で従来の常時同期に戻せる。
   if (window.__useOperationSSoT && typeof LogipokeDB !== 'undefined' && LogipokeDB.createOperationStore) {
     try {
-      if (!window.__opStore) window.__opStore = LogipokeDB.createOperationStore();
-      window.__opStore.syncFromAssignments(assignments);
+      if (!window.__opStore) {
+        window.__opStore = LogipokeDB.createOperationStore();
+        window.__opStore.syncFromAssignments(assignments);   // 初回 seed
+        return;
+      }
+      var strict = (window.__opStoreStrict !== false);        // 既定 strict（単方向）
+      var diverged = !_assignmentsMatchesStore();
+      if (diverged) {
+        window.__opStoreDivergences = (window.__opStoreDivergences || 0) + 1;
+        console.warn('[SSoT] assignments が store と乖離（非 store-first 変異の可能性）。自己修復で再同期します。');
+      }
+      if (!strict || diverged) window.__opStore.syncFromAssignments(assignments); // strict時は乖離時のみ自己修復
     } catch (e) { window.__opStore = null; /* 失敗時はストア無効化＝レガシー読取に縮退 */ }
   }
+}
+// store 由来 assignments と現配列が一致するか（乖離検出用・単方向化の番人）
+function _assignmentsMatchesStore() {
+  try {
+    if (!window.__opStore || !window.__opStore.getAssignments) return true;
+    var s = window.__opStore.getAssignments();
+    if (s.length !== assignments.length) return false;
+    var byId = {}; s.forEach(function (a) { byId[a.id] = a; });
+    return assignments.every(function (a) {
+      var x = byId[a.id];
+      return x && x.driverId === a.driverId && x.vehicleId === a.vehicleId
+        && x.start === a.start && x.end === a.end && x.status === a.status
+        && x.client === a.client && x.from === a.from && x.to === a.to
+        && x.tab === a.tab && x.date === a.date;
+    });
+  } catch (e) { return true; }
 }
 let _assignByDriver = {}, _assignByVehicle = {}, _assignById = {};
 rebuildAssignmentIndex();
@@ -44831,21 +44890,42 @@ function _runPartnerStep(index) {
   }
 
   // localStorage 上のキューを全部取り込み、空にする
+  // 【受付C1カットオーバー】正規化受付ストア(logipoke_db_receptions_v1)を「単一の取込パイプライン」とする。
+  // 旧 logipoke_ai_intake_queue は併読をやめ、"一度きりの移行元"に降格：
+  //   ・モデル利用可能時 → 旧キュー項目を正規化ストアへ移送し、以降は正規化ストアのみで取込（単一経路）。
+  //   ・モデル未読込時のみ → 旧キューを直接取込（安全網）。
   function drainIntakeQueue() {
-    var queue = [];
+    var ingested = 0;
+    var hasModel = !!(window.LogipokeDB && LogipokeDB.loadReceptions);
+
+    var legacy = [];
     try {
       var raw = localStorage.getItem(INTAKE_QUEUE_KEY);
-      queue = raw ? JSON.parse(raw) : [];
-    } catch(e){ queue = []; }
-    var ingested = 0;
-    if (Array.isArray(queue) && queue.length) {
-      queue.forEach(function(item){ if (ingestIntakeItem(item)) ingested++; });
-      // 処理済みなので旧キューを空にする
+      legacy = raw ? JSON.parse(raw) : [];
+    } catch(e){ legacy = []; }
+    if (Array.isArray(legacy) && legacy.length) {
+      if (hasModel && LogipokeDB.createReception && LogipokeDB.pushReception) {
+        // 旧キュー → 正規化ストアへ移送（単一パイプライン化）。原 intake は _legacyIntake でロスレス保持。
+        legacy.forEach(function(item){
+          try {
+            var r = LogipokeDB.createReception(null, {
+              id: item.id, client: item.client, from: item.from, to: item.to,
+              goods: item.goods, deadline: item.deadline, conditions: item.conditions,
+              channel: item.ch === 'mail' ? 'mail' : 'ai_phone', receivedAt: item.receivedAt
+            });
+            r._legacyIntake = item;
+            LogipokeDB.pushReception(r);
+          } catch(e){ if (ingestIntakeItem(item)) ingested++; } // 移送失敗時のみ直接取込
+        });
+      } else {
+        // モデル未読込：旧キューを直接取込（安全網）
+        legacy.forEach(function(item){ if (ingestIntakeItem(item)) ingested++; });
+      }
       try { localStorage.removeItem(INTAKE_QUEUE_KEY); } catch(e){}
     }
 
-    // SSoT(正規化) 受付ストアからも取り込む（logipoke_db_receptions_v1 へ置換した本流）
-    if (window.LogipokeDB && LogipokeDB.loadReceptions) {
+    // 正規化受付ストア(logipoke_db_receptions_v1)= 単一の取込パイプライン（上で移送した旧キュー分も含む）
+    if (hasModel) {
       try {
         var receptions = LogipokeDB.loadReceptions();
         if (receptions && receptions.length) {

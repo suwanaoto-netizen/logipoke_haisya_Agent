@@ -39,9 +39,14 @@ SSoT 未接続のままでした）。
   Location / Cargo / TimeWindow と round-trip）。
 
 #### プロトタイプ本体（`index.html`）への接続状況
+- ✅ **マスタ層は全てSSoT派生済み（`_ssotDerive`）**: 拠点 `bases` / 取引先 `clientMasterData` /
+  協力会社 `partnerMasterData` / ユーザー `TEAM_MEMBERS` / 定期便 `TEIKI_SAMPLES` に加え、
+  **ドライバー `drivers` / 車両 `vehicles`** も `seedMasters → toDriversArray/toVehiclesArray` で
+  derive（往復ロスレス時は LogipokeDB 由来、失敗時は seed フォールバック＝`_ssotDerive` が JSON 一致で自己検証）。
+  検証は `verify_model.mjs`（計16件）、実ブラウザQAで drivers/vehicles 50/50・名前/プレート・全画面整合を確認。
+  ※`vehicleMasterData` は固有データを持つ独立レジストリのため物理統合はデータ判断を要する（保留）。
 - ✅ **拠点 `bases`**: 本体が `window.LogipokeDB` を読み込み、`seedMasters → toBasesArray` で
-  **derive** するよう変更（"縦串" 第1号）。読み込み失敗時は seed にフォールバックするため、
-  オフライン / 厳格 CSP でも壊れません。
+  **derive**。読み込み失敗時は seed にフォールバックするため、オフライン / 厳格 CSP でも壊れません。
 - ✅ **車両 / ドライバーの ID 互換**: `vehicles[]` に `legacyIds[]`（`V1245` / `1245` / `車両1245`
   / 紐づくドライバー `D-id`）を付与し、**あらゆる旧IDを 1 台へ解決する単一窓口
   `resolveVehicleRef()`** を追加。`vehicleMasterData` には正規車両への `_canonicalVehicleId`
@@ -133,14 +138,29 @@ SSoT 未接続のままでした）。
   - **読取ファサード**：`window.OpStore`（`assignments(tab)`/`conflicts(id)`）を**単一情報源の読取API**として公開。
   - **整合不変条件**：`window.__opStoreConsistent()` が「store 由来 ≡ `assignments[]`」を常時検証。jsdom（既定ON）で
     起動時整合・store-first reassign（`via:'opstore'`・store/legacy 両反映・整合維持）・描画無例外を目視確認。
-- 🔜 **完全インバージョン最後の一歩（ブラウザQA必須）**: `assignments[]`/`c.legs`/`dndAssignments` の
-  **`const` 実体を物理的に getter/Proxy へ置換**し、全 writer（`push`/`splice`/`a.x=…` の直接変異が数十箇所）を
-  store-first へ寄せる物理一本化。**無損失表現・reader 経路・書込先一本化（reassign）・不変条件権威・整合
-  不変条件は全て確立済み**で、残るは「直接変異 writer 群の store-first 化」と「const 実体の getter 化」だが、
-  これは稼働中UIの全画面ブラウザ目視を要するため別ラウンド（当環境は実機目視不可のため安全側で保留）。
-  あわせて 他マスタ（取引先/協力会社/ユーザー/定期便）・受付（旧 `logipoke_ai_intake_queue` →
-  `logipoke_db_receptions_v1`）・案件4分割（`unprocessed`/`processing`/`processed`）の接続が残る。
-  `vehicleMasterData` は固有データを持つ独立レジストリのため、物理統合はデータ判断を要します。
+- ✅ **受付 C1 カットオーバー**: `index.html` の `drainIntakeQueue` を「正規化受付ストア
+  `logipoke_db_receptions_v1` を単一の取込パイプライン」に再構成。旧 `logipoke_ai_intake_queue` は
+  併読をやめ "一度きりの移行元" に降格（モデル利用可能時は旧キュー項目を正規化ストアへ移送→単一経路で取込、
+  モデル未読込時のみ直接取込の安全網）。`ai-phone-reception.html` は既に正規化ストアが主経路（旧キューは
+  フォールバックのみ）。実ブラウザQA（HTTP同一オリジン）で 正規化経由取込／旧キュー→移送→取込・旧キー除去・
+  ストア空 を確認。
+- ✅ **assignments→store 単方向化（C6 仕上げ）**: 残る直接変異 writer の汎用CRUD
+  `createAssignment`/`updateAssignment`/`deleteAssignment` を **store-first 化**（store へ add/remove → 
+  `assignments[]` を再導出）。これで reassign/DnD/中継 を含む**全 writer が store-first** に。
+  `rebuildAssignmentIndex` の常時 back-sync（store←assignments）を**自己修復型・単方向**へ変更：
+  既定 strict で「乖離が無ければ再同期しない（単方向）／乖離検出時のみ自己修復＋warn」（`window.__opStoreStrict=false`
+  で従来の常時同期に戻せる）。実ブラウザQAで CRUD/reassign/DnD 実行後も **乖離 0**（=全 writer が store-first で
+  back-flow 不要）・store/legacy 一致・全画面整合 true・エラー0 を確認。store が単一権威、`assignments[]` は
+  その射影。万一の非 store-first 変異も自己修復＋warn で検出（データ損失なし）。
+- ✅ **案件層統合 基盤（課題C7・第1段）**: 旧 4分割配列（`unprocessedCases`/`processingCases`/
+  `processedCases`/`allCasesMasterData`）を `LogipokeDB.ingestCases` で**単一ストアへ統合**し、
+  per-phase 配列を**完全ロスレス復元**（`toUnprocessedCases`/`toProcessingCases`/`toProcessedCases`/
+  `toAllCasesMaster`）＋横断ビュー `toCaseOverview`。同一 id が複数フェーズに異なるシェイプで併存できる
+  よう (phase, id) キーで保持。`verify_cases.mjs`（8件）でロスレス往復・フェーズ分離・順序保持・決定性を検証。
+  **本体UIは未変更**（4配列の reader を派生へ接続するのが後続フェーズ＝段階適用・全画面QA）。
+- 🔜 **残（C7 後続）**: 本体の一覧/詳細 reader（未処理/処理中/完了/総覧）を `LogipokeDB` の per-phase 派生へ
+  1画面ずつ切替え、最終的に 4配列を「単一ストアの派生ビュー」に降格。`vehicleMasterData` は固有データを
+  持つ独立レジストリのため、物理統合はデータ判断を要します。
 
 ```bash
 # モデルの自動検証（adapter の lossless / 値構造化 / 受付ブリッジ / 中継運行）

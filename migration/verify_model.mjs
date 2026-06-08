@@ -65,6 +65,20 @@ masterCheck('bases (8拠点) が完全一致 ★本体の縦串', seeds.bases, (
 masterCheck('TEAM_MEMBERS が完全一致', seeds.users, () => assert.deepStrictEqual(DB.toTeamMembers(db), seeds.users));
 masterCheck('TEIKI_SAMPLES が完全一致', seeds.recurringRoutes, () => assert.deepStrictEqual(DB.toTeikiSamples(db), seeds.recurringRoutes));
 
+console.log('①b ドライバー/車両 adapter の lossless（_ssotDerive 用・本体の drivers/vehicles 縦串）');
+const _mdb = DB.createDB();
+const _sampleDrivers = [
+  { id: 'D001', name: '山田 一郎', license: ['中型', '大型'], tel: '090-1111-2222', partner: false, baseId: 'B001', homeBaseId: 'B001' },
+  { id: 'D009', name: '協力 太郎', license: ['大型'], tel: '090-3333-4444', partner: true, partnerName: '北関東物流㈱', baseId: null, homeBaseId: null }
+];
+const _sampleVehicles = [
+  { id: 'V0001', plate: '車両0001', maxLoad: 2000, type: '平ボディ', baseId: 'B001', baseIds: ['B001'] },
+  { id: 'V0009', plate: '車両0009', maxLoad: 4000, type: 'ウィング', baseId: 'B003', baseIds: ['B003', 'B007'] }
+];
+DB.seedMasters(_mdb, { drivers: _sampleDrivers, vehicles: _sampleVehicles });
+check('toDriversArray が seed と完全一致（ロスレス）', () => assert.deepStrictEqual(DB.toDriversArray(_mdb), _sampleDrivers));
+check('toVehiclesArray が seed と完全一致（ロスレス）', () => assert.deepStrictEqual(DB.toVehiclesArray(_mdb), _sampleVehicles));
+
 console.log('② 受付層: 値オブジェクト構造化 + round-trip');
 const reception = DB.createReception(db, {
   id: 'AI20260601090000', client: '株式会社サンライズ物産', from: '千葉県市原市',

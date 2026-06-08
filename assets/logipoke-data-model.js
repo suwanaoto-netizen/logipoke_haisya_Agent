@@ -205,6 +205,14 @@
   function toTeamMembers(db) {
     var out = []; db.users.forEach(function (u) { out.push({ id: u.id, name: u.name, color: u.color, initial: u.initial }); }); return out;
   }
+  // ドライバー / 車両：seedMasters が Object.assign で全プロパティを保持しているため、
+  // 挿入順（=seed順）に射影すれば JSON 一致のロスレス往復（_ssotDerive 用）。
+  function toDriversArray(db) {
+    var out = []; db.drivers.forEach(function (d) { out.push(Object.assign({}, d)); }); return out;
+  }
+  function toVehiclesArray(db) {
+    var out = []; db.vehicles.forEach(function (v) { out.push(Object.assign({}, v)); }); return out;
+  }
   function toTeikiSamples(db) {
     var out = [];
     db.recurringRoutes.forEach(function (r) {
@@ -684,6 +692,44 @@
     };
   }
 
+  /* ───────────────────────── ③ 案件層 統合（課題C7）─────────────────────────
+   *  旧 unprocessedCases / processingCases / processedCases / allCasesMasterData の
+   *  「4分割配列」を単一ストアへ統合する基盤。同一 id が複数フェーズに異なるシェイプで
+   *  存在しうるため (phase, id) で保持。全フィールドを温存し、per-phase 配列をロスレス復元。
+   *  これにより 4配列を「単一ストアの派生ビュー」に降格する道筋を用意する（reader 接続は段階適用）。
+   * ------------------------------------------------------------------------- */
+  var _CASE_PHASES = ['unprocessed', 'processing', 'processed', 'master'];
+  function ingestCases(db, byPhase) {
+    byPhase = byPhase || {};
+    _CASE_PHASES.forEach(function (phase) {
+      (byPhase[phase] || []).forEach(function (c, i) {
+        if (!c) return;
+        var key = 'c7::' + phase + '::' + (c.id != null ? c.id : ('idx' + i));
+        db.orders.set(key, { _c7: true, phase: phase, _seq: i, raw: c });
+      });
+    });
+    return db;
+  }
+  function _toCasePhase(db, phase) {
+    var rows = [];
+    db.orders.forEach(function (o) { if (o && o._c7 && o.phase === phase) rows.push(o); });
+    rows.sort(function (a, b) { return (a._seq || 0) - (b._seq || 0); });
+    return rows.map(function (o) { return o.raw; });
+  }
+  function toUnprocessedCases(db) { return _toCasePhase(db, 'unprocessed'); }
+  function toProcessingCases(db) { return _toCasePhase(db, 'processing'); }
+  function toProcessedCases(db) { return _toCasePhase(db, 'processed'); }
+  function toAllCasesMaster(db) { return _toCasePhase(db, 'master'); }
+  // 統合ビュー：全フェーズ横断（phase 付き）。将来の一覧/フィルタ用。
+  function toCaseOverview(db) {
+    var rows = [];
+    db.orders.forEach(function (o) { if (o && o._c7) rows.push({ phase: o.phase, id: o.raw && o.raw.id, _seq: o._seq, raw: o.raw }); });
+    return rows.sort(function (a, b) {
+      if (a.phase !== b.phase) return _CASE_PHASES.indexOf(a.phase) - _CASE_PHASES.indexOf(b.phase);
+      return (a._seq || 0) - (b._seq || 0);
+    });
+  }
+
   /* ───────────────────────── 公開API ─────────────────────────────────────── */
   return {
     // helpers / value objects
@@ -694,6 +740,7 @@
     // ① masters
     seedMasters: seedMasters, toClientMaster: toClientMaster, toPartnerMaster: toPartnerMaster,
     toBasesArray: toBasesArray, toTeamMembers: toTeamMembers, toTeikiSamples: toTeikiSamples,
+    toDriversArray: toDriversArray, toVehiclesArray: toVehiclesArray,
     // ② reception
     createReception: createReception, receptionToLegacyIntake: receptionToLegacyIntake,
     RECEPTION_KEY: RECEPTION_KEY, saveReceptions: saveReceptions, loadReceptions: loadReceptions,
@@ -712,6 +759,9 @@
     // ④ operation：中継編集(c.legs)の書込検証 I9/ドライバー重複（課題C6・第5段）
     validateRelayLegs: validateRelayLegs,
     // ④ operation：永続ストア（物理統合の足場・課題C6・第8段）
-    createOperationStore: createOperationStore
+    createOperationStore: createOperationStore,
+    // ③ 案件層 統合（課題C7）：4分割配列の単一ストア統合＋per-phase ロスレス復元
+    ingestCases: ingestCases, toUnprocessedCases: toUnprocessedCases, toProcessingCases: toProcessingCases,
+    toProcessedCases: toProcessedCases, toAllCasesMaster: toAllCasesMaster, toCaseOverview: toCaseOverview
   };
 });
