@@ -10851,6 +10851,8 @@ function _ssotDerive(seed, build){
         <div style="font-size:12px;color:var(--sidebar-bg);font-weight:600;margin-bottom:6px">⚠ この操作は取り消せません</div>
         <div id="confirm-case-summary" style="font-size:12px;color:#374151"></div>
       </div>
+      <!-- 確定前バリデーション（免許/積載按分/時間重複など。JS で表示制御） -->
+      <div id="confirm-validation-block" style="display:none"></div>
       <!-- 法令要確認の警告（JS で表示制御） -->
       <div id="confirm-law-warning" style="display:none;background:#fffbeb;border:1.5px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px">
         <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#92400e;margin-bottom:8px">
@@ -10892,7 +10894,7 @@ function _ssotDerive(seed, build){
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('confirm-modal')">キャンセル</button>
-      <button class="btn btn-orange" onclick="confirmDispatch()">
+      <button class="btn btn-orange" id="confirm-dispatch-btn" onclick="confirmDispatch()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         確定・指示送信
       </button>
@@ -16130,6 +16132,7 @@ function _renderJobSplitModal() {
 }
 
 function renderProcessingDetail(i) {
+  _seedDemoCaseLockOnce();                 // 論点G：協調ロックのデモ初期化（一度きり）
   const c = processingCases[i];
   const el = document.getElementById('processing-detail');
   const selIdx = c.selectedVehicleIdx ?? 0;
@@ -17266,7 +17269,12 @@ function _validateLegCombo(c, leg, applyLoad) {
       const need = _vehicleRequiredLicense(v);
       issues.push({ type: 'license', level: 'error', msg: `免許不足：${d.name}（${(Array.isArray(d.license) ? d.license.join('/') : d.license)}）は ${v.ton}t車に${need}免許が必要` });
     }
-    if (applyLoad && v) {
+    // 積載：区間ごとの按分(loadKg)があれば各便の最大積載と照合、無ければ案件全量で照合（単一/リレー）
+    if (v && typeof leg.loadKg === 'number') {
+      if (leg.loadKg > v.maxLoad) {
+        issues.push({ type: 'load', level: 'error', msg: `この便の積載 ${leg.loadKg.toLocaleString()}kg ＞ ${v.plate} の最大積載 ${v.maxLoad.toLocaleString()}kg` });
+      }
+    } else if (applyLoad && v) {
       const needKg = _caseNeededKg(c);
       if (needKg > 0 && v.maxLoad < needKg) {
         issues.push({ type: 'load', level: 'error', msg: `積載超過：荷量 ${needKg.toLocaleString()}kg ＞ ${v.plate} の最大積載 ${v.maxLoad.toLocaleString()}kg` });
@@ -17278,6 +17286,11 @@ function _validateLegCombo(c, leg, applyLoad) {
       issues.push({ type: 'cross', level: 'info', msg: `クロス配車：${cb.driverBaseName}のドライバー × ${cb.vehicleBaseName}の車両${cb.distanceKm != null ? `（回送 約${cb.distanceKm}km）` : ''}／実働拠点＝${cb.vehicleBaseName}` });
     }
   }
+  // 案件横断の時間重複（I1/I2）：別案件と同一ドライバー/車両が時間重複
+  _legGlobalConflicts(c, leg).forEach(g => issues.push({
+    type: 'global_overlap', level: 'error',
+    msg: `他案件と時間重複：${g.type === 'driver' ? '同一ドライバー' : '同一車両'}が「${g.client}」と重複`
+  }));
   if (leg.driverRefId && !_driverLawOk(c, leg.driverRefId)) {
     issues.push({ type: 'law', level: 'error', msg: `改善基準告示：${d ? d.name : ''} は要確認` });
   }
@@ -17301,6 +17314,138 @@ function _legOverlapConflicts(c) {
   }
   return out;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  残課題対応：積載按分 / 案件横断の時間重複 / 確定ハードブロック / 編集ロック(論点G)
+// ═══════════════════════════════════════════════════════════════
+
+// 案件の総荷量(kg)
+function _caseTotalKg(c) { return _caseNeededKg(c); }
+
+// 時刻 "HH:MM" → 分
+function _hhmmToMin(t) { if (!t) return null; const p = String(t).split(':'); const h = +p[0], m = +(p[1] || 0); return isNaN(h) ? null : h * 60 + (isNaN(m) ? 0 : m); }
+
+// 案件横断の時間重複（I1/I2 を処理中の全案件にまたがって検出）。
+// 同一ドライバー/同一車両が、別案件の区間と時間重複していれば返す（同日前提）。
+function _legGlobalConflicts(c, leg) {
+  const out = {};
+  const dId = _legDriverId(leg), vId = _legVehicleId(leg);
+  const s = _hhmmToMin(leg.startTime), e = _hhmmToMin(leg.endTime);
+  if ((!dId && !vId) || s == null || e == null) return [];
+  const cases = (typeof processingCases !== 'undefined') ? processingCases : [];
+  cases.forEach(oc => {
+    if (!oc || oc.id === (c && c.id) || !Array.isArray(oc.legs)) return;   // 同一案件内は intra で別途検出
+    oc.legs.forEach(ol => {
+      const os = _hhmmToMin(ol.startTime), oe = _hhmmToMin(ol.endTime);
+      if (os == null || oe == null) return;
+      if (!(s < oe && os < e)) return;
+      const odId = _legDriverId(ol), ovId = _legVehicleId(ol);
+      if (dId && odId === dId) out['d|' + oc.id] = { type: 'driver', client: oc.client || oc.id };
+      if (vId && ovId === vId && !ol.partnerVehicle && !leg.partnerVehicle) out['v|' + oc.id] = { type: 'vehicle', client: oc.client || oc.id };
+    });
+  });
+  return Object.keys(out).map(k => out[k]);
+}
+
+// 案件の確定前バリデーション（エラーのみ集約。確定ハードブロック用）
+function _caseValidationErrors(c) {
+  if (!c) return [];
+  const errs = [];
+  const legs = c.legs || [];
+  const unit = c.vehicleMode === 'relay' ? '区間' : '便';
+  const baseApplyLoad = (c.vehicleMode === 'relay') || legs.length <= 1;
+  legs.forEach((leg, i) => {
+    _ensureLegRefs(c, leg);
+    const applyLoad = baseApplyLoad || (typeof leg.loadKg === 'number');
+    _validateLegCombo(c, leg, applyLoad).forEach(it => { if (it.level !== 'info') errs.push(`第${i + 1}${unit}：${it.msg}`); });
+  });
+  // 同一案件内の時間重複（I1/I2）
+  _legOverlapConflicts(c).forEach(x => errs.push(x.type === 'driver'
+    ? `同一ドライバーが${unit}${x.a + 1}と${unit}${x.b + 1}で時間重複`
+    : `同一車両が${unit}${x.a + 1}と${unit}${x.b + 1}で時間重複`));
+  // 積載按分（複数台）：割当合計が荷量に満たない
+  if (c.vehicleMode === 'multi') {
+    const total = _caseTotalKg(c);
+    const allocated = legs.reduce((s, l) => s + (typeof l.loadKg === 'number' ? l.loadKg : 0), 0);
+    if (total > 0 && legs.some(l => typeof l.loadKg === 'number') && allocated < total) {
+      errs.push(`積載按分が不足：割当 ${allocated.toLocaleString()}kg ＜ 荷量 ${total.toLocaleString()}kg（残 ${(total - allocated).toLocaleString()}kg）`);
+    }
+  }
+  return [...new Set(errs)];
+}
+
+// 複数台モードの積載按分サマリー（総荷量 / 割当済 / 残）
+function _legLoadAllocHtml(c) {
+  if (c.vehicleMode !== 'multi') return '';
+  const total = _caseTotalKg(c);
+  if (!total) return '';
+  const legs = c.legs || [];
+  const allocated = legs.reduce((s, l) => s + (typeof l.loadKg === 'number' ? l.loadKg : 0), 0);
+  const remain = total - allocated;
+  const over = remain < 0;
+  const short = remain > 0 && legs.some(l => typeof l.loadKg === 'number');
+  const color = over ? '#b91c1c' : (short ? '#9a3412' : '#047857');
+  const bg = over ? '#fef2f2' : (short ? '#fff7ed' : '#ecfdf5');
+  const bd = over ? '#fecaca' : (short ? '#fdba74' : '#a7f3d0');
+  return `<div style="margin:0 0 8px;padding:7px 10px;background:${bg};border:1px solid ${bd};border-radius:8px;font-size:11px;color:${color};line-height:1.6">
+    📦 積載按分：総荷量 <b>${total.toLocaleString()}kg</b> ／ 割当済 <b>${allocated.toLocaleString()}kg</b> ／ ${over ? `超過 <b>${(-remain).toLocaleString()}kg</b>` : `残 <b>${remain.toLocaleString()}kg</b>`}
+  </div>`;
+}
+
+// ── 論点G：案件単位の編集ロック（複数担当の協調。主スコア完結・edit_lock 相当）──
+window.__caseEditLocks = window.__caseEditLocks || {};
+window.__currentDispatcher = window.__currentDispatcher || { id: 'me', name: '自分' };
+function _caseLock(c) {
+  const l = c && c.id ? window.__caseEditLocks[c.id] : null;
+  if (!l) return { locked: false, byOther: false, name: null };
+  return { locked: true, byOther: l.userId !== window.__currentDispatcher.id, name: l.userName };
+}
+function _acquireCaseLock(c) {
+  if (!c || !c.id) return;
+  if (_caseLock(c).byOther) return;     // 他者ロック中は取得しない
+  window.__caseEditLocks[c.id] = { userId: window.__currentDispatcher.id, userName: window.__currentDispatcher.name, at: Date.now() };
+}
+function _blockIfLocked(c) {
+  const st = _caseLock(c);
+  if (st.byOther) { if (typeof showToast === 'function') showToast(`「${st.name}」さんが編集中のためロックされています。『編集を引き継ぐ』で取得してください`, 'warn'); return true; }
+  _acquireCaseLock(c);
+  return false;
+}
+function takeOverCaseLock(caseIdx) {
+  const c = processingCases[caseIdx]; if (!c || !c.id) return;
+  window.__caseEditLocks[c.id] = { userId: window.__currentDispatcher.id, userName: window.__currentDispatcher.name, at: Date.now() };
+  if (typeof showToast === 'function') showToast('編集ロックを引き継ぎました', 'success');
+  renderProcessingDetail(caseIdx);
+}
+// デモ：末尾の処理中案件を別担当が編集中に（協調ロックの可視化）。一度だけ。
+let _demoLockSeeded = false;
+function _seedDemoCaseLockOnce() {
+  if (_demoLockSeeded) return; _demoLockSeeded = true;
+  try {
+    if (typeof processingCases !== 'undefined' && processingCases.length > 1) {
+      const tgt = processingCases[processingCases.length - 1];
+      if (tgt && tgt.id && !window.__caseEditLocks[tgt.id]) {
+        window.__caseEditLocks[tgt.id] = { userId: 'u2', userName: '田中 花子', at: Date.now() };
+      }
+    }
+  } catch (e) { /* noop */ }
+}
+
+// ── 区間の積載量(kg)を設定（積載按分） ──
+function setLegLoadKg(caseIdx, legIdx, val) {
+  const c = processingCases[caseIdx]; const leg = c.legs[legIdx]; if (!leg) return;
+  if (_blockIfLocked(c)) return;
+  const n = parseInt(String(val).replace(/[^\d]/g, ''), 10);
+  leg.loadKg = isNaN(n) ? null : n;
+  _afterLegEdit(c, caseIdx);
+}
+
+// ── 確定モーダル：エラー承知の上書きトグル ──
+function toggleConfirmOverride(checked) {
+  const c = processingCases[pendingConfirmIdx]; if (c) c._confirmOverride = checked;
+  const btn = document.getElementById('confirm-dispatch-btn'); if (btn) btn.disabled = !checked;
+}
+window.toggleConfirmOverride = toggleConfirmOverride;
 
 // ドライバー選択 <select> のHTML（AI推薦を先頭、続けて全ドライバー）
 function _driverSelectHtml(c, caseIdx, legIdx) {
@@ -17359,6 +17504,15 @@ function _vehicleSelectHtml(c, caseIdx, legIdx) {
 // ドライバー＋車両の2軸選択UI（論点A検証バナー付き）。multi/relay 共通。
 function _legDriverVehiclePickerHtml(c, caseIdx, legIdx, applyLoad) {
   const leg = c.legs[legIdx];
+  // 論点G：他担当が編集中なら読み取り専用（引き継ぎ可）
+  const lock = _caseLock(c);
+  if (lock.byOther) {
+    return `<div class="leg-dv-picker" style="padding:8px 10px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;font-size:11px;color:#475569;line-height:1.7">
+      🔒 <b>「${lock.name}」さんが編集中</b>（読み取り専用）
+      <button onclick="takeOverCaseLock(${caseIdx})" style="margin-left:6px;font-size:10px;font-weight:700;color:#fff;background:#0d9488;border:none;border-radius:5px;padding:3px 8px;cursor:pointer">編集を引き継ぐ</button>
+      <div style="margin-top:4px">現在：👤 ${leg.driverName || '—'} ／ 🚚 ${leg.partnerVehicle ? '傭車（協力会社）' : (leg.vehicleName || '—')}</div>
+    </div>`;
+  }
   const issues = _validateLegCombo(c, leg, applyLoad);
   const errs = issues.filter(it => it.level !== 'info');
   const infos = issues.filter(it => it.level === 'info');
@@ -17408,6 +17562,7 @@ function setLegDriver(caseIdx, legIdx, driverId) {
   const c = processingCases[caseIdx];
   const leg = c.legs[legIdx];
   if (!leg) return;
+  if (_blockIfLocked(c)) return;            // 論点G：編集ロック
   const autoVehicle = !leg._vehicleManual;
   leg.driverRefId = driverId;
   const dObj = getDriverById(driverId);
@@ -17432,6 +17587,7 @@ function setLegVehicle(caseIdx, legIdx, vehicleId) {
   const c = processingCases[caseIdx];
   const leg = c.legs[legIdx];
   if (!leg) return;
+  if (_blockIfLocked(c)) return;            // 論点G：編集ロック
   leg._vehicleManual = true;
   if (vehicleId === '__partner__') {              // 論点H：協力会社車両（傭車）
     leg.partnerVehicle = true;
@@ -17511,6 +17667,7 @@ function renderRelayList(caseIdx, c) {
 // リレーレッグの追加
 function addRelayLeg(caseIdx) {
   const c = processingCases[caseIdx];
+  if (_blockIfLocked(c)) return;            // 論点G：編集ロック
   if (!c.legs) c.legs = [];
   if (c.legs.length >= 4) { showToast('リレー輸送は最大4区間まで追加できます', 'warn'); return; }
   const lastLeg = c.legs[c.legs.length - 1];
@@ -17614,6 +17771,7 @@ function toggleMultiReason(caseIdx, reason) {
 
 function addLeg(caseIdx) {
   const c = processingCases[caseIdx];
+  if (_blockIfLocked(c)) return;            // 論点G：編集ロック
   if (!c.legs) c.legs = [];
   if (c.legs.length >= 3) { showToast('自社便は最大3台まで追加できます', 'warn'); return; }
   const legNo = c.legs.length + 1;
@@ -17708,6 +17866,14 @@ function renderLegList(caseIdx, c) {
         ${leg.driverName}（${leg.vehicleName}）· ${leg.capacity}
         <span class="law-ok-pill">${leg.lawOk?'法令✓':'⚠️'}</span>
       </div>
+      <!-- 積載按分（この便が運ぶ重量） -->
+      <div style="padding:6px 12px 0;display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;font-weight:700;color:var(--text-secondary)">📦 この便の積載</span>
+        <input type="number" min="0" step="100" value="${typeof leg.loadKg==='number'?leg.loadKg:''}" placeholder="kg"
+          onchange="setLegLoadKg(${caseIdx},${li},this.value)"
+          style="width:90px;border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;font-family:'Noto Sans JP',sans-serif;outline:none">
+        <span style="font-size:10px;color:var(--text-muted)">kg</span>
+      </div>
       <!-- 備考 -->
       <div style="padding:6px 12px 8px">
         <input type="text" placeholder="備考（帰り荷の都合、特記事項など）" value="${leg.notes||''}"
@@ -17719,7 +17885,7 @@ function renderLegList(caseIdx, c) {
   }).join('');
 
   const addDisabled = legs.length >= 3;
-  return _legOverlapBannerHtml(c) + legHtml + `
+  return _legLoadAllocHtml(c) + _legOverlapBannerHtml(c) + legHtml + `
     <button class="add-leg-btn" onclick="addLeg(${caseIdx})" ${addDisabled?'disabled':''}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       第${legs.length+1}便を追加${addDisabled?' （上限3台）':''}
@@ -18868,12 +19034,42 @@ function openConfirmModal(i) {
     }
   }
 
+  // 確定ハードブロック：未解消の問題があれば赤バナー＋「承知で確定」必須
+  (function () {
+    const vb = document.getElementById('confirm-validation-block');
+    const btn = document.getElementById('confirm-dispatch-btn');
+    if (!vb) return;
+    c._confirmOverride = false;
+    const errs = (typeof _caseValidationErrors === 'function') ? _caseValidationErrors(c) : [];
+    if (errs.length) {
+      vb.style.display = 'block';
+      vb.innerHTML = `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+        <div style="font-size:12px;font-weight:700;color:#b91c1c;margin-bottom:8px">⚠ 確定前に解消すべき問題（${errs.length}件）</div>
+        <ul style="margin:0 0 8px 18px;padding:0;font-size:11px;color:#b91c1c;line-height:1.7">${errs.map(e => `<li>${e}</li>`).join('')}</ul>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#9a3412;cursor:pointer">
+          <input type="checkbox" onchange="toggleConfirmOverride(this.checked)"> 問題を承知の上で確定する（運行管理者の責任で実行）
+        </label>
+      </div>`;
+      if (btn) btn.disabled = true;
+    } else {
+      vb.style.display = 'none';
+      vb.innerHTML = '';
+      if (btn) btn.disabled = false;
+    }
+  })();
+
   document.getElementById('confirm-modal').classList.add('open');
 }
 
 function confirmDispatch() {
-  closeModal('confirm-modal');
   const c = processingCases[pendingConfirmIdx];
+  // 確定ハードブロック：未解消の問題があり、上書き未承認なら中断
+  const _errs = (typeof _caseValidationErrors === 'function') ? _caseValidationErrors(c) : [];
+  if (_errs.length && !c._confirmOverride) {
+    if (typeof showToast === 'function') showToast('未解消の問題があります。内容を確認し『承知の上で確定』にチェックしてください', 'warn');
+    return;
+  }
+  closeModal('confirm-modal');
   const isMulti = c.vehicleMode === 'multi' && c.legs && c.legs.length > 0;
   const now = new Date();
   const invBase = 'INV-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random()*900)+100).padStart(5,'0');
