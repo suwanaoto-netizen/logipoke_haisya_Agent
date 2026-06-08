@@ -4037,21 +4037,21 @@ function _ssotDerive(seed, build){
     background-image: linear-gradient(rgba(3,42,31,.30), rgba(3,42,31,.30)); /* 深いグリーンへ寄せ「仮確定済み」を強調 */
     box-shadow: inset 0 0 0 2.5px rgba(255,255,255,.78), 0 2px 7px rgba(13,74,58,.34);
   }
-  /* タイムラインの未確定（D&D割当・仮配車）ブロック：鮮やかな黄緑で確定（濃緑）と一目で区別 */
+  /* タイムラインの未確定（D&D割当・仮配車）ブロック：ロゴ「配車Agent」カラーで確定（濃緑）と一目で区別 */
   /* 背景はインラインの background ショートハンドで塗られるため、!important で確実に上書きする */
   .dnd-block.is-tentative {
-    background: #a3e635 !important; /* 黄緑(lime-400)で塗りつぶし「仮配車」を明確化 */
+    background: #6DD5A8 !important; /* ロゴ「配車Agent」カラーで塗りつぶし「仮配車」を明確化 */
     box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.55), 0 1px 3px rgba(0,0,0,.12);
-    outline: 1.5px dashed rgba(54,83,20,.65);
+    outline: 1.5px dashed rgba(13,74,58,.6);
     outline-offset: -4px;
   }
-  /* 黄緑背景では白文字が読めないため、仮ブロックの文字を濃いグリーンに */
-  .dnd-block.is-tentative .dnd-block-title { color:#1a3c0a; }
-  .dnd-block.is-tentative .dnd-block-sub   { color:rgba(26,60,10,.82); }
+  /* ミント背景では白文字が読めないため、仮ブロックの文字を濃いグリーン（ブランド色）に */
+  .dnd-block.is-tentative .dnd-block-title { color:#0D4A3A; }
+  .dnd-block.is-tentative .dnd-block-sub   { color:rgba(13,74,58,.82); }
   .dnd-block.is-tentative .dnd-block-status.tentative {
-    background:rgba(26,60,10,.16); color:#1a3c0a; border:1px dashed rgba(26,60,10,.6);
+    background:rgba(13,74,58,.16); color:#0D4A3A; border:1px dashed rgba(13,74,58,.6);
   }
-  .dnd-block.is-tentative .dnd-block-status.tentative .so-dot { background:#3f6212; }
+  .dnd-block.is-tentative .dnd-block-status.tentative .so-dot { background:#0D4A3A; }
   /* 配車ブロックのステータスチップ（常に最前面・セグメントの上に出す） */
   .dnd-block-status {
     position:absolute; top:2px; left:3px;
