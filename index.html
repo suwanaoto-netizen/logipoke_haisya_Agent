@@ -14516,6 +14516,42 @@ function applyScaleOutPlan(caseIdx) {
     + (pc ? '。協力' + pc + '社は増車枠バーから「発注確定」できます' : ''), 'success');
 }
 
+// 案件が増車レコメンド（AI増車プラン）で適用された配車差配かどうか。
+function _isScaleOutAppliedCase(c) {
+  return !!(c && c.vehicleMode === 'multi' && Array.isArray(c.legs)
+    && c.legs.some(l => l && l.reason === 'AI増車プラン'));
+}
+
+// 増車レコメンドで適用した配車差配に改善基準告示違反が含まれるか。
+//  (1) ドライバー基準の法令フラグ（論点C：leg.lawOk）
+//  (2) 配車割当タイムラインで自社便をドライバー当日割当に重ねた改善基準告示判定
+// どちらかで violation を検出したら true（＝確定/発注確定をハードブロックする）。
+function _caseHasKaizenViolation(c) {
+  if (!c || !Array.isArray(c.legs)) return false;
+  // (1) 個別案件処理の法令フラグ（ドライバー基準）
+  const lawNg = c.legs.some(leg => {
+    if (typeof _ensureLegRefs === 'function') _ensureLegRefs(c, leg);
+    return leg.lawOk === false;
+  });
+  if (lawNg) return true;
+  // (2) タイムライン：自社便をドライバーの当日割当に重ねた改善基準告示判定
+  if (typeof kaizenCheck === 'function' && typeof dndDrivers !== 'undefined'
+      && typeof _legDriverId === 'function') {
+    const dateKey = (typeof dndGetCurrentDateKey === 'function') ? dndGetCurrentDateKey() : null;
+    return c.legs.some(leg => {
+      if (leg.partnerVehicle) return false;            // 協力会社（傭車）は対象外
+      if (!leg.startTime || !leg.endTime) return false;
+      const did = _legDriverId(leg);
+      if (!did) return false;
+      const dd = dndDrivers.find(x => x._driverId === did);
+      if (!dd) return false;
+      const k = kaizenCheck(dd.id, dateKey, { start: leg.startTime, end: leg.endTime });
+      return k && k.level === 'violation';
+    });
+  }
+  return false;
+}
+
 // 増車枠バーから協力会社便を直接「発注確定」（ボード上で完結・発注書PO発行）。
 // ここで発行したPO番号は確定(confirmDispatch)時の請求連携にそのまま引き継がれる。
 function confirmPartnerLegPO(caseId, legIdx) {
@@ -14524,6 +14560,11 @@ function confirmPartnerLegPO(caseId, legIdx) {
   const leg = c.scaleOutPartnerLegs[legIdx];
   if (leg.poConfirmed) {
     showToast('発注確定済みです（' + leg.purchaseOrderNo + ' / ' + (leg.name || '協力会社') + '）', 'info');
+    return;
+  }
+  // 改善基準告示違反が解消されていない配車差配は発注確定できない（ハードブロック）。
+  if (_caseHasKaizenViolation(c)) {
+    showToast('改善基準告示違反が解消されていないため発注確定できません。自社便のドライバー・時間帯を見直してください', 'warn');
     return;
   }
   const charge = (leg.charge || 0).toLocaleString();
@@ -19041,7 +19082,17 @@ function openConfirmModal(i) {
     if (!vb) return;
     c._confirmOverride = false;
     const errs = (typeof _caseValidationErrors === 'function') ? _caseValidationErrors(c) : [];
-    if (errs.length) {
+    // 増車レコメンドで適用した配車差配 × 改善基準告示違反：オーバーライド不可のハードブロック。
+    const kaizenHardBlock = _isScaleOutAppliedCase(c) && _caseHasKaizenViolation(c);
+    if (kaizenHardBlock) {
+      vb.style.display = 'block';
+      vb.innerHTML = `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+        <div style="font-size:12px;font-weight:700;color:#b91c1c;margin-bottom:8px">⚠ 改善基準告示違反のため確定できません</div>
+        ${errs.length ? `<ul style="margin:0 0 8px 18px;padding:0;font-size:11px;color:#b91c1c;line-height:1.7">${errs.map(e => `<li>${e}</li>`).join('')}</ul>` : ''}
+        <div style="font-size:11px;color:#b91c1c;line-height:1.7">増車レコメンドで適用した配車差配は、改善基準告示違反が解消されるまで確定できません。自社便のドライバー・時間帯を見直してください。</div>
+      </div>`;
+      if (btn) btn.disabled = true;
+    } else if (errs.length) {
       vb.style.display = 'block';
       vb.innerHTML = `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;margin-bottom:14px">
         <div style="font-size:12px;font-weight:700;color:#b91c1c;margin-bottom:8px">⚠ 確定前に解消すべき問題（${errs.length}件）</div>
@@ -19063,6 +19114,11 @@ function openConfirmModal(i) {
 
 function confirmDispatch() {
   const c = processingCases[pendingConfirmIdx];
+  // 増車レコメンドで適用した配車差配 × 改善基準告示違反は『承知の上で確定』でも確定不可（オーバーライド不可のハードブロック）。
+  if (_isScaleOutAppliedCase(c) && _caseHasKaizenViolation(c)) {
+    if (typeof showToast === 'function') showToast('改善基準告示違反が解消されていないため確定できません。自社便のドライバー・時間帯を見直してください', 'warn');
+    return;
+  }
   // 確定ハードブロック：未解消の問題があり、上書き未承認なら中断
   const _errs = (typeof _caseValidationErrors === 'function') ? _caseValidationErrors(c) : [];
   if (_errs.length && !c._confirmOverride) {
@@ -28873,7 +28929,30 @@ function dndRowHasTentative(driverId) {
   const blocks = (typeof dndAssignmentsFor === 'function')
     ? (dndAssignmentsFor(driverId, dateKey) || [])
     : [];
-  return blocks.some(a => !a.confirmed && !a.isPreset && !a.locked);
+  if (blocks.some(a => !a.confirmed && !a.isPreset && !a.locked)) return true;
+  // 増車レコメンドで適用した自社便（processingCases の AI増車プラン）も未確定として扱う。
+  // タイムラインには locked バーで注入されるため、従来の判定（!locked）から漏れていた。
+  return dndRowHasScaleOutLeg(driverId);
+}
+
+// この行（ドライバー）に、増車レコメンドで適用された未確定の自社便が割り当たっているか。
+// renderDndTimeline の増車便注入（processingCases の multi＝AI増車プラン）と同条件で照合する。
+// processingCases に残っている＝未確定フェーズ（請求確定で除外される）。
+function dndRowHasScaleOutLeg(driverId) {
+  if (typeof processingCases === 'undefined' || !Array.isArray(processingCases)) return false;
+  const d = dndDrivers.find(x => x.id === driverId);
+  if (!d) return false;
+  const driverFirstName = (d.name || '').split(' ')[0];
+  return processingCases.some(c => {
+    if (c.vehicleMode !== 'multi' || !Array.isArray(c.legs)) return false;
+    return c.legs.some(leg => {
+      if (!leg || leg.reason !== 'AI増車プラン') return false;
+      if (!leg.driverName && !leg.driverRefId) return false;
+      const legDid = (typeof _legDriverId === 'function') ? _legDriverId(leg) : null;
+      if (legDid && d._driverId) return legDid === d._driverId;
+      return (leg.driverName || '').split(' ')[0] === driverFirstName;
+    });
+  });
 }
 
 function dndApplyVehicleSort() {
