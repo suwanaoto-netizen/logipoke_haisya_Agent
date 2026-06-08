@@ -17327,10 +17327,10 @@ function _validateLegCombo(c, leg, applyLoad) {
       issues.push({ type: 'cross', level: 'info', msg: `クロス配車：${cb.driverBaseName}のドライバー × ${cb.vehicleBaseName}の車両${cb.distanceKm != null ? `（回送 約${cb.distanceKm}km）` : ''}／実働拠点＝${cb.vehicleBaseName}` });
     }
   }
-  // 案件横断の時間重複（I1/I2）：別案件と同一ドライバー/車両が時間重複
+  // 案件横断の時間重複（I1/I2）：別案件・確定済み配車と同一ドライバー/車両が時間重複
   _legGlobalConflicts(c, leg).forEach(g => issues.push({
     type: 'global_overlap', level: 'error',
-    msg: `他案件と時間重複：${g.type === 'driver' ? '同一ドライバー' : '同一車両'}が「${g.client}」と重複`
+    msg: `${g.confirmed ? '確定済み配車' : '他案件'}と時間重複：${g.type === 'driver' ? '同一ドライバー' : '同一車両'}が「${g.client}」と重複`
   }));
   if (leg.driverRefId && !_driverLawOk(c, leg.driverRefId)) {
     issues.push({ type: 'law', level: 'error', msg: `改善基準告示：${d ? d.name : ''} は要確認` });
@@ -17366,13 +17366,14 @@ function _caseTotalKg(c) { return _caseNeededKg(c); }
 // 時刻 "HH:MM" → 分（null安全。既存の同名関数 _hhmmToMin と衝突しないよう別名にする）
 function _legHhmmToMin(t) { if (!t) return null; const p = String(t).split(':'); const h = +p[0], m = +(p[1] || 0); return isNaN(h) ? null : h * 60 + (isNaN(m) ? 0 : m); }
 
-// 案件横断の時間重複（I1/I2 を処理中の全案件にまたがって検出）。
-// 同一ドライバー/同一車両が、別案件の区間と時間重複していれば返す（同日前提）。
+// 案件横断の時間重複（I1/I2 を処理中の全案件 ＋ 確定済み配車 にまたがって検出）。
+// 同一ドライバー/同一車両が、別案件の区間や確定済み運行と時間重複していれば返す（同日前提）。
 function _legGlobalConflicts(c, leg) {
   const out = {};
   const dId = _legDriverId(leg), vId = _legVehicleId(leg);
   const s = _legHhmmToMin(leg.startTime), e = _legHhmmToMin(leg.endTime);
   if ((!dId && !vId) || s == null || e == null) return [];
+  // (1) 処理中の他案件
   const cases = (typeof processingCases !== 'undefined') ? processingCases : [];
   cases.forEach(oc => {
     if (!oc || oc.id === (c && c.id) || !Array.isArray(oc.legs)) return;   // 同一案件内は intra で別途検出
@@ -17385,6 +17386,22 @@ function _legGlobalConflicts(c, leg) {
       if (vId && ovId === vId && !ol.partnerVehicle && !leg.partnerVehicle) out['v|' + oc.id] = { type: 'vehicle', client: oc.client || oc.id };
     });
   });
+  // (2) 確定済み配車（assignments の tab='confirmed'）。driverId='D###' / vehicleId='V####' で直接照合。
+  //     処理中legは日付を持たないため同日前提で時刻のみ突合（同一案件内/他案件の突合と同じ方針）。
+  //     legに日付(serviceDate)がある場合のみ、異なる日付の確定を除外する。
+  if (typeof assignments !== 'undefined' && Array.isArray(assignments)) {
+    const legDate = leg.serviceDate || (c && c.serviceDate) || null;
+    assignments.forEach(a => {
+      if (!a || a.tab !== 'confirmed') return;
+      if (legDate && a.date && a.date !== legDate) return;     // legに日付がある時のみ別日を除外
+      const os = _legHhmmToMin(a.start), oe = _legHhmmToMin(a.end);
+      if (os == null || oe == null) return;
+      if (!(s < oe && os < e)) return;
+      const label = a.client || a.id;
+      if (dId && a.driverId === dId) out['cd|' + a.id] = { type: 'driver', confirmed: true, client: label };
+      if (vId && a.vehicleId === vId && !leg.partnerVehicle) out['cv|' + a.id] = { type: 'vehicle', confirmed: true, client: label };
+    });
+  }
   return Object.keys(out).map(k => out[k]);
 }
 
@@ -17436,15 +17453,57 @@ function _legLoadAllocHtml(c) {
 // ── 論点G：案件単位の編集ロック（複数担当の協調。主スコア完結・edit_lock 相当）──
 window.__caseEditLocks = window.__caseEditLocks || {};
 window.__currentDispatcher = window.__currentDispatcher || { id: 'me', name: '自分' };
+
+// 論点G統合：現在の配車担当（本来基盤 __dispatchCollab があればそこから、無ければフォールバック）
+function _caseDispatcher() {
+  const col = window.__dispatchCollab;
+  if (col && col.currentUserId) {
+    const m = col.member ? col.member(col.currentUserId) : null;
+    return { id: col.currentUserId, name: (m && m.name) || '自分' };
+  }
+  return window.__currentDispatcher || { id: 'me', name: '自分' };
+}
+// 案件の主担当ドライバーの dnd id（='V####'。driverOwners/driverLocks のキー）
+function _casePrimaryDriverDndId(c) {
+  let d = (c && c.legs && c.legs.length) ? c.legs[0].driverRefId : null;
+  if (!d && c && c.driver) { const dd = drivers.find(x => x.name === c.driver); if (dd) d = dd.id; }
+  if (!d) return null;
+  return (typeof _opVehicleIdForDriverId === 'function') ? _opVehicleIdForDriverId(d) : null;
+}
+// 案件の担当者名（本来基盤の driverOwners 由来）
+function _caseOwnerName(c) {
+  const col = window.__dispatchCollab;
+  if (!col || !col.ownerOf) return null;
+  const dnd = _casePrimaryDriverDndId(c);
+  if (!dnd) return null;
+  const oid = col.ownerOf(dnd);
+  const m = oid && col.member ? col.member(oid) : null;
+  return m ? m.name : null;
+}
 function _caseLock(c) {
+  const me = _caseDispatcher();
+  // 1) 案件単位の編集ロック（自前）
   const l = c && c.id ? window.__caseEditLocks[c.id] : null;
-  if (!l) return { locked: false, byOther: false, name: null };
-  return { locked: true, byOther: l.userId !== window.__currentDispatcher.id, name: l.userName };
+  if (l) return { locked: true, byOther: l.userId !== me.id, name: l.userName };
+  // 2) 本来基盤：担当ドライバーが他者「編集中」ロックなら案件も読み取り専用に連動
+  const col = window.__dispatchCollab;
+  if (col && col.lockOf) {
+    const dnd = _casePrimaryDriverDndId(c);
+    if (dnd) {
+      const dl = col.lockOf(dnd);
+      if (dl && dl.userId !== me.id) {
+        const mm = col.member ? col.member(dl.userId) : null;
+        return { locked: true, byOther: true, name: (mm && mm.name) || dl.userId, source: 'driverLock' };
+      }
+    }
+  }
+  return { locked: false, byOther: false, name: null };
 }
 function _acquireCaseLock(c) {
   if (!c || !c.id) return;
   if (_caseLock(c).byOther) return;     // 他者ロック中は取得しない
-  window.__caseEditLocks[c.id] = { userId: window.__currentDispatcher.id, userName: window.__currentDispatcher.name, at: Date.now() };
+  const me = _caseDispatcher();
+  window.__caseEditLocks[c.id] = { userId: me.id, userName: me.name, at: Date.now() };
 }
 function _blockIfLocked(c) {
   const st = _caseLock(c);
@@ -17454,7 +17513,8 @@ function _blockIfLocked(c) {
 }
 function takeOverCaseLock(caseIdx) {
   const c = processingCases[caseIdx]; if (!c || !c.id) return;
-  window.__caseEditLocks[c.id] = { userId: window.__currentDispatcher.id, userName: window.__currentDispatcher.name, at: Date.now() };
+  const me = _caseDispatcher();
+  window.__caseEditLocks[c.id] = { userId: me.id, userName: me.name, at: Date.now() };
   if (typeof showToast === 'function') showToast('編集ロックを引き継ぎました', 'success');
   renderProcessingDetail(caseIdx);
 }
@@ -17465,8 +17525,9 @@ function _seedDemoCaseLockOnce() {
   try {
     if (typeof processingCases !== 'undefined' && processingCases.length > 1) {
       const tgt = processingCases[processingCases.length - 1];
+      const other = (window.__dispatchCollab && window.__dispatchCollab.member && window.__dispatchCollab.member('u2')) || { id: 'u2', name: '田中 花子' };
       if (tgt && tgt.id && !window.__caseEditLocks[tgt.id]) {
-        window.__caseEditLocks[tgt.id] = { userId: 'u2', userName: '田中 花子', at: Date.now() };
+        window.__caseEditLocks[tgt.id] = { userId: other.id || 'u2', userName: other.name || '田中 花子', at: Date.now() };
       }
     }
   } catch (e) { /* noop */ }
@@ -17567,7 +17628,10 @@ function _legDriverVehiclePickerHtml(c, caseIdx, legIdx, applyLoad) {
   if (!errs.length && !infos.length) {
     banner = `<div style="margin-top:6px;padding:4px 8px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;font-size:10px;color:#047857">✅ ドライバー・車両・法令の整合OK</div>`;
   }
+  const ownerName = (typeof _caseOwnerName === 'function') ? _caseOwnerName(c) : null;
+  const ownerLine = ownerName ? `<div style="font-size:9px;color:#64748b;margin-bottom:4px">🗂 担当：${ownerName}</div>` : '';
   return `<div class="leg-dv-picker">
+    ${ownerLine}
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
       <span style="font-size:10px;font-weight:700;color:var(--text-secondary);width:48px;flex-shrink:0">👤 ドライバー</span>
       ${_driverSelectHtml(c, caseIdx, legIdx)}
@@ -41293,6 +41357,16 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
     // 他ユーザーが「編集中」のロックだけは同時編集の安全策として引き続き保護する。
     return !isLockedByOther(driverId);
   }
+
+  // 論点G統合：案件編集ロック側（主スコープ）から参照できるよう、本来の担当/ロック基盤を公開。
+  // driverOwners / driverLocks は dnd driver id（='V####'）キー。currentUserId は 'me'。
+  window.__dispatchCollab = {
+    currentUserId: CURRENT_USER_ID,
+    member: getMember,
+    ownerOf: ownerOf,
+    lockOf: function (driverDndId) { return driverLocks[driverDndId] || null; },
+    isLockedByOther: isLockedByOther
+  };
 
   // ════════════════════════════════════════════════════════════════
   //  担当フィルタバーの設置
