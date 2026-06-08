@@ -17321,6 +17321,11 @@ function _validateLegCombo(c, leg, applyLoad) {
         issues.push({ type: 'load', level: 'error', msg: `積載超過：荷量 ${needKg.toLocaleString()}kg ＞ ${v.plate} の最大積載 ${v.maxLoad.toLocaleString()}kg` });
       }
     }
+    // 温度帯適合（冷凍/冷蔵荷に対し非対応車両はエラー）
+    const zone = _caseTempZone(c);
+    if (v && zone !== 'ambient' && !_vehicleTempOk(v, zone)) {
+      issues.push({ type: 'temp', level: 'error', msg: `温度帯不適合：${_TEMP_LABEL[zone]}荷に ${v.plate}（${v.type}）は非対応（冷蔵/冷凍車が必要）` });
+    }
     // 論点E：クロス配車は情報提示（エラーではない）。実働拠点は車両拠点。
     const cb = _legCrossBase(leg);
     if (cb.cross) {
@@ -17362,6 +17367,67 @@ function _legOverlapConflicts(c) {
 
 // 案件の総荷量(kg)
 function _caseTotalKg(c) { return _caseNeededKg(c); }
+
+// 案件の主温度帯（冷凍 > 冷蔵 > 常温）
+function _caseTempZone(c) {
+  const SO = window.LogipokeScaleOut;
+  const zones = (SO && SO.parseTempZones) ? SO.parseTempZones((c && c.goods) || '') : [];
+  if (zones.indexOf('frozen') >= 0) return 'frozen';
+  if (zones.indexOf('chilled') >= 0) return 'chilled';
+  return 'ambient';
+}
+const _TEMP_LABEL = { frozen: '冷凍', chilled: '冷蔵', ambient: '常温' };
+// 車両が温度帯に適合するか（冷凍車=frozen/chilled可、冷蔵車=chilled可、それ以外=常温のみ）
+function _vehicleTempOk(vehicle, zone) {
+  if (!vehicle || zone === 'ambient' || !zone) return true;
+  const t = String(vehicle.type || '');
+  const isFreezer = /冷凍/.test(t);
+  const isReefer = /冷蔵|リーファー/.test(t);
+  if (zone === 'frozen') return isFreezer;
+  if (zone === 'chilled') return isFreezer || isReefer;
+  return true;
+}
+// 案件の体積(m3)。データに無ければ null（マスタに車両容積が無いため厳密検証は対象外）
+function _caseVolumeM3(c) {
+  const m = String((c && c.goods) || '').match(/([\d,]+(?:\.\d+)?)\s*(?:m3|m³|㎥|立米)/i);
+  return m ? parseFloat(m[1].replace(/,/g, '')) : null;
+}
+
+// 積載の自動按分：総荷量を各便の車両最大積載に比例配分（上限超過なし）。
+function _autoAllocateLoad(caseIdx) {
+  const c = processingCases[caseIdx];
+  if (!c || !Array.isArray(c.legs) || !c.legs.length) return;
+  if (_blockIfLocked(c)) return;
+  const total = _caseTotalKg(c);
+  if (!total) { if (typeof showToast === 'function') showToast('荷量が不明なため自動按分できません', 'warn'); return; }
+  // 各便の上限（傭車は上限不明→総量を上限扱い）
+  const caps = c.legs.map(l => {
+    if (l.partnerVehicle) return total;
+    const v = l.vehicleRefId ? getVehicleById(l.vehicleRefId) : null;
+    return v && typeof v.maxLoad === 'number' ? v.maxLoad : 0;
+  });
+  const capSum = caps.reduce((s, x) => s + x, 0);
+  if (capSum <= 0) { if (typeof showToast === 'function') showToast('車両の最大積載が不明です', 'warn'); return; }
+  // 比例配分（上限内）→ 端数・残量を上限の余る便へ寄せる
+  let remaining = Math.min(total, capSum);
+  const alloc = caps.map(cap => Math.min(cap, Math.floor(remaining * (cap / capSum))));
+  let assigned = alloc.reduce((s, x) => s + x, 0);
+  let rest = Math.min(total, capSum) - assigned;
+  for (let i = 0; i < c.legs.length && rest > 0; i++) {
+    const room = caps[i] - alloc[i];
+    const add = Math.min(room, rest);
+    alloc[i] += add; rest -= add;
+  }
+  c.legs.forEach((l, i) => { l.loadKg = alloc[i]; });
+  _afterLegEdit(c, caseIdx);
+  const over = total > capSum;
+  if (typeof showToast === 'function') {
+    showToast(over
+      ? `自動按分：合計 ${capSum.toLocaleString()}kg まで配分（荷量 ${total.toLocaleString()}kg は容量超過。増車を検討）`
+      : `自動按分しました（総荷量 ${total.toLocaleString()}kg を ${c.legs.length}台に配分）`,
+      over ? 'warn' : 'success');
+  }
+}
 
 // 時刻 "HH:MM" → 分（null安全。既存の同名関数 _hhmmToMin と衝突しないよう別名にする）
 function _legHhmmToMin(t) { if (!t) return null; const p = String(t).split(':'); const h = +p[0], m = +(p[1] || 0); return isNaN(h) ? null : h * 60 + (isNaN(m) ? 0 : m); }
@@ -17433,7 +17499,7 @@ function _caseValidationErrors(c) {
 }
 
 // 複数台モードの積載按分サマリー（総荷量 / 割当済 / 残）
-function _legLoadAllocHtml(c) {
+function _legLoadAllocHtml(c, caseIdx) {
   if (c.vehicleMode !== 'multi') return '';
   const total = _caseTotalKg(c);
   if (!total) return '';
@@ -17445,8 +17511,14 @@ function _legLoadAllocHtml(c) {
   const color = over ? '#b91c1c' : (short ? '#9a3412' : '#047857');
   const bg = over ? '#fef2f2' : (short ? '#fff7ed' : '#ecfdf5');
   const bd = over ? '#fecaca' : (short ? '#fdba74' : '#a7f3d0');
-  return `<div style="margin:0 0 8px;padding:7px 10px;background:${bg};border:1px solid ${bd};border-radius:8px;font-size:11px;color:${color};line-height:1.6">
-    📦 積載按分：総荷量 <b>${total.toLocaleString()}kg</b> ／ 割当済 <b>${allocated.toLocaleString()}kg</b> ／ ${over ? `超過 <b>${(-remain).toLocaleString()}kg</b>` : `残 <b>${remain.toLocaleString()}kg</b>`}
+  const zone = _caseTempZone(c);
+  const vol = _caseVolumeM3(c);
+  const meta = `${zone !== 'ambient' ? ` ／ 温度帯 <b>${_TEMP_LABEL[zone]}</b>` : ''}${vol != null ? ` ／ 体積 <b>${vol}m³</b>` : ''}`;
+  const btn = (typeof caseIdx === 'number')
+    ? `<button onclick="_autoAllocateLoad(${caseIdx})" style="float:right;font-size:10px;font-weight:700;color:#fff;background:#1a7a5e;border:none;border-radius:5px;padding:3px 9px;cursor:pointer">⚖ 自動按分</button>`
+    : '';
+  return `<div style="margin:0 0 8px;padding:7px 10px;background:${bg};border:1px solid ${bd};border-radius:8px;font-size:11px;color:${color};line-height:1.7">
+    ${btn}📦 積載按分：総荷量 <b>${total.toLocaleString()}kg</b> ／ 割当済 <b>${allocated.toLocaleString()}kg</b> ／ ${over ? `超過 <b>${(-remain).toLocaleString()}kg</b>` : `残 <b>${remain.toLocaleString()}kg</b>`}${meta}
   </div>`;
 }
 
@@ -17990,7 +18062,7 @@ function renderLegList(caseIdx, c) {
   }).join('');
 
   const addDisabled = legs.length >= 3;
-  return _legLoadAllocHtml(c) + _legOverlapBannerHtml(c) + legHtml + `
+  return _legLoadAllocHtml(c, caseIdx) + _legOverlapBannerHtml(c) + legHtml + `
     <button class="add-leg-btn" onclick="addLeg(${caseIdx})" ${addDisabled?'disabled':''}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       第${legs.length+1}便を追加${addDisabled?' （上限3台）':''}
