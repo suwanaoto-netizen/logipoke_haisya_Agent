@@ -17192,9 +17192,32 @@ function _driverLawForCase(c, driverId) {
   const cand = (c.vehicles || []).find(v => v.driverId === driverId || (name && v.driver === name));
   return cand ? cand.law : null;
 }
-function _driverLawOk(c, driverId) {
+// #6 実稼働ソース化：当日のドライバー稼働ブロック（assignments/dndAssignments）＋この便の時刻から
+// 改善基準告示（拘束/連続運転/休息）を計算。候補law（静的ラベル）ではなく実データを権威にする。
+function _driverComplianceFromWorkload(c, driverId, leg) {
+  if (!driverId) return null;
+  const dateKey = (typeof dndGetCurrentDateKey === 'function') ? dndGetCurrentDateKey() : null;
+  if (!dateKey) return null;
+  const cand = (leg && leg.startTime && leg.endTime) ? { start: leg.startTime, end: leg.endTime } : null;
+  try {
+    if (typeof kaizenCheckByAssignments === 'function') return kaizenCheckByAssignments(driverId, dateKey, cand, null);
+    if (typeof kaizenCheck === 'function') return kaizenCheck(driverId, dateKey, cand, -1);
+  } catch (e) { /* noop */ }
+  return null;
+}
+// 改善基準告示レベル 'ok'|'warn'|'violation'（実稼働優先、無ければ候補lawへフォールバック）
+function _driverLawLevel(c, driverId, leg) {
+  if (!driverId) return 'ok';
+  const comp = _driverComplianceFromWorkload(c, driverId, leg);
+  if (comp && comp.level) return comp.level;
   const law = _driverLawForCase(c, driverId);
-  return law ? law.items.every(it => it.ok) : true;
+  if (!law) return 'ok';
+  if (law.status === 'ng' || law.status === 'violation') return 'violation';
+  return (law.items && law.items.every(it => it.ok)) ? 'ok' : 'warn';
+}
+// 配車可否（ハードブロック対象は violation のみ。warn は要確認だが配車自体は可）
+function _driverLawOk(c, driverId, leg) {
+  return _driverLawLevel(c, driverId, leg) !== 'violation';
 }
 
 // 区間の表示用フィールドを driverRefId/vehicleRefId（権威）から再生成
@@ -17211,7 +17234,8 @@ function _syncLegDisplayFromRefs(c, leg) {
     leg.vehicleName = v.plate || v.id;      // 表示用ナンバープレート
     leg.capacity = (typeof v.maxLoad === 'number') ? (v.maxLoad.toLocaleString() + 'kg') : leg.capacity;
   }
-  leg.lawOk = _driverLawOk(c, leg.driverRefId);  // 論点C：ドライバー基準
+  leg.lawLevel = _driverLawLevel(c, leg.driverRefId, leg);  // #6 実稼働ソース：ok/warn/violation
+  leg.lawOk = leg.lawLevel !== 'violation';                  // 論点C：ドライバー基準（ハードブロックは違反のみ）
   // 論点E：実働拠点（既定=車両拠点）とクロス配車フラグを確定して保存
   const cb = _legCrossBase(leg);
   leg.effectiveBaseId = cb.effectiveBaseId;
@@ -17340,8 +17364,16 @@ function _validateLegCombo(c, leg, applyLoad) {
     type: 'global_overlap', level: 'error',
     msg: `${g.confirmed ? '確定済み配車' : '他案件'}と時間重複：${g.type === 'driver' ? '同一ドライバー' : '同一車両'}が「${g.client}」と重複`
   }));
-  if (leg.driverRefId && !_driverLawOk(c, leg.driverRefId)) {
-    issues.push({ type: 'law', level: 'error', msg: `改善基準告示：${d ? d.name : ''} は要確認` });
+  if (leg.driverRefId) {
+    const lawLv = _driverLawLevel(c, leg.driverRefId, leg);
+    const comp = _driverComplianceFromWorkload(c, leg.driverRefId, leg);
+    const detail = comp && (comp.violations || comp.warnings)
+      ? (comp.violations.concat(comp.warnings || []).slice(0, 2).join('・')) : '';
+    if (lawLv === 'violation') {
+      issues.push({ type: 'law', level: 'error', msg: `改善基準告示違反：${d ? d.name : ''}（実稼働）${detail ? '／' + detail : ''}` });
+    } else if (lawLv === 'warn') {
+      issues.push({ type: 'law', level: 'info', msg: `改善基準告示 要確認：${d ? d.name : ''}（実稼働）${detail ? '／' + detail : ''}` });
+    }
   }
   return issues;
 }
@@ -18151,8 +18183,9 @@ function renderLegList(caseIdx, c) {
   }
   const legHtml = legs.map((leg, li) => {
     _ensureLegRefs(c, leg);
-    const lawIcon = leg.lawOk ? '✅ 法令クリア' : '⚠️ 法令要確認';
-    const lawCls  = leg.lawOk ? 'background:#d1fae5;color:#065f46' : 'background:#fef2f2;color:#dc2626';
+    const _lawLv  = leg.lawLevel || (leg.lawOk === false ? 'violation' : 'ok');
+    const lawIcon = _lawLv === 'violation' ? '⛔ 法令違反' : (_lawLv === 'warn' ? '⚠️ 法令要確認' : '✅ 法令クリア');
+    const lawCls  = _lawLv === 'violation' ? 'background:#fef2f2;color:#dc2626' : (_lawLv === 'warn' ? 'background:#fff7ed;color:#9a3412' : 'background:#d1fae5;color:#065f46');
 
     return `<div class="leg-block ${leg.vehicleRefId?'leg-confirmed':''}" id="leg-block-${caseIdx}-${li}">
       <div class="leg-block-header">
@@ -18178,7 +18211,7 @@ function renderLegList(caseIdx, c) {
       <div class="leg-selected-summary">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 4v3h-7V8z"/></svg>
         ${leg.driverName}（${leg.vehicleName}）· ${leg.capacity}
-        <span class="law-ok-pill">${leg.lawOk?'法令✓':'⚠️'}</span>
+        <span class="law-ok-pill">${(leg.lawLevel||(leg.lawOk===false?'violation':'ok'))==='ok'?'法令✓':((leg.lawLevel==='warn')?'⚠️要確認':'⛔違反')}</span>
       </div>
       <!-- 積載按分（この便が運ぶ重量） -->
       <div style="padding:6px 12px 0;display:flex;align-items:center;gap:6px">
