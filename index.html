@@ -8808,7 +8808,7 @@ function _ssotDerive(seed, build){
               </div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label class="form-label">担当車両ID</label><input class="form-input" id="vf-dvehicle" placeholder="例：1245"></div>
+              <div class="form-group"><label class="form-label">現在の担当車両（運行盤で自動連動）</label><input class="form-input" id="vf-dvehicle" placeholder="（配車盤で割当）" readonly style="background:#f3f4f6;color:#6b7280"></div>
               <div class="form-group"><label class="form-label">評価 (1〜5)</label>
                 <select class="form-select" id="vf-dstars">
                   <option value="5">★★★★★ 5</option><option value="4">★★★★☆ 4</option><option value="3">★★★☆☆ 3</option><option value="2">★★☆☆☆ 2</option><option value="1">★☆☆☆☆ 1</option>
@@ -17661,7 +17661,7 @@ function _buildVehicleDriverCard(c) {
   var rawId    = c.vehicle || '';
   var lookupId = rawId.replace(/^車両/, '');
   var vm = masterData.find(function(v) {
-    return v.id === lookupId || v.id === rawId || v.plate === rawId;
+    return v.id === lookupId || v.id === rawId || v.plate === rawId || v.legacyId === lookupId || v.legacyId === rawId;
   });
 
   // マスタから取得、なければ案件データのフォールバック値を使う
@@ -18362,7 +18362,7 @@ function confirmDispatch() {
       // 車両マスタからプレート・スペックを引く
       const rawId = leg.vehicleName || leg.vehicleId || '';
       const lookupId = rawId.replace(/^車両/, '');
-      const vm = (window.vehicleMasterData || []).find(v => v.id === lookupId || v.id === rawId);
+      const vm = (window.vehicleMasterData || []).find(v => v.id === lookupId || v.id === rawId || v.legacyId === lookupId || v.legacyId === rawId);
       const vPlate = vm ? vm.plate : rawId;
       processedCases.unshift({
         id: c.id + '-L' + (li+1), status:'完了', casePattern: c.casePattern || null,
@@ -19841,8 +19841,8 @@ function _legacyDriverIdToNew(legacyId) {
 //  C2（ID体系の一本化・足場）: 車両/ドライバーの旧ID互換 + 参照解決の単一窓口
 //  既存の複数表現（'V1245' / '1245' / '車両1245' / 紐づくドライバー 'D###' / ドライバー名）を
 //  1台の正規 vehicles エントリに解決する。「どのIDがどれか」の曖昧さ＝不整合の元を解消。
-//  ※ vehicleMasterData は固有データ(plate/maker/燃費・コスト等)を持つ独立レジストリのため
-//    物理統合はせず、_canonicalVehicleId で正規車両へ橋渡しする（追記のみ・非破壊）。
+//  ※ 旧 vehicleMasterData の固有データ(plate/maker/燃費・コスト等)は、直後の「台帳1本化」で
+//    vehicles[]/drivers[] の拡張列(_led)へ吸収済み。本ブロックは旧ID→正規車両の解決窓口を維持する。
 // ═══════════════════════════════════════════════════════════════
 vehicles.forEach(function (v, i) {
   var num = String(v.id).replace(/^V/, '');     // 'V1245' → '1245'
@@ -19870,42 +19870,194 @@ function resolveVehicleRef(ref) {
   return null;
 }
 window.resolveVehicleRef = resolveVehicleRef;
-// 車両マスタ（独立レジストリ）→ 正規 vehicles への明示クロスリンク（非破壊の追記）
-function _logipokeLinkOne(vm) {
-  if (!vm) return;
-  var canon = resolveVehicleRef(vm.id);
-  vm._canonicalVehicleId = canon ? canon.id : null;     // 例 '1245' → 'V1245'（無ければ null＝正規フリート外）
-  vm.legacyIds = ['車両' + vm.id, String(vm.id), vm.plate].filter(Boolean);
-  if (canon) {
-    if (!vm._driverId) vm._driverId = canon._driverId || null;
-    if (Array.isArray(canon.legacyIds) && canon.legacyIds.indexOf(String(vm.id)) < 0) canon.legacyIds.push(String(vm.id));
+// ═══════════════════════════════════════════════════════════════
+//  台帳1本化：車両・ドライバー固有データを drivers[]/vehicles[] へ吸収
+//  ----------------------------------------------------------------
+//  旧 window.vehicleMasterData / window.driverMasterData（手台帳12件）の固有項目
+//  （燃費 fuelLogs・整備履歴 costLogs・maker/model・empNo・stars 等）を、名前/序数で
+//  対応する運行マスタ drivers[]/vehicles[] の該当レコードへ「拡張列(_led)」として吸収する。
+//  ・ID は運行側の V####/D### に寄せ、旧ID（'1245' / 'DRV-001'）は legacyId/legacyIds に退避。
+//  ・運行ロジックが使う type/ton/maxLoad/baseId/license(配列) は無傷（_led サイドカーに隔離）。
+//  ・vehicleId/driverName の固定相互参照は撤廃。「現在の担当」は運行層(dndDrivers ペア)から
+//    射影時に動的算出して埋める（_opDriverIdForVehicleId / _opVehicleIdForDriverId）。
+//  window.vehicleMasterData / window.driverMasterData は、この単一情報源からの射影ビュー。
+// ═══════════════════════════════════════════════════════════════
+
+// 手台帳の固有データ（運行 drivers[]/vehicles[] の index に対応付け）。
+// veh.driverName / drv.vehicleId は固定参照のため意図的に持たない（撤廃）。
+var _LEDGER_ROWS = [
+  { i:0,  drv:{ id:'DRV-001', name:'山田 一郎', empNo:'EMP-001', tel:'090-1234-5678', license:'大型・牽引', stars:5, avail:'運行中', base:'品川区',   note:'フォークリフト所持' },
+          veh:{ id:'1245', plate:'品川 800 あ 1245', type:'4tウィング',  cap:2000, base:'品川区',   status:'運行中', inspection:'2025/08/31', fuel:'軽油', note:'',               maker:'いすゞ',     model:'エルフ NLR85AR',     regdate:'2020/04', mileage:95400,
+            fuelLogs:[{date:'2025/04/28',liters:62.4,amount:10920,odo:95400,note:'品川SS'},{date:'2025/04/14',liters:58.1,amount:10165,odo:93200,note:'品川SS'},{date:'2025/03/31',liters:65.0,amount:11375,odo:90800,note:'川口IC'}],
+            costLogs:[{date:'2025/04/01',cat:'自動車税',amount:27500,note:'令和7年度'},{date:'2025/03/15',cat:'修理・整備',amount:42000,note:'ブレーキパッド交換'},{date:'2025/01/10',cat:'3ヶ月点検',amount:18000,note:'定期'}] } },
+  { i:1,  drv:{ id:'DRV-002', name:'鈴木 次郎', empNo:'EMP-002', tel:'090-2345-6789', license:'大型',      stars:4, avail:'空車',   base:'品川区',   note:'' },
+          veh:{ id:'1123', plate:'品川 800 い 1123', type:'2tトラック', cap:1000, base:'品川区',   status:'空車',   inspection:'2025/11/30', fuel:'軽油', note:'',               maker:'日野',       model:'デュトロ XZU600',   regdate:'2021/07', mileage:62300,
+            fuelLogs:[{date:'2025/04/25',liters:38.2,amount:6685,odo:62300,note:'品川SS'},{date:'2025/04/10',liters:41.5,amount:7262,odo:60500,note:''}],
+            costLogs:[{date:'2025/02/20',cat:'任意保険',amount:85000,note:'年間保険料'},{date:'2025/01/15',cat:'部品購入',amount:12800,note:'エアフィルター'}] } },
+  { i:5,  drv:{ id:'DRV-003', name:'渡辺 六郎', empNo:'EMP-003', tel:'090-3456-7890', license:'大型',      stars:4, avail:'運行中', base:'足立区',   note:'冷蔵車専任' },
+          veh:{ id:'0552', plate:'足立 800 う 0552', type:'冷蔵車',     cap:1500, base:'足立区',   status:'運行中', inspection:'2025/06/15', fuel:'軽油', note:'冷蔵機能あり',     maker:'三菱ふそう', model:'キャンター FEA50',  regdate:'2019/10', mileage:118700,
+            fuelLogs:[{date:'2025/04/27',liters:71.8,amount:12565,odo:118700,note:'足立SS'},{date:'2025/04/13',liters:69.2,amount:12110,odo:116200,note:'足立SS'},{date:'2025/03/28',liters:74.1,amount:12967,odo:113400,note:''}],
+            costLogs:[{date:'2025/04/05',cat:'車検',amount:185000,note:'2年定期'},{date:'2025/03/01',cat:'修理・整備',amount:28000,note:'冷凍機ガス補充'},{date:'2025/01/20',cat:'自賠責保険',amount:31680,note:'24ヶ月'}] } },
+  { i:9,  drv:{ id:'DRV-004', name:'松本 十郎', empNo:'EMP-004', tel:'090-4567-8901', license:'大型・牽引', stars:5, avail:'空車',   base:'品川区',   note:'危険物取扱' },
+          veh:{ id:'2580', plate:'品川 800 え 2580', type:'10tトラック',cap:6000, base:'品川区',   status:'空車',   inspection:'2026/02/28', fuel:'軽油', note:'',               maker:'いすゞ',     model:'ギガ CYJ77A',       regdate:'2022/01', mileage:74200,
+            fuelLogs:[{date:'2025/04/22',liters:128.5,amount:22487,odo:74200,note:'品川SS'},{date:'2025/04/08',liters:135.2,amount:23660,odo:71800,note:'大阪給油'}],
+            costLogs:[{date:'2025/03/10',cat:'自動車重量税',amount:65600,note:'2年分'},{date:'2025/02/15',cat:'3ヶ月点検',amount:32000,note:''},{date:'2025/01/05',cat:'部品購入',amount:18500,note:'タイヤ交換（前輪）'}] } },
+  { i:12, drv:{ id:'DRV-005', name:'山本 十三', empNo:'EMP-005', tel:'090-5678-9012', license:'大型',      stars:5, avail:'空車',   base:'福岡市',   note:'' },
+          veh:{ id:'3301', plate:'福岡 800 お 3301', type:'4tウィング',  cap:2000, base:'福岡市',   status:'空車',   inspection:'2025/09/30', fuel:'軽油', note:'',               maker:'日野',       model:'レンジャー GD7JGAA', regdate:'2021/03', mileage:88900,
+            fuelLogs:[{date:'2025/04/20',liters:59.8,amount:10465,odo:88900,note:'博多SS'},{date:'2025/04/05',liters:63.1,amount:11042,odo:86700,note:''}],
+            costLogs:[{date:'2025/04/01',cat:'自動車税',amount:27500,note:''},{date:'2025/02/28',cat:'修理・整備',amount:15000,note:'ウィング油圧調整'}] } },
+  { i:15, drv:{ id:'DRV-006', name:'斉藤 十六', empNo:'EMP-006', tel:'090-6789-0123', license:'大型',      stars:5, avail:'空車',   base:'仙台市',   note:'精密機器輸送経験豊富' },
+          veh:{ id:'5521', plate:'宮城 800 か 5521', type:'4tウィング',  cap:2000, base:'仙台市',   status:'空車',   inspection:'2025/12/31', fuel:'軽油', note:'精密機器対応',     maker:'三菱ふそう', model:'ファイター FK71F',  regdate:'2020/09', mileage:102300,
+            fuelLogs:[{date:'2025/04/24',liters:64.2,amount:11235,odo:102300,note:'仙台SS'},{date:'2025/04/09',liters:61.8,amount:10815,odo:100100,note:''}],
+            costLogs:[{date:'2025/03/20',cat:'その他点検',amount:9800,note:'タコグラフ点検'},{date:'2025/01/15',cat:'任意保険',amount:92000,note:'年間'}] } },
+  { i:3,  drv:{ id:'DRV-007', name:'田中 四郎', empNo:'EMP-007', tel:'090-7890-1234', license:'中型',      stars:4, avail:'空車',   base:'船橋市',   note:'食品衛生管理者' },
+          veh:{ id:'0887', plate:'千葉 800 き 0887', type:'冷蔵車',     cap:1500, base:'船橋市',   status:'空車',   inspection:'2025/07/31', fuel:'軽油', note:'食品衛生管理対応', maker:'日野',       model:'デュトロ XZU710',   regdate:'2019/06', mileage:126500,
+            fuelLogs:[{date:'2025/04/26',liters:68.4,amount:11970,odo:126500,note:'船橋SS'},{date:'2025/04/12',liters:72.1,amount:12617,odo:124100,note:''},{date:'2025/03/29',liters:69.8,amount:12215,odo:121500,note:''}],
+            costLogs:[{date:'2025/04/10',cat:'修理・整備',amount:55000,note:'冷凍機コンプレッサー修理'},{date:'2025/02/05',cat:'自賠責保険',amount:31680,note:'24ヶ月'},{date:'2025/01/20',cat:'3ヶ月点検',amount:22000,note:''}] } },
+  { i:10, drv:{ id:'DRV-008', name:'高木 十一', empNo:'EMP-008', tel:'090-8901-2345', license:'大型',      stars:4, avail:'空車',   base:'大田区',   note:'' },
+          veh:{ id:'1872', plate:'大田 800 く 1872', type:'4tウィング',  cap:2000, base:'大田区',   status:'空車',   inspection:'2025/10/31', fuel:'軽油', note:'',               maker:'いすゞ',     model:'フォワード FRR90S',  regdate:'2021/11', mileage:55800,
+            fuelLogs:[{date:'2025/04/23',liters:55.6,amount:9730,odo:55800,note:'大田SS'},{date:'2025/04/07',liters:58.9,amount:10307,odo:53700,note:''}],
+            costLogs:[{date:'2025/03/25',cat:'部品購入',amount:8200,note:'ワイパーブレード・油脂類'},{date:'2025/01/30',cat:'自動車税',amount:27500,note:''}] } },
+  { i:11, drv:{ id:'DRV-009', name:'藤田 十二', empNo:'EMP-009', tel:'090-9012-3456', license:'準中型',    stars:4, avail:'休憩中', base:'品川区',   note:'' },
+          veh:{ id:'0934', plate:'品川 800 け 0934', type:'2tトラック', cap:1500, base:'品川区',   status:'整備中', inspection:'2025/05/31', fuel:'軽油', note:'車検前点検中',     maker:'三菱ふそう', model:'キャンター FEB90',  regdate:'2018/12', mileage:144600,
+            fuelLogs:[{date:'2025/04/15',liters:44.2,amount:7735,odo:144600,note:'品川SS'},{date:'2025/03/30',liters:46.8,amount:8190,odo:142400,note:''}],
+            costLogs:[{date:'2025/04/20',cat:'車検',amount:220000,note:'車検前整備中'},{date:'2025/04/20',cat:'修理・整備',amount:68000,note:'エンジンオーバーホール'},{date:'2025/02/10',cat:'自動車重量税',amount:41400,note:'2年分'}] } },
+  { i:13, drv:{ id:'DRV-010', name:'中島 十四', empNo:'EMP-010', tel:'090-0123-4567', license:'大型・牽引', stars:4, avail:'空車',   base:'北九州市', note:'長距離得意' },
+          veh:{ id:'2240', plate:'北九州 800 こ 2240', type:'10tトラック',cap:6000, base:'北九州市', status:'空車',   inspection:'2026/01/31', fuel:'軽油', note:'',               maker:'日野',       model:'プロフィア FS1EXPA', regdate:'2022/06', mileage:68100,
+            fuelLogs:[{date:'2025/04/21',liters:142.3,amount:24902,odo:68100,note:'北九州SS'},{date:'2025/04/06',liters:138.7,amount:24272,odo:65200,note:'大阪給油'}],
+            costLogs:[{date:'2025/03/05',cat:'3ヶ月点検',amount:35000,note:''},{date:'2025/01/12',cat:'部品購入',amount:24000,note:'タイヤ（後輪2本）'}] } },
+  { i:14, drv:{ id:'DRV-011', name:'小野 十五', empNo:'EMP-011', tel:'090-1111-2222', license:'大型',      stars:3, avail:'空車',   base:'福岡市',   note:'' },
+          veh:{ id:'4410', plate:'福岡 800 さ 4410', type:'4tウィング',  cap:2000, base:'福岡市',   status:'空車',   inspection:'2025/08/15', fuel:'軽油', note:'',               maker:'いすゞ',     model:'フォワード FRR90',   regdate:'2020/02', mileage:91200,
+            fuelLogs:[{date:'2025/04/19',liters:61.4,amount:10745,odo:91200,note:'博多SS'},{date:'2025/04/04',liters:59.2,amount:10360,odo:89100,note:''}],
+            costLogs:[{date:'2025/02/20',cat:'修理・整備',amount:22000,note:'クラッチ調整'},{date:'2025/01/10',cat:'任意保険',amount:88000,note:'年間'}] } },
+  { i:16, drv:{ id:'DRV-012', name:'池田 十七', empNo:'EMP-012', tel:'090-2222-3333', license:'中型',      stars:4, avail:'休憩中', base:'福島市',   note:'東北エリア専任' },
+          veh:{ id:'6632', plate:'福島 800 し 6632', type:'2tトラック', cap:1000, base:'福島市',   status:'休憩中', inspection:'2025/09/15', fuel:'軽油', note:'',               maker:'三菱ふそう', model:'キャンター FEA20',  regdate:'2021/05', mileage:48700,
+            fuelLogs:[{date:'2025/04/22',liters:36.8,amount:6440,odo:48700,note:'福島SS'},{date:'2025/04/07',liters:38.4,amount:6720,odo:47100,note:''}],
+            costLogs:[{date:'2025/03/15',cat:'自賠責保険',amount:25830,note:'24ヶ月'},{date:'2025/01/25',cat:'その他点検',amount:6500,note:'エアコン点検'}] } },
+];
+
+function _dedupPush(arr, v) { if (v != null && arr.indexOf(v) < 0) arr.push(v); return arr; }
+
+// 吸収：手台帳の固有データを drivers[]/vehicles[] へ拡張列(_led)として取り込む（dndDrivers 構築前に実行）
+function _applyLedgerToMasters() {
+  _LEDGER_ROWS.forEach(function (row) {
+    var d = drivers[row.i];
+    if (d) {
+      d.name = row.drv.name;          // 12件を正：氏名は台帳を権威に
+      d.tel  = row.drv.tel;           // 実電話番号を権威に
+      d._ledger = true;
+      d.legacyIds = d.legacyIds || [];
+      _dedupPush(d.legacyIds, row.drv.id);
+      d._led = {
+        id: row.drv.id, name: row.drv.name, empNo: row.drv.empNo, tel: row.drv.tel,
+        license: row.drv.license, stars: row.drv.stars, avail: row.drv.avail, base: row.drv.base, note: row.drv.note
+      };
+    }
+    var v = vehicles[row.i];
+    if (v) {
+      v.plate = row.veh.plate;        // 12件を正：実ナンバープレートを権威に
+      v._ledger = true;
+      v.legacyIds = v.legacyIds || [];
+      _dedupPush(v.legacyIds, String(row.veh.id));
+      _dedupPush(v.legacyIds, '車両' + row.veh.id);
+      // 旧番号(例 '1245' / '車両1245')→正規車両 の解決を resolveVehicleRef でも一貫させる
+      if (typeof _vehicleByLegacy !== 'undefined') {
+        if (_vehicleByLegacy[String(row.veh.id)] === undefined) _vehicleByLegacy[String(row.veh.id)] = v;
+        if (_vehicleByLegacy['車両' + row.veh.id] === undefined) _vehicleByLegacy['車両' + row.veh.id] = v;
+      }
+      v._led = {
+        id: row.veh.id, plate: row.veh.plate, type: row.veh.type, cap: row.veh.cap, base: row.veh.base,
+        status: row.veh.status, inspection: row.veh.inspection, fuel: row.veh.fuel, note: row.veh.note,
+        maker: row.veh.maker, model: row.veh.model, regdate: row.veh.regdate, mileage: row.veh.mileage,
+        fuelLogs: row.veh.fuelLogs, costLogs: row.veh.costLogs
+      };
+    }
+  });
+}
+_applyLedgerToMasters();
+
+// 派生：「現在の担当」を運行層(dndDrivers ペア)から動的算出。未構築時は drivers[i]↔vehicles[i] にフォールバック。
+function _opDriverIdForVehicleId(vId) {
+  if (!vId) return null;
+  if (typeof dndDrivers !== 'undefined' && Array.isArray(dndDrivers)) {
+    var r = dndDrivers.find(function (x) { return x && x._vehicleId === vId; });
+    if (r && r._driverId) return r._driverId;
   }
+  var i = vehicles.findIndex(function (v) { return v.id === vId; });
+  return (i >= 0 && drivers[i]) ? drivers[i].id : null;
 }
-function _logipokeLinkVehicleMaster() {
-  if (typeof window.vehicleMasterData === 'undefined' || !Array.isArray(window.vehicleMasterData)) return;
-  window.vehicleMasterData.forEach(_logipokeLinkOne);
+function _opVehicleIdForDriverId(dId) {
+  if (!dId) return null;
+  if (typeof dndDrivers !== 'undefined' && Array.isArray(dndDrivers)) {
+    var r = dndDrivers.find(function (x) { return x && x._driverId === dId; });
+    if (r && r._vehicleId) return r._vehicleId;
+  }
+  var i = drivers.findIndex(function (d) { return d.id === dId; });
+  return (i >= 0 && vehicles[i]) ? vehicles[i].id : null;
 }
-// (c) 車両マスタ編集の単一窓口。追加/更新/削除/担当変更を集約し、編集の度にクロスリンクを維持する。
+
+// 射影ビュー：単一情報源(drivers[]/vehicles[]) → 旧 vehicleMasterData/driverMasterData 形。
+// id は V####/D### に寄せ、legacyId に旧ID。driverName/vehicleId は固定参照ではなく派生値。
+function _vehicleLedgerView(v) {
+  var dId = _opDriverIdForVehicleId(v.id);
+  var d = dId ? _driverById[dId] : null;
+  return Object.assign({}, v._led, {
+    id: v.id, legacyId: (v._led && v._led.id) || null,
+    driverName: d ? d.name : '', __ref: v
+  });
+}
+function _driverLedgerView(d) {
+  var vId = _opVehicleIdForDriverId(d.id);
+  return Object.assign({}, d._led, {
+    id: d.id, legacyId: (d._led && d._led.id) || null, name: d.name,
+    vehicleId: vId || '', __ref: d
+  });
+}
+function rebuildLedgerViews() {
+  window.vehicleMasterData = vehicles.filter(function (v) { return v._ledger; }).map(_vehicleLedgerView);
+  window.driverMasterData  = drivers.filter(function (d) { return d._ledger; }).map(_driverLedgerView);
+}
+window.rebuildLedgerViews = rebuildLedgerViews;
+
+// 車両台帳の編集窓口：単一情報源(vehicles[]) の _led へ書き戻す（固定参照 driverName は持たない）。
+var _VEH_LED_KEYS = ['plate','type','cap','base','status','inspection','fuel','note','maker','model','regdate','mileage','fuelLogs','costLogs'];
+function _pickVehLed(rec) { var o = {}; _VEH_LED_KEYS.forEach(function (k) { if (rec[k] !== undefined) o[k] = rec[k]; }); return o; }
 function vehicleMasterUpsert(rec, idx) {
-  if (typeof window.vehicleMasterData === 'undefined' || !Array.isArray(window.vehicleMasterData)) window.vehicleMasterData = [];
-  if (typeof idx === 'number' && idx >= 0 && idx < window.vehicleMasterData.length) window.vehicleMasterData[idx] = rec;
-  else window.vehicleMasterData.push(rec);
-  _logipokeLinkOne(rec);
+  rec = rec || {};
+  if (typeof idx === 'number' && idx >= 0 && window.vehicleMasterData && window.vehicleMasterData[idx]) {
+    var ref = window.vehicleMasterData[idx].__ref;                 // 既存：運行レコードの _led を更新
+    if (ref) { ref._led = Object.assign({}, ref._led, _pickVehLed(rec)); if (rec.plate) ref.plate = rec.plate; }
+  } else {
+    var num = String(rec.id || '').replace(/^V/, '').replace(/^車両/, '') || String(1000 + ((vehicles.length * 137 + 245) % 9000));
+    var vid = 'V' + num;
+    var led = Object.assign({ id: num }, _pickVehLed(rec));
+    var nv = {
+      id: vid, plate: rec.plate || ('車両' + num), type: rec.type || '平ボディ',
+      ton: Math.max(2, Math.round((rec.cap || 0) / 1000)) || 2, maxLoad: rec.cap || 0,
+      baseId: null, homeBaseId: null, baseIds: [], legacyIds: ['V' + num, num, '車両' + num],
+      _ledger: true, _ledgerNew: true, _led: led
+    };
+    vehicles.push(nv); _vehicleById[vid] = nv;
+  }
+  rebuildLedgerViews();
   return rec;
 }
 function vehicleMasterRemove(idx) {
-  if (typeof window.vehicleMasterData !== 'undefined' && idx >= 0 && idx < window.vehicleMasterData.length) return window.vehicleMasterData.splice(idx, 1)[0] || null;
-  return null;
-}
-function vehicleMasterSetDriver(idx, name) {
-  if (typeof window.vehicleMasterData !== 'undefined' && window.vehicleMasterData[idx]) {
-    window.vehicleMasterData[idx].driverName = name; _logipokeLinkOne(window.vehicleMasterData[idx]);
+  if (!window.vehicleMasterData || !window.vehicleMasterData[idx]) return null;
+  var removed = window.vehicleMasterData[idx];
+  var ref = removed.__ref;
+  if (ref) {
+    if (ref._ledgerNew) { var vi = vehicles.indexOf(ref); if (vi >= 0) vehicles.splice(vi, 1); delete _vehicleById[ref.id]; }
+    else { delete ref._ledger; delete ref._led; }   // 既存運行車両は盤に残し、台帳からのみ外す
   }
+  rebuildLedgerViews();
+  return removed;
 }
+// 固定相互参照は撤廃。担当ドライバーは運行層から派生するため本関数は no-op（後方互換のため残置）。
+function vehicleMasterSetDriver() { /* deprecated: driver↔vehicle は運行層(dndDrivers)が真実 */ }
 window.vehicleMasterUpsert = vehicleMasterUpsert;
 window.vehicleMasterRemove = vehicleMasterRemove;
 window.vehicleMasterSetDriver = vehicleMasterSetDriver;
-document.addEventListener('DOMContentLoaded', function () { try { _logipokeLinkVehicleMaster(); } catch (e) { console.warn('[logipoke] vehicleMaster link failed', e); } });
 
 // ═══════════════════════════════════════════════════════════════
 //  追加リファクタ（いずれも非破壊・ストラングラー方式）
@@ -19984,27 +20136,45 @@ function buildOperationSSoT(dateKey) {
 window.buildOperationSSoT = buildOperationSSoT;
 window.deriveCaseTimelineLive = function (caseId, dateKey) { var db = buildOperationSSoT(dateKey); return db ? LogipokeDB.deriveCaseTimeline(db, String(caseId)) : []; };
 
-// #3 ドライバーマスタ編集の単一窓口（追加/更新=マージ/削除）。編集の度に正規車両へのリンクを維持。
-function _logipokeLinkDriverOne(dm) {
-  if (!dm) return;
-  var canon = (typeof resolveVehicleRef === 'function') ? resolveVehicleRef(dm.vehicleId) : null;
-  dm._canonicalVehicleId = canon ? canon.id : null;
-}
+// #3 ドライバー台帳の編集窓口：単一情報源(drivers[]) の _led へ書き戻す（固定参照 vehicleId は持たない）。
+var _DRV_LED_KEYS = ['name','empNo','tel','license','stars','avail','base','note'];
+function _pickDrvLed(rec) { var o = {}; _DRV_LED_KEYS.forEach(function (k) { if (rec[k] !== undefined) o[k] = rec[k]; }); return o; }
 function driverMasterUpsert(rec, idx) {
-  if (typeof window.driverMasterData === 'undefined' || !Array.isArray(window.driverMasterData)) window.driverMasterData = [];
-  var out;
-  if (typeof idx === 'number' && idx >= 0 && idx < window.driverMasterData.length) { out = Object.assign({}, window.driverMasterData[idx], rec); window.driverMasterData[idx] = out; }
-  else { out = rec; window.driverMasterData.push(rec); }
-  _logipokeLinkDriverOne(out);
-  return out;
+  rec = rec || {};
+  if (typeof idx === 'number' && idx >= 0 && window.driverMasterData && window.driverMasterData[idx]) {
+    var ref = window.driverMasterData[idx].__ref;                 // 既存：運行レコードの _led / 氏名を更新
+    if (ref) {
+      ref._led = Object.assign({}, ref._led, _pickDrvLed(rec));
+      if (rec.name) ref.name = rec.name;
+      if (rec.tel) ref.tel = rec.tel;
+    }
+  } else {
+    var did = (rec.id && /^D\d/.test(rec.id)) ? rec.id : ('D' + String(drivers.length + 1).padStart(3, '0'));
+    var led = Object.assign({ id: did }, _pickDrvLed(rec));
+    var nd = {
+      id: did, name: rec.name || '', tel: rec.tel || '',
+      license: rec.license ? [rec.license] : ['中型'], partner: false,
+      baseId: null, homeBaseId: null, defaultOwnerId: null, legacyIds: [did],
+      _ledger: true, _ledgerNew: true, _led: led
+    };
+    drivers.push(nd); _driverById[did] = nd;
+  }
+  rebuildLedgerViews();
+  return rec;
 }
 function driverMasterRemove(idx) {
-  if (typeof window.driverMasterData !== 'undefined' && idx >= 0 && idx < window.driverMasterData.length) return window.driverMasterData.splice(idx, 1)[0] || null;
-  return null;
+  if (!window.driverMasterData || !window.driverMasterData[idx]) return null;
+  var removed = window.driverMasterData[idx];
+  var ref = removed.__ref;
+  if (ref) {
+    if (ref._ledgerNew) { var di = drivers.indexOf(ref); if (di >= 0) drivers.splice(di, 1); delete _driverById[ref.id]; }
+    else { delete ref._ledger; delete ref._led; }
+  }
+  rebuildLedgerViews();
+  return removed;
 }
 window.driverMasterUpsert = driverMasterUpsert;
 window.driverMasterRemove = driverMasterRemove;
-document.addEventListener('DOMContentLoaded', function () { try { if (Array.isArray(window.driverMasterData)) window.driverMasterData.forEach(_logipokeLinkDriverOne); } catch (e) {} });
 
 // ═══════════════════════════════════════════════════════════════
 //  Assignment レイヤー（Phase 1a 追加）
@@ -34036,151 +34206,9 @@ document.addEventListener('DOMContentLoaded', () => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // ── グローバルデータストア（案件一覧の配車AIと連動） ──
-window.vehicleMasterData = [
-  { id:'1245', plate:'品川 800 あ 1245', type:'4tウィング', cap:2000, base:'品川区', status:'運行中', inspection:'2025/08/31', fuel:'軽油', note:'', driverName:'山田 一郎', maker:'いすゞ', model:'エルフ NLR85AR', regdate:'2020/04', mileage:95400,
-    fuelLogs:[
-      {date:'2025/04/28', liters:62.4, amount:10920, odo:95400, note:'品川SS'},
-      {date:'2025/04/14', liters:58.1, amount:10165, odo:93200, note:'品川SS'},
-      {date:'2025/03/31', liters:65.0, amount:11375, odo:90800, note:'川口IC'},
-    ],
-    costLogs:[
-      {date:'2025/04/01', cat:'自動車税', amount:27500, note:'令和7年度'},
-      {date:'2025/03/15', cat:'修理・整備', amount:42000, note:'ブレーキパッド交換'},
-      {date:'2025/01/10', cat:'3ヶ月点検', amount:18000, note:'定期'},
-    ]
-  },
-  { id:'1123', plate:'品川 800 い 1123', type:'2tトラック', cap:1000, base:'品川区', status:'空車', inspection:'2025/11/30', fuel:'軽油', note:'', driverName:'鈴木 次郎', maker:'日野', model:'デュトロ XZU600', regdate:'2021/07', mileage:62300,
-    fuelLogs:[
-      {date:'2025/04/25', liters:38.2, amount:6685, odo:62300, note:'品川SS'},
-      {date:'2025/04/10', liters:41.5, amount:7262, odo:60500, note:''},
-    ],
-    costLogs:[
-      {date:'2025/02/20', cat:'任意保険', amount:85000, note:'年間保険料'},
-      {date:'2025/01/15', cat:'部品購入', amount:12800, note:'エアフィルター'},
-    ]
-  },
-  { id:'0552', plate:'足立 800 う 0552', type:'冷蔵車', cap:1500, base:'足立区', status:'運行中', inspection:'2025/06/15', fuel:'軽油', note:'冷蔵機能あり', driverName:'渡辺 六郎', maker:'三菱ふそう', model:'キャンター FEA50', regdate:'2019/10', mileage:118700,
-    fuelLogs:[
-      {date:'2025/04/27', liters:71.8, amount:12565, odo:118700, note:'足立SS'},
-      {date:'2025/04/13', liters:69.2, amount:12110, odo:116200, note:'足立SS'},
-      {date:'2025/03/28', liters:74.1, amount:12967, odo:113400, note:''},
-    ],
-    costLogs:[
-      {date:'2025/04/05', cat:'車検', amount:185000, note:'2年定期'},
-      {date:'2025/03/01', cat:'修理・整備', amount:28000, note:'冷凍機ガス補充'},
-      {date:'2025/01/20', cat:'自賠責保険', amount:31680, note:'24ヶ月'},
-    ]
-  },
-  { id:'2580', plate:'品川 800 え 2580', type:'10tトラック', cap:6000, base:'品川区', status:'空車', inspection:'2026/02/28', fuel:'軽油', note:'', driverName:'松本 十郎', maker:'いすゞ', model:'ギガ CYJ77A', regdate:'2022/01', mileage:74200,
-    fuelLogs:[
-      {date:'2025/04/22', liters:128.5, amount:22487, odo:74200, note:'品川SS'},
-      {date:'2025/04/08', liters:135.2, amount:23660, odo:71800, note:'大阪給油'},
-    ],
-    costLogs:[
-      {date:'2025/03/10', cat:'自動車重量税', amount:65600, note:'2年分'},
-      {date:'2025/02/15', cat:'3ヶ月点検', amount:32000, note:''},
-      {date:'2025/01/05', cat:'部品購入', amount:18500, note:'タイヤ交換（前輪）'},
-    ]
-  },
-  { id:'3301', plate:'福岡 800 お 3301', type:'4tウィング', cap:2000, base:'福岡市', status:'空車', inspection:'2025/09/30', fuel:'軽油', note:'', driverName:'山本 十三', maker:'日野', model:'レンジャー GD7JGAA', regdate:'2021/03', mileage:88900,
-    fuelLogs:[
-      {date:'2025/04/20', liters:59.8, amount:10465, odo:88900, note:'博多SS'},
-      {date:'2025/04/05', liters:63.1, amount:11042, odo:86700, note:''},
-    ],
-    costLogs:[
-      {date:'2025/04/01', cat:'自動車税', amount:27500, note:''},
-      {date:'2025/02/28', cat:'修理・整備', amount:15000, note:'ウィング油圧調整'},
-    ]
-  },
-  { id:'5521', plate:'宮城 800 か 5521', type:'4tウィング', cap:2000, base:'仙台市', status:'空車', inspection:'2025/12/31', fuel:'軽油', note:'精密機器対応', driverName:'斉藤 十六', maker:'三菱ふそう', model:'ファイター FK71F', regdate:'2020/09', mileage:102300,
-    fuelLogs:[
-      {date:'2025/04/24', liters:64.2, amount:11235, odo:102300, note:'仙台SS'},
-      {date:'2025/04/09', liters:61.8, amount:10815, odo:100100, note:''},
-    ],
-    costLogs:[
-      {date:'2025/03/20', cat:'その他点検', amount:9800, note:'タコグラフ点検'},
-      {date:'2025/01/15', cat:'任意保険', amount:92000, note:'年間'},
-    ]
-  },
-  { id:'0887', plate:'千葉 800 き 0887', type:'冷蔵車', cap:1500, base:'船橋市', status:'空車', inspection:'2025/07/31', fuel:'軽油', note:'食品衛生管理対応', driverName:'田中 四郎', maker:'日野', model:'デュトロ XZU710', regdate:'2019/06', mileage:126500,
-    fuelLogs:[
-      {date:'2025/04/26', liters:68.4, amount:11970, odo:126500, note:'船橋SS'},
-      {date:'2025/04/12', liters:72.1, amount:12617, odo:124100, note:''},
-      {date:'2025/03/29', liters:69.8, amount:12215, odo:121500, note:''},
-    ],
-    costLogs:[
-      {date:'2025/04/10', cat:'修理・整備', amount:55000, note:'冷凍機コンプレッサー修理'},
-      {date:'2025/02/05', cat:'自賠責保険', amount:31680, note:'24ヶ月'},
-      {date:'2025/01/20', cat:'3ヶ月点検', amount:22000, note:''},
-    ]
-  },
-  { id:'1872', plate:'大田 800 く 1872', type:'4tウィング', cap:2000, base:'大田区', status:'空車', inspection:'2025/10/31', fuel:'軽油', note:'', driverName:'高木 十一', maker:'いすゞ', model:'フォワード FRR90S', regdate:'2021/11', mileage:55800,
-    fuelLogs:[
-      {date:'2025/04/23', liters:55.6, amount:9730, odo:55800, note:'大田SS'},
-      {date:'2025/04/07', liters:58.9, amount:10307, odo:53700, note:''},
-    ],
-    costLogs:[
-      {date:'2025/03/25', cat:'部品購入', amount:8200, note:'ワイパーブレード・油脂類'},
-      {date:'2025/01/30', cat:'自動車税', amount:27500, note:''},
-    ]
-  },
-  { id:'0934', plate:'品川 800 け 0934', type:'2tトラック', cap:1500, base:'品川区', status:'整備中', inspection:'2025/05/31', fuel:'軽油', note:'車検前点検中', driverName:'藤田 十二', maker:'三菱ふそう', model:'キャンター FEB90', regdate:'2018/12', mileage:144600,
-    fuelLogs:[
-      {date:'2025/04/15', liters:44.2, amount:7735, odo:144600, note:'品川SS'},
-      {date:'2025/03/30', liters:46.8, amount:8190, odo:142400, note:''},
-    ],
-    costLogs:[
-      {date:'2025/04/20', cat:'車検', amount:220000, note:'車検前整備中'},
-      {date:'2025/04/20', cat:'修理・整備', amount:68000, note:'エンジンオーバーホール'},
-      {date:'2025/02/10', cat:'自動車重量税', amount:41400, note:'2年分'},
-    ]
-  },
-  { id:'2240', plate:'北九州 800 こ 2240', type:'10tトラック', cap:6000, base:'北九州市', status:'空車', inspection:'2026/01/31', fuel:'軽油', note:'', driverName:'中島 十四', maker:'日野', model:'プロフィア FS1EXPA', regdate:'2022/06', mileage:68100,
-    fuelLogs:[
-      {date:'2025/04/21', liters:142.3, amount:24902, odo:68100, note:'北九州SS'},
-      {date:'2025/04/06', liters:138.7, amount:24272, odo:65200, note:'大阪給油'},
-    ],
-    costLogs:[
-      {date:'2025/03/05', cat:'3ヶ月点検', amount:35000, note:''},
-      {date:'2025/01/12', cat:'部品購入', amount:24000, note:'タイヤ（後輪2本）'},
-    ]
-  },
-  { id:'4410', plate:'福岡 800 さ 4410', type:'4tウィング', cap:2000, base:'福岡市', status:'空車', inspection:'2025/08/15', fuel:'軽油', note:'', driverName:'小野 十五', maker:'いすゞ', model:'フォワード FRR90', regdate:'2020/02', mileage:91200,
-    fuelLogs:[
-      {date:'2025/04/19', liters:61.4, amount:10745, odo:91200, note:'博多SS'},
-      {date:'2025/04/04', liters:59.2, amount:10360, odo:89100, note:''},
-    ],
-    costLogs:[
-      {date:'2025/02/20', cat:'修理・整備', amount:22000, note:'クラッチ調整'},
-      {date:'2025/01/10', cat:'任意保険', amount:88000, note:'年間'},
-    ]
-  },
-  { id:'6632', plate:'福島 800 し 6632', type:'2tトラック', cap:1000, base:'福島市', status:'休憩中', inspection:'2025/09/15', fuel:'軽油', note:'', driverName:'池田 十七', maker:'三菱ふそう', model:'キャンター FEA20', regdate:'2021/05', mileage:48700,
-    fuelLogs:[
-      {date:'2025/04/22', liters:36.8, amount:6440, odo:48700, note:'福島SS'},
-      {date:'2025/04/07', liters:38.4, amount:6720, odo:47100, note:''},
-    ],
-    costLogs:[
-      {date:'2025/03/15', cat:'自賠責保険', amount:25830, note:'24ヶ月'},
-      {date:'2025/01/25', cat:'その他点検', amount:6500, note:'エアコン点検'},
-    ]
-  },
-];
-
-window.driverMasterData = [
-  { id:'DRV-001', name:'山田 一郎',   empNo:'EMP-001', tel:'090-1234-5678', license:'大型・牽引', vehicleId:'1245', stars:5, avail:'運行中', base:'品川区',   note:'フォークリフト所持' },
-  { id:'DRV-002', name:'鈴木 次郎',   empNo:'EMP-002', tel:'090-2345-6789', license:'大型',      vehicleId:'1123', stars:4, avail:'空車',   base:'品川区',   note:'' },
-  { id:'DRV-003', name:'渡辺 六郎',   empNo:'EMP-003', tel:'090-3456-7890', license:'大型',      vehicleId:'0552', stars:4, avail:'運行中', base:'足立区',   note:'冷蔵車専任' },
-  { id:'DRV-004', name:'松本 十郎',   empNo:'EMP-004', tel:'090-4567-8901', license:'大型・牽引', vehicleId:'2580', stars:5, avail:'空車',   base:'品川区',   note:'危険物取扱' },
-  { id:'DRV-005', name:'山本 十三',   empNo:'EMP-005', tel:'090-5678-9012', license:'大型',      vehicleId:'3301', stars:5, avail:'空車',   base:'福岡市',   note:'' },
-  { id:'DRV-006', name:'斉藤 十六',   empNo:'EMP-006', tel:'090-6789-0123', license:'大型',      vehicleId:'5521', stars:5, avail:'空車',   base:'仙台市',   note:'精密機器輸送経験豊富' },
-  { id:'DRV-007', name:'田中 四郎',   empNo:'EMP-007', tel:'090-7890-1234', license:'中型',      vehicleId:'0887', stars:4, avail:'空車',   base:'船橋市',   note:'食品衛生管理者' },
-  { id:'DRV-008', name:'高木 十一',   empNo:'EMP-008', tel:'090-8901-2345', license:'大型',      vehicleId:'1872', stars:4, avail:'空車',   base:'大田区',   note:'' },
-  { id:'DRV-009', name:'藤田 十二',   empNo:'EMP-009', tel:'090-9012-3456', license:'準中型',    vehicleId:'0934', stars:4, avail:'休憩中', base:'品川区',   note:'' },
-  { id:'DRV-010', name:'中島 十四',   empNo:'EMP-010', tel:'090-0123-4567', license:'大型・牽引', vehicleId:'2240', stars:4, avail:'空車',   base:'北九州市', note:'長距離得意' },
-  { id:'DRV-011', name:'小野 十五',   empNo:'EMP-011', tel:'090-1111-2222', license:'大型',      vehicleId:'4410', stars:3, avail:'空車',   base:'福岡市',   note:'' },
-  { id:'DRV-012', name:'池田 十七',   empNo:'EMP-012', tel:'090-2222-3333', license:'中型',      vehicleId:'6632', stars:4, avail:'休憩中', base:'福島市',   note:'東北エリア専任' },
-];
+// 車両・ドライバー台帳：固有データは単一情報源(drivers[]/vehicles[]) の _led へ吸収済み。
+// 旧 window.vehicleMasterData / window.driverMasterData は、そこからの射影ビュー（ID=V####/D###）。
+rebuildLedgerViews();
 
 // 車両マスタロード完了 → 処理済み詳細パネルを再描画して車両情報を正しく表示
 if (typeof renderProcessedList === 'function') {
@@ -34249,6 +34277,8 @@ function switchVehicleView(view) {
 function filterVehicleTable() { renderVehicleContent(); }
 
 function getFilteredData() {
+  // 単一情報源から射影を再生成（運行盤の担当変更を「現在の担当」へ反映）
+  if (typeof rebuildLedgerViews === 'function') rebuildLedgerViews();
   const search = (document.getElementById('vehicle-search')?.value || '').toLowerCase();
   const statusF = document.getElementById('vehicle-status-filter')?.value || 'all';
   const typeF   = document.getElementById('vehicle-type-filter')?.value || 'all';
@@ -35042,7 +35072,6 @@ function saveVehicleItem() {
       model: document.getElementById('vf-model').value.trim(),
       regdate: document.getElementById('vf-regdate').value.trim(),
       mileage: parseInt(document.getElementById('vf-mileage').value) || existing.mileage || 0,
-      driverName: existing.driverName || '',
       fuelLogs: fuelEntries.length ? fuelEntries : (existing.fuelLogs || []),
       costLogs: costEntries.length ? costEntries : (existing.costLogs || []),
     };
@@ -35057,12 +35086,11 @@ function saveVehicleItem() {
     const name = document.getElementById('vf-dname').value.trim();
     if (!name) { showToast('氏名は必須です', 'warn'); return; }
     const obj = {
-      id: 'DRV-' + String(window.driverMasterData.length + 1).padStart(3,'0'),
+      // 担当車両(vehicleId)の固定参照は撤廃。担当は運行層(配車盤)が真実。
       name,
       empNo: document.getElementById('vf-dno').value.trim(),
       tel: document.getElementById('vf-dtel').value.trim(),
       license: document.getElementById('vf-dlicense').value,
-      vehicleId: document.getElementById('vf-dvehicle').value.trim(),
       stars: parseInt(document.getElementById('vf-dstars').value) || 3,
       avail: document.getElementById('vf-davail').value,
       base: document.getElementById('vf-dbase').value.trim(),
@@ -35075,8 +35103,6 @@ function saveVehicleItem() {
       driverMasterUpsert(obj);
       showToast('ドライバーを追加しました', 'success');
     }
-    const vidx = window.vehicleMasterData.findIndex(v => v.id === obj.vehicleId);
-    if (vidx >= 0) vehicleMasterSetDriver(vidx, name);
   }
   syncVehicleDataToProcessing();
   closeVehicleModal();
@@ -35110,7 +35136,7 @@ function syncVehicleDataToProcessing() {
       const driver = window.driverMasterData.find(d => d.vehicleId === v.id);
       return {
         rank: i + 1,
-        id: '車両' + v.id,
+        id: '車両' + (v.legacyId || v.id),
         driver: driver ? driver.name : v.driverName || '未割当',
         base: v.base,
         avail: v.status === '空車' ? '空車' : v.status,
@@ -35135,7 +35161,7 @@ function syncVehicleDataToProcessing() {
         const driver = window.driverMasterData.find(d => d.vehicleId === v.id);
         return {
           rank: i + 1,
-          id: '車両' + v.id,
+          id: '車両' + (v.legacyId || v.id),
           driver: driver ? driver.name : v.driverName || '未割当',
           base: v.base,
           avail: v.status === '空車' ? '空車' : v.status,
@@ -35220,7 +35246,7 @@ function confirmCsvImport() {
     csvPendingData.forEach(row => {
       const id = row.id || row['車両番号'] || row['車両ID'] || '';
       if (!id) return;
-      const existing = window.vehicleMasterData.findIndex(v => v.id === id);
+      const existing = window.vehicleMasterData.findIndex(v => v.id === id || v.legacyId === id);
       const obj = {
         id,
         plate: row.plate || row['ナンバープレート'] || row['ナンバー'] || '',
@@ -35231,7 +35257,7 @@ function confirmCsvImport() {
         inspection: row.inspection || row['車検期限'] || '',
         fuel:  row.fuel  || row['燃料'] || '軽油',
         note:  row.note  || row['備考'] || '',
-        driverName: row.driverName || row['担当ドライバー'] || '',
+        // 担当ドライバー(driverName)の固定参照は撤廃（担当は運行層が真実）
       };
       vehicleMasterUpsert(obj, existing >= 0 ? existing : null);
     });
@@ -35242,12 +35268,11 @@ function confirmCsvImport() {
       if (!name) return;
       const existing = window.driverMasterData.findIndex(d => d.name === name);
       const obj = {
-        id: 'DRV-' + String(window.driverMasterData.length + 1).padStart(3,'0'),
         name,
         empNo:   row.empNo   || row['社員番号'] || '',
         tel:     row.tel     || row['電話番号'] || '',
         license: row.license || row['免許区分'] || '大型',
-        vehicleId: row.vehicleId || row['担当車両'] || '',
+        // 担当車両(vehicleId)の固定参照は撤廃（担当は運行層が真実）
         stars:   parseInt(row.stars || row['評価']) || 3,
         avail:   row.avail   || row['稼働状況'] || '空車',
         base:    row.base    || row['拠点'] || '',
