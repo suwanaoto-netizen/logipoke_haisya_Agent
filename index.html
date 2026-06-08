@@ -8285,6 +8285,15 @@ function _ssotDerive(seed, build){
                 <div class="dnd-stat">稼働率 <span class="dnd-stat-val" id="dnd-stat-rate">0%</span></div>
               </div>
             </div>
+            <!-- 論点C：軸切替（ドライバー主軸＋車両稼働サブビュー） -->
+            <div class="dnd-axis-toggle" style="display:flex;align-items:center;gap:8px;padding:8px 12px 0">
+              <span style="font-size:10px;font-weight:700;color:var(--text-secondary)">表示軸</span>
+              <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+                <button id="dnd-axis-driver" onclick="setDndAxis('driver')" style="border:none;background:var(--sidebar-bg);color:#fff;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">👤 ドライバー</button>
+                <button id="dnd-axis-vehicle" onclick="setDndAxis('vehicle')" style="border:none;background:#fff;color:var(--text-secondary);padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">🚚 車両稼働</button>
+              </div>
+              <span id="dnd-axis-hint" style="font-size:10px;color:var(--text-muted)">車両軸では稼働率と同一車両の二重予約を確認できます（読み取り専用）</span>
+            </div>
             <div class="dnd-timeline" id="dnd-timeline"></div>
           </div>
         </div>
@@ -29491,6 +29500,96 @@ function dndRowDrop(ev, driverId) {
 
 
 
+// ═══════════════════════════════════════════════════════════════
+//  論点C 案①：車両稼働サブビュー（ドライバー主軸はそのまま／🚚切替で車両軸）
+//  当日の全ドライバー行のブロック＋処理中案件の分離leg(vehicleRefId)から、
+//  車両ごとの占有時間を集計し、稼働率と同一車両の二重予約(時間重複)を検出して表示する。
+// ═══════════════════════════════════════════════════════════════
+window.dndAxisMode = window.dndAxisMode || 'driver';
+function setDndAxis(mode) {
+  window.dndAxisMode = (mode === 'vehicle') ? 'vehicle' : 'driver';
+  const bd = document.getElementById('dnd-axis-driver'), bv = document.getElementById('dnd-axis-vehicle');
+  if (bd && bv) {
+    const on = 'background:var(--sidebar-bg);color:#fff', off = 'background:#fff;color:var(--text-secondary)';
+    bd.style.cssText = 'border:none;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;' + (window.dndAxisMode === 'driver' ? on : off);
+    bv.style.cssText = 'border:none;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;' + (window.dndAxisMode === 'vehicle' ? on : off);
+  }
+  renderDndTimeline();   // 末尾フックで車両モード時は _applyVehicleAxisView に差し替わる
+}
+// 当日の車両占有を集計：vehicleId → [{driverName, start, end, client, hired}]
+function _dndCollectVehicleOccupancy(dateKey) {
+  const occ = {};
+  function push(vid, rec) { if (!vid) return; (occ[vid] = occ[vid] || []).push(rec); }
+  // (1) ボードの通常ブロック（block.vehicleId override or 行の既定車両）
+  if (typeof dndDrivers !== 'undefined' && typeof dndAssignments !== 'undefined') {
+    dndDrivers.forEach(row => {
+      const arr = (dndAssignments[row.id] && dndAssignments[row.id][dateKey]) || [];
+      arr.forEach(b => {
+        if (b.isPreset) return;
+        const vid = b.vehicleId || row._vehicleId || row.id;
+        push(vid, { driverName: row.driver, start: b.start, end: b.end, client: b.client || b.label || '', hired: false });
+      });
+    });
+  }
+  // (2) 処理中案件の分離leg（傭車は自社車両を占有しないので除外）
+  if (typeof processingCases !== 'undefined') {
+    processingCases.forEach(c => {
+      (c.legs || []).forEach(l => {
+        if (l.partnerVehicle || !l.vehicleRefId || !l.startTime || !l.endTime) return;
+        push(l.vehicleRefId, { driverName: l.driverName || (getDriverById(l.driverRefId) || {}).name || '', start: l.startTime, end: l.endTime, client: c.client || '', hired: false });
+      });
+    });
+  }
+  return occ;
+}
+function _vehAxisOverlap(a, b) {
+  const s1 = timeToMin(a.start), e1 = timeToMin(a.end), s2 = timeToMin(b.start), e2 = timeToMin(b.end);
+  if ([s1, e1, s2, e2].some(x => isNaN(x))) return false;
+  return s1 < e2 && s2 < e1;
+}
+// 車両軸のHTMLを生成して #dnd-timeline に差し替え（時間ヘッダーは既存renderと同じ構造を流用）
+function _applyVehicleAxisView() {
+  const wrap = document.getElementById('dnd-timeline'); if (!wrap) return;
+  const dateKey = (typeof dndGetCurrentDateKey === 'function') ? dndGetCurrentDateKey() : null;
+  const occ = _dndCollectVehicleOccupancy(dateKey);
+  const DAY_S = 6 * 60, DAY_E = 22 * 60, SPAN = DAY_E - DAY_S;
+  const dcol = name => { const d = (typeof drivers !== 'undefined') ? drivers.find(x => x.name === name) : null; const i = d ? drivers.indexOf(d) : 0; const C = ['#1a7a5e', '#2563eb', '#9333ea', '#c2410c', '#0891b2', '#b45309']; return C[(i >= 0 ? i : 0) % C.length]; };
+  // 時間目盛り
+  let ticks = ''; for (let h = 6; h < 22; h += 2) ticks += `<div class="dnd-time-tick" style="left:${(h * 60 - DAY_S) / SPAN * 100}%">${h}:00</div>`;
+  const list = (typeof vehicles !== 'undefined') ? vehicles.slice() : [];
+  // 稼働のある車両を上に
+  list.sort((a, b) => ((occ[b.id] ? occ[b.id].length : 0) - (occ[a.id] ? occ[a.id].length : 0)));
+  let confTotal = 0;
+  const rows = list.map(v => {
+    const recs = (occ[v.id] || []).slice().sort((x, y) => timeToMin(x.start) - timeToMin(y.start));
+    const used = recs.reduce((s, r) => s + Math.max(0, timeToMin(r.end) - timeToMin(r.start)), 0);
+    const util = Math.round(used / SPAN * 100);
+    const ucls = util >= 50 ? 'background:#dcfce7;color:#065f46' : (util > 0 ? 'background:#fef9c3;color:#854d0e' : 'background:#f1f5f9;color:#64748b');
+    const conflictIdx = new Set();
+    for (let i = 0; i < recs.length; i++) for (let j = i + 1; j < recs.length; j++) if (_vehAxisOverlap(recs[i], recs[j])) { conflictIdx.add(i); conflictIdx.add(j); }
+    const hasConf = conflictIdx.size > 0; if (hasConf) confTotal++;
+    const blocks = recs.map((r, i) => {
+      const s = timeToMin(r.start), e = timeToMin(r.end);
+      const left = (Math.max(DAY_S, s) - DAY_S) / SPAN * 100, width = (Math.min(DAY_E, e) - Math.max(DAY_S, s)) / SPAN * 100;
+      const conf = conflictIdx.has(i);
+      return `<div title="${(r.driverName + ' ' + r.start + '-' + r.end + ' ' + (r.client || '')).replace(/"/g, '&quot;')}" style="position:absolute;top:8px;height:30px;left:${left}%;width:${width}%;background:${dcol(r.driverName)};border-radius:6px;color:#fff;padding:3px 6px;font-size:10px;line-height:1.2;overflow:hidden;${conf ? 'outline:2.5px solid #ef4444;outline-offset:-1px' : ''}">
+        <div style="font-weight:800;white-space:nowrap">${(r.driverName || '').split(' ')[0]}${conf ? ' ⛔' : ''}</div>
+        <div style="opacity:.9;font-size:9px;white-space:nowrap">${r.start}-${r.end}</div></div>`;
+    }).join('');
+    return `<div class="dnd-vrow" style="display:flex;border-bottom:1px solid #f1f5f9;min-height:46px">
+      <div class="dnd-vcell" style="width:170px;flex-shrink:0;border-right:1px solid var(--border);padding:6px 8px;display:flex;flex-direction:column;justify-content:center;gap:2px">
+        <div style="font-size:12px;font-weight:700">${v.plate}${hasConf ? ' <span style="font-size:9px;font-weight:800;color:#fff;background:#dc2626;border-radius:8px;padding:1px 6px">⛔二重予約</span>' : ''}</div>
+        <div style="font-size:10px;color:var(--text-muted)">${v.type} ・ <span style="font-size:10px;font-weight:800;padding:1px 6px;border-radius:9px;${ucls}">稼働${util}%</span></div>
+      </div>
+      <div class="dnd-vtrack" style="flex:1;position:relative;background:repeating-linear-gradient(90deg,#fff,#fff 71px,#f6f8fa 71px,#f6f8fa 72px)">${blocks || ''}</div>
+    </div>`;
+  }).join('');
+  wrap.innerHTML = `
+    <div class="dnd-time-header"><div class="dnd-time-header-label">車両 / 稼働</div><div class="dnd-time-ticks">${ticks}</div></div>
+    ${confTotal ? `<div style="margin:8px 10px;padding:7px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:11px;color:#b91c1c;font-weight:700">⛔ 同一車両の二重予約 ${confTotal}件（赤枠の便）。ドライバー軸で車両を差し替えて解消してください</div>` : `<div style="margin:8px 10px;padding:7px 10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;font-size:11px;color:#047857;font-weight:700">✅ 同一車両の二重予約はありません</div>`}
+    ${rows}`;
+}
+
 function renderDndTimeline() {
   const wrap = document.getElementById('dnd-timeline');
   if (!wrap) return;
@@ -29886,6 +29985,7 @@ function renderDndTimeline() {
     ${rowsHtml}
     ${relayRowsHtml}
     ${scaleOutPartnerRowsHtml}`;
+  if (window.dndAxisMode === 'vehicle') { try { _applyVehicleAxisView(); } catch (e) {} }  // 論点C：車両稼働サブビュー
 }
 
 function updateDndStats() {
