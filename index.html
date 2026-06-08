@@ -4038,8 +4038,9 @@ function _ssotDerive(seed, build){
     box-shadow: inset 0 0 0 2.5px rgba(255,255,255,.78), 0 2px 7px rgba(13,74,58,.34);
   }
   /* タイムラインの未確定（D&D割当・仮配車）ブロック：鮮やかな黄緑で確定（濃緑）と一目で区別 */
+  /* 背景はインラインの background ショートハンドで塗られるため、!important で確実に上書きする */
   .dnd-block.is-tentative {
-    background-image: linear-gradient(rgba(190,242,100,.95), rgba(190,242,100,.95)); /* 黄緑(lime-300)でほぼ塗りつぶし「仮配車」を明確化 */
+    background: #a3e635 !important; /* 黄緑(lime-400)で塗りつぶし「仮配車」を明確化 */
     box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.55), 0 1px 3px rgba(0,0,0,.12);
     outline: 1.5px dashed rgba(54,83,20,.65);
     outline-offset: -4px;
