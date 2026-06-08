@@ -9382,7 +9382,9 @@ function _ssotDerive(seed, build){
     const partnerMasterData = _ssotDerive(_partnerMasterSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { partners: _partnerMasterSeed }); return DB.toPartnerMaster(db); });
 
     // 全案件一覧（未処理+処理中+処理済み+過去案件）
-    const allCasesMasterData = [
+    // 【案件層C7・reader接続 第1画面】総覧を統合ストア由来に derive（往復ロスレス時は LogipokeDB、
+    //  失敗時は seed フォールバック＝_ssotDerive が JSON 一致で自己検証）。マスタ群と同じ縦串パターン。
+    const _allCasesMasterSeed = [
       // 未処理
       { id:'20240524001', client:'株式会社○○商事',      from:'埼玉県川口市',   to:'神奈川県横浜市', pattern:'定期案件',    status:'未処理', deadline:'05/25 AM', sales:null },
       { id:'20240524002', client:'△△食品株式会社',      from:'千葉県船橋市',   to:'東京都大田区',   pattern:'特殊条件案件', status:'未処理', deadline:'05/24 PM', sales:null },
@@ -9408,6 +9410,9 @@ function _ssotDerive(seed, build){
       { id:'20240519065', client:'首都圏生活協同組合',   from:'東京都新宿区',   to:'千葉県千葉市',   pattern:'多地点配送',  status:'過去',    deadline:'05/19',    sales:47000 },
       { id:'20240518035', client:'東京精工株式会社',      from:'東京都大田区',   to:'埼玉県川口市',   pattern:'特殊条件案件', status:'過去',    deadline:'05/18',    sales:35000 },
     ];
+    const allCasesMasterData = _ssotDerive(_allCasesMasterSeed, function (DB) {
+      var db = DB.createDB(); DB.ingestCases(db, { master: _allCasesMasterSeed }); return DB.toAllCasesMaster(db);
+    });
 
     let currentCustTab = 'client';
     let selectedClientId = null;
