@@ -9398,6 +9398,7 @@ function _ssotDerive(seed, build){
     ];
     // (a) 協力会社マスタを SSoT から derive（不一致時は seed にフォールバック）
     const partnerMasterData = _ssotDerive(_partnerMasterSeed, function (DB) { var db = DB.createDB(); DB.seedMasters(db, { partners: _partnerMasterSeed }); return DB.toPartnerMaster(db); });
+    window.partnerMasterData = partnerMasterData;   // #4 傭車レート参照のため公開
 
     // 全案件一覧（未処理+処理中+処理済み+過去案件）
     // 【案件層C7・reader接続 第1画面】総覧を統合ストア由来に derive（往復ロスレス時は LogipokeDB、
@@ -17303,7 +17304,9 @@ function _validateLegCombo(c, leg, applyLoad) {
   if (!d) issues.push({ type: 'driver', level: 'error', msg: 'ドライバーが未選択です' });
   // 論点H：協力会社車両（傭車）は自社マスタ外。車両未選択扱いにせず、免許/積載/拠点チェックは対象外。
   if (leg.partnerVehicle) {
-    issues.push({ type: 'partner', level: 'info', msg: `協力会社（傭車）：${d ? d.name : ''}／車両は自社マスタ外のため免許・積載・拠点チェックは対象外` });
+    const est = _partnerLegCharge(c, leg);
+    const poTxt = leg.poConfirmed ? `／発注済 ${leg.purchaseOrderNo}` : `／傭車概算 ¥${est.charge.toLocaleString()}（${est.company}・${est.vehicleType}）`;
+    issues.push({ type: 'partner', level: 'info', msg: `協力会社（傭車）：${d ? d.name : ''}／免許・積載・拠点チェック対象外${poTxt}` });
   } else {
     if (!v) issues.push({ type: 'vehicle', level: 'error', msg: '車両が未選択です' });
     if (d && v && !_driverCanDrive(d, v)) {
@@ -17677,6 +17680,66 @@ function _seedDemoCaseLockOnce() {
       }
     }
   } catch (e) { /* noop */ }
+}
+
+// ── #4 傭車（協力会社）の発注/運賃連携 ───────────────────────────
+// 傭車区間の概算傭車料：協力会社の partnerRates（車格別 baseCharge + perKm×距離）。
+function _normCompanyKey(s) { return String(s || '').replace(/[㈱\(株\)株式会社\s（）]/g, ''); }
+function _caseDistanceKm(c) { return parseInt(String((c && c.distance) || '').replace(/[^\d]/g, ''), 10) || 0; }
+function _caseRequiredVehicleType(c) {
+  // 案件の必要車格（明示が無ければ AI推薦/割当車格、最後に既定4tウィング）
+  return (c && (c.requiredVehicleType || (c.aiResult && c.aiResult.vehicle) || c.vehicleType)) || '4tウィング';
+}
+function _partnerLegCharge(c, leg) {
+  const d = leg && leg.driverRefId ? getDriverById(leg.driverRefId) : null;
+  const pname = d && d.partnerName ? d.partnerName : null;
+  const reqType = _caseRequiredVehicleType(c);
+  const distance = _caseDistanceKm(c);
+  const list = (typeof window !== 'undefined' && Array.isArray(window.partnerMasterData)) ? window.partnerMasterData : [];
+  let company = null, companyName = pname || '協力会社', rate = null;
+  if (pname) {
+    const key = _normCompanyKey(pname).slice(0, 4);
+    company = list.find(p => p.name && _normCompanyKey(p.name).indexOf(key) >= 0);
+  }
+  if (company && Array.isArray(company.partnerRates) && company.partnerRates.length) {
+    companyName = company.name;
+    rate = company.partnerRates.find(r => r.vehicleType === reqType
+      || (reqType && r.vehicleType && (reqType.indexOf(r.vehicleType) >= 0 || r.vehicleType.indexOf(String(reqType).replace(/車$/, '')) >= 0)))
+      || company.partnerRates[0];
+  }
+  const base = rate ? rate.baseCharge : 25000;
+  const perKm = rate ? rate.perKm : 150;
+  const charge = base + perKm * distance;
+  return { company: companyName, vehicleType: rate ? rate.vehicleType : reqType, base, perKm, distance, charge, estimated: !rate };
+}
+// 傭車区間の発注確定（PO発行）。leg 上に PO 情報を保持し、PO プレビューを開く。
+function confirmLegPartnerPO(caseIdx, legIdx) {
+  const c = processingCases[caseIdx]; const leg = c && c.legs && c.legs[legIdx];
+  if (!leg || !leg.partnerVehicle) return;
+  if (_blockIfLocked(c)) return;
+  if (leg.poConfirmed) { if (typeof showToast === 'function') showToast('発注確定済みです（' + leg.purchaseOrderNo + '）', 'info'); return; }
+  const est = _partnerLegCharge(c, leg);
+  const ok = (typeof confirm === 'function') ? confirm(`${est.company} へ 傭車¥${est.charge.toLocaleString()}（${est.vehicleType} 基本¥${est.base.toLocaleString()}＋¥${est.perKm}/km×${est.distance}km）で発注確定します。発注書(PO)を発行しますか？`) : true;
+  if (!ok) return;
+  const now = new Date();
+  leg.partnerCompany = est.company;
+  leg.partnerCharge = est.charge;
+  leg.poConfirmed = true;
+  leg.purchaseOrderNo = 'PO-' + (typeof formatDateYYYYMM === 'function' ? formatDateYYYYMM(now) : '') + '-' + String(Math.floor(Math.random() * 90000) + 10000);
+  leg.purchaseOrderIssuedAt = now.toLocaleString('ja-JP');
+  leg.purchaseOrderTotal = est.charge;
+  _afterLegEdit(c, caseIdx);
+  if (typeof showToast === 'function') showToast(`✅ ${est.company} へ発注確定（${leg.purchaseOrderNo} / 傭車¥${est.charge.toLocaleString()}）`, 'success');
+  if (typeof openPOPreviewModal === 'function') {
+    openPOPreviewModal({ partnerName: est.company, from: c.from, to: c.to, goods: c.goods, charge: est.charge,
+      purchaseOrderNo: leg.purchaseOrderNo, purchaseOrderTotal: est.charge, purchaseOrderIssuedAt: leg.purchaseOrderIssuedAt,
+      _client: c.client, _caseId: c.id, _legIdx: legIdx });
+  }
+}
+// 案件内の傭車料合計（運賃/原価反映用）
+function _caseHireCostTotal(c) {
+  if (!c || !Array.isArray(c.legs)) return 0;
+  return c.legs.reduce((s, l) => s + (l.partnerVehicle ? (typeof l.partnerCharge === 'number' ? l.partnerCharge : _partnerLegCharge(c, l).charge) : 0), 0);
 }
 
 // ── 区間の積載量(kg)を設定（積載按分） ──
@@ -18125,6 +18188,13 @@ function renderLegList(caseIdx, c) {
           style="width:90px;border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;font-family:'Noto Sans JP',sans-serif;outline:none">
         <span style="font-size:10px;color:var(--text-muted)">kg</span>
       </div>
+      ${leg.partnerVehicle ? `<!-- #4 傭車：発注確定（PO） -->
+      <div style="padding:6px 12px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:10px;font-weight:700;color:#9a3412">🤝 傭車 ¥${(typeof leg.partnerCharge==='number'?leg.partnerCharge:_partnerLegCharge(c,leg).charge).toLocaleString()}</span>
+        ${leg.poConfirmed
+          ? `<span style="font-size:10px;font-weight:700;color:#065f46;background:#d1fae5;border-radius:10px;padding:2px 8px">✓ 発注済 ${leg.purchaseOrderNo}</span>`
+          : `<button onclick="confirmLegPartnerPO(${caseIdx},${li})" style="font-size:10px;font-weight:700;color:#fff;background:#c2410c;border:none;border-radius:5px;padding:3px 9px;cursor:pointer">🤝 発注確定（傭車）</button>`}
+      </div>` : ''}
       <!-- 備考 -->
       <div style="padding:6px 12px 8px">
         <input type="text" placeholder="備考（帰り荷の都合、特記事項など）" value="${leg.notes||''}"
@@ -19353,16 +19423,22 @@ function confirmDispatch() {
     const _ownCostPerLeg = _sof ? Math.round(_sof.ownCost / Math.max(1, c.legs.length)) : Math.round(16000 / c.legs.length);
     c.legs.forEach((leg, li) => {
       const legSales  = _salesPerLeg;
-      const legFuel   = _ownCostPerLeg;
-      const legProfit = legSales - legFuel;
+      // #4 傭車便は自社燃料ではなく傭車料を原価(other)に計上し粗利を圧縮
+      const isHire = !!leg.partnerVehicle;
+      const hireCost = isHire ? (typeof leg.partnerCharge === 'number' ? leg.partnerCharge : _partnerLegCharge(c, leg).charge) : 0;
+      const legFuel   = isHire ? 0 : _ownCostPerLeg;
+      const legOther  = isHire ? hireCost : 0;
+      const legProfit = legSales - legFuel - legOther;
       // 車両マスタからプレート・スペックを引く
       const rawId = leg.vehicleName || leg.vehicleId || '';
       const lookupId = rawId.replace(/^車両/, '');
       const vm = (window.vehicleMasterData || []).find(v => v.id === lookupId || v.id === rawId || v.legacyId === lookupId || v.legacyId === rawId);
-      const vPlate = vm ? vm.plate : rawId;
+      const vPlate = isHire ? '傭車（協力会社）' : (vm ? vm.plate : rawId);
+      const _hireDrv = isHire && leg.driverRefId ? getDriverById(leg.driverRefId) : null;
       processedCases.unshift({
         id: c.id + '-L' + (li+1), status:'完了', casePattern: c.casePattern || null,
-        partner: false, partnerName: null,
+        partner: isHire, partnerName: isHire ? (leg.partnerCompany || (_hireDrv && _hireDrv.partnerName) || '協力会社') : null,
+        purchaseOrderNo: isHire ? (leg.purchaseOrderNo || null) : null,
         client: c.client, from: c.from, to: c.to,
         goods: c.goods,
         completion: now.toLocaleDateString('ja-JP') + ' 完了（第'+(li+1)+'便）',
@@ -19372,7 +19448,7 @@ function confirmDispatch() {
         vehicleCap: vm ? vm.cap : null,
         legNo: li+1, totalLegs: c.legs.length, multiCase: true, parentId: c.id,
         legRole: leg.role, legReason: leg.reason,
-        sales: legSales, fuel: legFuel, other: 0, profit: legProfit, margin: Math.round(legProfit/legSales*100),
+        sales: legSales, fuel: legFuel, other: legOther, profit: legProfit, margin: legSales ? Math.round(legProfit/legSales*100) : 0,
         invoiceNo: invBase + (li > 0 ? '-' + (li+1) : ''),
         invoiceDate: formatDateSlash(now),
         due: formatDateSlash(new Date(now.getTime()+30*86400000)),
