@@ -7435,7 +7435,7 @@ function _ssotDerive(seed, build){
     <div class="nav-item" onclick="showPage('fax')">
       <div class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
       <span class="nav-label">メール・FAX受付</span>
-      <span class="agent-tag">AI</span>
+      <span class="nav-badge orange" id="nav-badge-fax">7</span>
     </div>
     <div class="sidebar-section-label" style="margin-top:8px">管理</div>
     <div class="nav-item" onclick="showPage('vehicle')">
@@ -13083,6 +13083,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   } catch (e) {}
   _bindSidebarTips();
+  try { updateFaxNavBadge(); } catch (e) {}
 });
 
 // サブページ切替（定期案件登録など）
@@ -32971,6 +32972,16 @@ function renderFaxAddrList() {
   const total = faxBoxes.reduce((s, b) => s + b.unread, 0);
   const cnt = document.getElementById('fax-unread-total');
   if (cnt) { cnt.textContent = total; cnt.style.display = total > 0 ? '' : 'none'; }
+  updateFaxNavBadge();
+}
+
+// サイドバー「メール・FAX受付」のカウントバッジを受信Boxの未読合計に同期
+function updateFaxNavBadge() {
+  const badge = document.getElementById('nav-badge-fax');
+  if (!badge) return;
+  const total = faxBoxes.reduce((s, b) => s + b.unread, 0);
+  badge.textContent = total;
+  badge.style.display = total > 0 ? '' : 'none';
 }
 
 function selectFaxBox(idx) {
