@@ -39599,6 +39599,14 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   background: #0d9488; color: #fff;
   box-shadow: 0 2px 6px rgba(13,148,136,.3);
 }
+.dnd-detail-btn.unconfirm {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1.5px solid #fb923c;
+}
+.dnd-detail-btn.unconfirm:hover {
+  background: #fed7aa; border-color: #ea580c; color: #9a3412;
+}
 .dnd-detail-btn:disabled {
   background: #e5e7eb !important;
   color: #9ca3af !important;
@@ -40216,7 +40224,7 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
 
     const urgentBadge = a.urgent ? `<span class="dnd-detail-urgent-badge">緊急</span>` : '';
     const confirmedBadge = a.confirmed
-      ? `<span style="display:inline-block; padding:3px 10px; background:#16a34a; color:#fff; font-size:11px; font-weight:700; border-radius:12px; margin-left:8px;">✓ 確定済み</span>`
+      ? `<span style="display:inline-block; padding:3px 10px; background:#16a34a; color:#fff; font-size:11px; font-weight:700; border-radius:12px; margin-left:8px;">✓ 仮確定済み</span>`
       : `<span style="display:inline-block; padding:3px 10px; background:#dbeafe; color:#1e40af; font-size:11px; font-weight:700; border-radius:12px; margin-left:8px;">📋 未確定</span>`;
 
     // 金額（運賃）：ブロック → 配車計画表の案件 → caseObj → 算出 の順で解決
@@ -40319,7 +40327,12 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
     if (a.confirmed) {
       actions.innerHTML = `
         <button class="dnd-detail-btn secondary" onclick="closeDndDetailPane()">閉じる</button>
-        <button class="dnd-detail-btn primary" disabled>✓ 確定済み</button>
+        <button class="dnd-detail-btn unconfirm" onclick="unconfirmSingleBlock('${driverId}', ${blockIdx})"
+                title="仮確定済みを取り消して未確定に戻します">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+          未確定に戻す
+        </button>
+        <button class="dnd-detail-btn primary" disabled>✓ 仮確定済み</button>
       `;
     } else {
       actions.innerHTML = `
@@ -40475,6 +40488,48 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
 
     if (typeof showDndToast === 'function') {
       showDndToast(`✓ ${a.client || a.label} を確定 — ${driver ? driver.driver : ''} へ指示送信${movedMsg}`);
+    }
+    closeDndDetailPane();
+    if (typeof renderDnd === 'function') renderDnd();
+    // 個別案件処理ページが開いていれば再描画
+    refreshCasesPageIfOpen();
+    refreshWarningBar();
+  };
+
+  // ════════════════════════════════════════════════════════════════
+  //  仮確定済み → 未確定へ戻す（単独ブロック）
+  // ════════════════════════════════════════════════════════════════
+  window.unconfirmSingleBlock = function(driverId, blockIdx) {
+    pushHistory();
+    const currentKey = window.dndGetCurrentDateKey();
+    const arr = (window.dndAssignments[driverId] && window.dndAssignments[driverId][currentKey]) || [];
+    const a = arr[blockIdx];
+    if (!a || a.isPreset || !a.confirmed) return;
+    a.confirmed = false;
+    delete a.confirmedAt;
+    const driver = (window.dndDrivers || []).find(d => d.id === driverId);
+
+    // 個別案件処理側を「処理済み」から元フェーズへ戻す（確定時の連動を巻き戻す）
+    // 同一案件が他の仮確定済みブロックでまだ確定されている場合は戻さない（リレー等）
+    let movedMsg = '';
+    if (a.caseListId && typeof window.dndCaseFromProcessed === 'function') {
+      let stillConfirmedElsewhere = false;
+      Object.keys(window.dndAssignments || {}).forEach(did => {
+        const blocks = (window.dndAssignments[did] && window.dndAssignments[did][currentKey]) || [];
+        blocks.forEach(b => {
+          if (b !== a && b.confirmed && b.caseListId === a.caseListId) stillConfirmedElsewhere = true;
+        });
+      });
+      if (!stillConfirmedElsewhere) {
+        try {
+          window.dndCaseFromProcessed(a.caseListId);
+          movedMsg = ' ｜ 個別案件処理を元のステータスへ戻しました';
+        } catch(e) { console.warn('dndCaseFromProcessed error:', e); }
+      }
+    }
+
+    if (typeof showDndToast === 'function') {
+      showDndToast(`↩ ${a.client || a.label} を未確定に戻しました${movedMsg}`);
     }
     closeDndDetailPane();
     if (typeof renderDnd === 'function') renderDnd();
@@ -42684,6 +42739,23 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
         return r;
       };
       window.confirmSingleBlock._ownerGuarded = true;
+    }
+
+    // unconfirmSingleBlock（仮確定済み→未確定）：担当ガード
+    if (typeof window.unconfirmSingleBlock === 'function' && !window.unconfirmSingleBlock._ownerGuarded) {
+      const orig = window.unconfirmSingleBlock;
+      window.unconfirmSingleBlock = function(driverId, blockIdx) {
+        if (!canEditDriver(driverId)) {
+          if (typeof window.showDndToast === 'function') {
+            window.showDndToast('この車両は担当外のため操作できません', true);
+          }
+          return;
+        }
+        const r = orig.call(this, driverId, blockIdx);
+        refreshKpiDock();
+        return r;
+      };
+      window.unconfirmSingleBlock._ownerGuarded = true;
     }
   }
 
