@@ -28,6 +28,19 @@ function _ssotDerive(seed, build){
   } catch (e) { console.warn('[logipoke] SSoT derive failed; using seed', e); }
   return seed;
 }
+
+// 案件statusの正準化アクセサ（課題C7・第2段：日英2語彙→正準相へ寄せる読取窓口）。
+// LogipokeDB があれば normalizeOrderStatus 経由の正準相/CSSクラスへ、無ければ素の status を
+// 返して従来挙動にフォールバック（英語語彙はそのまま正準値なので挙動は不変）。生 status を
+// 比較・CSSクラスへ直結している箇所を、この単一窓口に集約する。
+function _orderStatusCanon(c){
+  try { if (typeof LogipokeDB !== 'undefined' && LogipokeDB.normalizeOrderStatus) return LogipokeDB.normalizeOrderStatus(c).status; } catch(e){}
+  return c && c.status;
+}
+function _orderStatusClass(c){
+  try { if (typeof LogipokeDB !== 'undefined' && LogipokeDB.orderStatusClass) return LogipokeDB.orderStatusClass(_orderStatusCanon(c)); } catch(e){}
+  return c && c.status;
+}
 </script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
@@ -28731,11 +28744,12 @@ function renderDndList() {
       const processed = isCaseProcessed(c.id);
       // 処理済みは他タブから除外
       if (processed) return false;
-      // ステータス絞り込み
+      // ステータス絞り込み（C7第2段：生 status 比較を正準相アクセサ経由へ）
+      const ns = _orderStatusCanon(c);
       if (dndCurrentFilter === 'pending') {
-        if (c.status !== 'unprocessed' && c.status !== 'processing') return false;
+        if (ns !== 'unprocessed' && ns !== 'processing') return false;
       } else if (dndCurrentFilter !== 'all') {
-        if (c.status !== dndCurrentFilter) return false;
+        if (ns !== dndCurrentFilter) return false;
       }
       // 荷主名検索（部分一致・大文字小文字区別なし）
       if (dndSearchQuery) {
@@ -28793,8 +28807,8 @@ function renderDndList() {
     const assignment = findCaseAssignment(c.id);
     const assigned = !!assignment;
     const processed = isCaseProcessed(c.id);
-    const statusLabel = processed ? '処理済み' : (c.status === 'unprocessed' ? '未処理' : '処理中');
-    const statusClass = processed ? 'processed' : c.status;
+    const statusLabel = processed ? '処理済み' : (_orderStatusCanon(c) === 'unprocessed' ? '未処理' : '処理中');
+    const statusClass = processed ? 'processed' : _orderStatusClass(c);
     // 割当済みの場合：いつ・誰にの情報を組み立て
     let assignedInfo = '';
     if (assignment) {
