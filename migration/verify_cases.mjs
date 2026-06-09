@@ -127,6 +127,78 @@ check('決定性：2回取込んでも同一復元', () => {
   assert.equal(a, b);
 });
 
+// ── status enum 統一の土台（課題C7・第1段の追補：normalizeOrderStatus）─────────
+console.log('\nstatus enum 統一の土台（日英2語彙→正準3軸 normalizeOrderStatus）\n');
+
+check('旧 status 値（日英両語彙）が正準相へ決定的にマップされる', () => {
+  const m = {
+    '未処理': 'unprocessed', '未解析': 'unprocessed', '要確認': 'unprocessed',
+    '処理中': 'processing', '完了': 'processed', '過去': 'processed',
+    'unprocessed': 'unprocessed', 'processing': 'processing', 'processed': 'processed'
+  };
+  Object.keys(m).forEach(raw => assert.equal(DB.normalizeOrderStatus(raw).status, m[raw], raw));
+});
+
+check('未知 status は phaseHint へフォールバック（master は status 依存）', () => {
+  assert.equal(DB.normalizeOrderStatus('謎', 'processing').status, 'processing');
+  assert.equal(DB.normalizeOrderStatus(undefined, 'processed').status, 'processed');
+  // master は相ではないため未知時は既定 unprocessed
+  assert.equal(DB.normalizeOrderStatus('謎', 'master').status, 'unprocessed');
+});
+
+check('軸B：analyzed 推定（未解析→false / 要確認→true / 明示優先）', () => {
+  assert.equal(DB.normalizeOrderStatus('未解析').analyzed, false);
+  assert.equal(DB.normalizeOrderStatus('要確認').analyzed, true);
+  assert.equal(DB.normalizeOrderStatus('処理中').analyzed, true);
+  // 明示 analyzed は status 推定より優先
+  assert.equal(DB.normalizeOrderStatus({ status: '処理中', analyzed: false }).analyzed, false);
+  assert.equal(DB.normalizeOrderStatus({ status: '未解析', analyzed: true }).analyzed, true);
+});
+
+check('軸C：isPast 派生（過去→true / それ以外→false）', () => {
+  assert.equal(DB.normalizeOrderStatus('過去').isPast, true);
+  assert.equal(DB.normalizeOrderStatus('完了').isPast, false);
+  assert.equal(DB.normalizeOrderStatus('処理中').isPast, false);
+});
+
+check('ラベル/CSSクラスのアダプタが正準相を解決（生 status 直結を撲滅）', () => {
+  assert.equal(DB.orderStatusLabel('unprocessed'), '未処理');
+  assert.equal(DB.orderStatusLabel('processing'), '処理中');
+  assert.equal(DB.orderStatusLabel('processed'), '処理済み');
+  assert.equal(DB.orderStatusClass('unprocessed'), 'unprocessed');
+  assert.equal(DB.orderStatusClass('processed'), 'processed');
+});
+
+check('相↔status 整合：ingestCases の _norm が同一案件で 3語彙を一致させる', () => {
+  const ov = DB.toCaseOverview(freshIngest());
+  const get = (phase) => ov.find(r => r.id === '20240524001' && r.phase === phase);
+  // 20240524001 は unprocessed:'未解析' / processed:'完了' / master:'未処理' の3シェイプ
+  assert.equal(get('unprocessed').norm.status, 'unprocessed');  // '未解析'
+  assert.equal(get('unprocessed').norm.analyzed, true);          // unprocessed seed の analyzed:true
+  assert.equal(get('processed').norm.status, 'processed');       // '完了'
+  assert.equal(get('master').norm.status, 'unprocessed');        // '未処理'
+  // フェーズ='processing' の relay 案件 20240524104 は processing 相
+  assert.equal(ov.find(r => r.id === '20240524104' && r.phase === 'processing').norm.status, 'processing');
+});
+
+check('純関数性：normalizeOrderStatus / ingestCases は raw を変更しない（ロスレス）', () => {
+  const frozen = Object.freeze({ id: 'X', status: '未解析', analyzed: false, client: 'A社' });
+  const before = JSON.stringify(frozen);
+  const r = DB.normalizeOrderStatus(frozen, 'unprocessed');   // freeze 下で例外なく動く＝非変更
+  assert.equal(r.status, 'unprocessed');
+  assert.equal(JSON.stringify(frozen), before);
+  // ingestCases も raw を凍結したまま取込め、復元がロスレス
+  const db = DB.createDB();
+  DB.ingestCases(db, { unprocessed: [frozen] });
+  assert.deepEqual(DB.toUnprocessedCases(db)[0], frozen);
+});
+
+check('決定性：normalizeOrderStatus は同入力で同出力', () => {
+  const a = JSON.stringify(DB.normalizeOrderStatus({ status: '完了', analyzed: true }, 'processed'));
+  const b = JSON.stringify(DB.normalizeOrderStatus({ status: '完了', analyzed: true }, 'processed'));
+  assert.equal(a, b);
+});
+
 console.log('\n' + (fail === 0
   ? '✅ 全 ' + pass + ' 件パス'
   : '❌ ' + fail + ' 件失敗 / ' + (pass + fail) + ' 件中') + '\n');

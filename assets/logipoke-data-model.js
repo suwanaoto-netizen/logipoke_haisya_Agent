@@ -725,13 +725,57 @@
    *  これにより 4配列を「単一ストアの派生ビュー」に降格する道筋を用意する（reader 接続は段階適用）。
    * ------------------------------------------------------------------------- */
   var _CASE_PHASES = ['unprocessed', 'processing', 'processed', 'master'];
+
+  /* ── 案件ステータスの正準化（課題C7・第1段の追補：status enum 統一の土台）──────
+   *  本体 index.html には案件 status が「日本語語彙（未処理/未解析/要確認/処理中/完了/過去）」と
+   *  「英語語彙（unprocessed/processing/processed）」の2系統が混在し、さらに配列所属(phase)と
+   *  analyzed フラグが同じ意味軸を二重・三重に表現している（docs/ideal-data-model.md C7）。
+   *  ここでは1フィールドに圧縮された status を「ライフサイクル相(status)／解析済みか(analyzed)／
+   *  過去か(isPast)」の3つの直交軸へ分解する純関数を用意する。raw は一切変更しない（ロスレス維持）。
+   *  本体の reader 切替（生 status 比較・statusClass 直結の置換）は後続 Step で本関数へ接続する。
+   * --------------------------------------------------------------------------- */
+  // 軸A：正準ライフサイクル相。配列フェーズ(unprocessed/processing/processed)と 1:1。
+  var ORDER_STATUS_ENUM = { UNPROCESSED: 'unprocessed', PROCESSING: 'processing', PROCESSED: 'processed' };
+  // 旧 status 値（日英両語彙）→ 正準相。master の軽量シェイプも同じ語彙を用いる。
+  var _ORDER_STATUS_TO_CANON = {
+    '未処理': 'unprocessed', '未解析': 'unprocessed', '要確認': 'unprocessed',
+    '処理中': 'processing',
+    '完了': 'processed', '過去': 'processed',
+    'unprocessed': 'unprocessed', 'processing': 'processing', 'processed': 'processed'
+  };
+  // 正準相 → 表示ラベル / CSSクラス（本体の「生 status を直結」する箇所を置換する単一窓口）。
+  var ORDER_STATUS_LABEL = { unprocessed: '未処理', processing: '処理中', processed: '処理済み' };
+  var ORDER_STATUS_CLASS = { unprocessed: 'unprocessed', processing: 'processing', processed: 'processed' };
+  function orderStatusLabel(canon) { return ORDER_STATUS_LABEL[canon] || String(canon == null ? '' : canon); }
+  function orderStatusClass(canon) { return ORDER_STATUS_CLASS[canon] || String(canon == null ? '' : canon); }
+
+  // 案件（または status 文字列）を正準3軸へ分解する純関数。raw は変更しない。
+  //   src       : 案件オブジェクト（.status / .analyzed を読む）または status 文字列。
+  //   phaseHint : ストアの保持フェーズ('unprocessed'|'processing'|'processed'|'master')。
+  //               status 文字列が未知のときの相フォールバック（master は相ではないため status に委ねる）。
+  function normalizeOrderStatus(src, phaseHint) {
+    var isObj = src && typeof src === 'object';
+    var rawStatus = isObj ? src.status : src;
+    var canon = _ORDER_STATUS_TO_CANON[rawStatus];
+    if (!canon) {
+      canon = (phaseHint && phaseHint !== 'master' && _ORDER_STATUS_TO_CANON[phaseHint])
+        ? _ORDER_STATUS_TO_CANON[phaseHint] : 'unprocessed';
+    }
+    // 軸B：解析済みか。明示 analyzed を優先、無ければ status から推定（未解析のみ false）。
+    var analyzed = (isObj && typeof src.analyzed === 'boolean') ? src.analyzed : (rawStatus !== '未解析');
+    // 軸C：過去案件か（status から派生。将来は completedAt の期間フィルタへ移す）。
+    var isPast = (rawStatus === '過去');
+    return { status: canon, analyzed: analyzed, isPast: isPast, rawStatus: (rawStatus == null ? null : rawStatus) };
+  }
+
   function ingestCases(db, byPhase) {
     byPhase = byPhase || {};
     _CASE_PHASES.forEach(function (phase) {
       (byPhase[phase] || []).forEach(function (c, i) {
         if (!c) return;
         var key = 'c7::' + phase + '::' + (c.id != null ? c.id : ('idx' + i));
-        db.orders.set(key, { _c7: true, phase: phase, _seq: i, raw: c });
+        // raw は無加工で温存（ロスレス）。正準3軸は _norm に併置（派生・読取専用）。
+        db.orders.set(key, { _c7: true, phase: phase, _seq: i, raw: c, _norm: normalizeOrderStatus(c, phase) });
       });
     });
     return db;
@@ -768,7 +812,7 @@
   // 統合ビュー：全フェーズ横断（phase 付き）。将来の一覧/フィルタ用。
   function toCaseOverview(db) {
     var rows = [];
-    db.orders.forEach(function (o) { if (o && o._c7) rows.push({ phase: o.phase, id: o.raw && o.raw.id, _seq: o._seq, raw: o.raw }); });
+    db.orders.forEach(function (o) { if (o && o._c7) rows.push({ phase: o.phase, id: o.raw && o.raw.id, _seq: o._seq, raw: o.raw, norm: o._norm || normalizeOrderStatus(o.raw, o.phase) }); });
     return rows.sort(function (a, b) {
       if (a.phase !== b.phase) return _CASE_PHASES.indexOf(a.phase) - _CASE_PHASES.indexOf(b.phase);
       return (a._seq || 0) - (b._seq || 0);
@@ -809,6 +853,9 @@
     // ③ 案件層 統合（課題C7）：4分割配列の単一ストア統合＋per-phase ロスレス復元
     ingestCases: ingestCases, toUnprocessedCases: toUnprocessedCases, toProcessingCases: toProcessingCases,
     toProcessedCases: toProcessedCases, toAllCasesMaster: toAllCasesMaster, toCaseOverview: toCaseOverview,
-    createCaseStore: createCaseStore
+    createCaseStore: createCaseStore,
+    // ③ 案件層：status enum 統一の土台（課題C7・第1段の追補）。日英2語彙→正準3軸へ分解。
+    ORDER_STATUS_ENUM: ORDER_STATUS_ENUM, ORDER_STATUS_LABEL: ORDER_STATUS_LABEL, ORDER_STATUS_CLASS: ORDER_STATUS_CLASS,
+    normalizeOrderStatus: normalizeOrderStatus, orderStatusLabel: orderStatusLabel, orderStatusClass: orderStatusClass
   };
 });
