@@ -8280,6 +8280,15 @@ function _ssotDerive(seed, build){
                 </svg>
                 <span id="dnd-sort-tentative-label">未確定優先</span>
               </button>
+              <!-- 車両並び替えボタン（空き優先：当日未割当のドライバーを上位） -->
+              <button class="dnd-sort-btn" id="dnd-sort-available-btn"
+                      onclick="dndToggleAvailableFirst()"
+                      title="当日の割当がない（空き）ドライバーを上位に表示">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                  <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>
+                </svg>
+                <span id="dnd-sort-available-label">空き優先</span>
+              </button>
               <div class="dnd-right-stats">
                 <div class="dnd-stat">割当済 <span class="dnd-stat-val" id="dnd-stat-assigned">0</span></div>
                 <div class="dnd-stat">稼働率 <span class="dnd-stat-val" id="dnd-stat-rate">0%</span></div>
@@ -21018,8 +21027,6 @@ function renderDisplaySettings() {
       + '<div class="dvcolside">'
         + '<div class="dvcard"><div class="dvch">📅 日付選択バーの表示<span class="dvflex"></span>' + dvSwitchHtml(DV.showDateBar, "dvSetFlag('showDateBar'," + (!DV.showDateBar) + ")") + '</div>'
           + '<div class="dvcb"><div class="dvmini">前後1週間の日付バー＋統計（割当済・稼働率）。OFFで行ごと非表示にして配車表を広げます。</div></div></div>'
-        + '<div class="dvcard"><div class="dvch">🗂 担当者フィルターバー<span class="dvflex"></span>' + dvSwitchHtml(DV.showFilterBar !== false, "dvSetFlag('showFilterBar'," + (DV.showFilterBar === false) + ")") + '</div>'
-          + '<div class="dvcb"><div class="dvmini">「担当 / 拠点 / すべて」と担当者別の絞り込みチップ（自分の担当・担当者別・未割当）。OFFで行ごと非表示。</div></div></div>'
         + '<div class="dvcard"><div class="dvch">⚠ 本日のサマリー（件数）の表示<span class="dvflex"></span>' + dvSwitchHtml(DV.showSummaryBar !== false, "dvSetFlag('showSummaryBar'," + (DV.showSummaryBar === false) + ")") + '</div>'
           + '<div class="dvcb"><div class="dvmini">法令違反・未確定・確定済みの件数チップ。OFFで件数行を非表示（取り消し / やり直し / 選択モード / 一括仮確定の操作ボタンはサブタブ行の右端へ常駐し、残ります）。</div></div></div>'
         + '<div class="dvcard dvpreview"><div class="dvch">👁 カードのプレビュー</div><div class="dvcb">' + dvPreviewCardHtml() + '</div></div>'
@@ -29277,6 +29284,8 @@ function saveDndEditModal() {
 let dndVehicleSortMode = 'original';
 // 未確定優先トグル（重量順とは独立。ON時は「未確定（仮）案件を持つ行」をプライマリキーで上位へ）
 let dndTentativeFirst = false;
+// 空き優先トグル（重量順・未確定優先とは独立。ON時は「当日割当がない＝空きの行」を最優先キーで上位へ）
+let dndAvailableFirst = false;
 // 初期順を保存しておく（custom やソート解除時に復元するため）
 const _DND_DRIVERS_ORIGINAL_ORDER = dndDrivers.map(d => d.id);
 
@@ -29314,6 +29323,15 @@ function dndRowHasScaleOutLeg(driverId) {
   });
 }
 
+// 行（ドライバー）が当日「空き」か（割当ブロックを1件も持たない＝未割当）。
+function dndRowIsAvailable(driverId) {
+  const dateKey = (typeof dndGetCurrentDateKey === 'function') ? dndGetCurrentDateKey() : null;
+  const blocks = (typeof dndAssignmentsFor === 'function')
+    ? (dndAssignmentsFor(driverId, dateKey) || [])
+    : [];
+  return blocks.length === 0;
+}
+
 function dndApplyVehicleSort() {
   // dndDrivers は const だがミドルクオートで配列中身は変更可能。インプレースで並び替える。
   // 2段ソート：プライマリ＝未確定優先（トグルON時のみ）／セカンダリ＝重量順 or 初期順 or 手動順。
@@ -29337,10 +29355,15 @@ function dndApplyVehicleSort() {
     cmpSecondary = (a, b) => (idx.get(a.id) ?? 0) - (idx.get(b.id) ?? 0);
   }
 
-  // 未確定優先トグルOFFかつ custom の場合は、既に手動順なので何もしない（従来挙動を維持）。
-  if (!dndTentativeFirst && dndVehicleSortMode === 'custom') return;
+  // 優先トグルがどれもOFFかつ custom の場合は、既に手動順なので何もしない（従来挙動を維持）。
+  if (!dndTentativeFirst && !dndAvailableFirst && dndVehicleSortMode === 'custom') return;
 
   dndDrivers.sort((a, b) => {
+    if (dndAvailableFirst) {
+      const aa = dndRowIsAvailable(a.id) ? 0 : 1;
+      const ab = dndRowIsAvailable(b.id) ? 0 : 1;
+      if (aa !== ab) return aa - ab;   // 当日空き（未割当）の行を最上位グループへ
+    }
     if (dndTentativeFirst) {
       const ta = dndRowHasTentative(a.id) ? 0 : 1;
       const tb = dndRowHasTentative(b.id) ? 0 : 1;
@@ -29366,6 +29389,15 @@ function dndUpdateSortBtnUI() {
     tBtn.title = dndTentativeFirst
       ? '現在：未確定（仮）案件のある車両を上位表示中。クリックで解除'
       : 'D&D済みで未確定（仮）の案件がある車両を上位に表示';
+  }
+  // 空き優先トグルも同じく確定済みタブでは非表示＋active状態を反映
+  const aBtn = document.getElementById('dnd-sort-available-btn');
+  if (aBtn) {
+    aBtn.style.display = isConfirmedTab ? 'none' : '';
+    aBtn.classList.toggle('active', dndAvailableFirst);
+    aBtn.title = dndAvailableFirst
+      ? '現在：当日空き（未割当）のドライバーを上位表示中。クリックで解除'
+      : '当日の割当がない（空き）ドライバーを上位に表示';
   }
   if (isConfirmedTab) return;
   if (dndVehicleSortMode === 'desc') {
@@ -29410,6 +29442,14 @@ function dndCycleVehicleSort() {
 function dndToggleTentativeFirst() {
   // 重量順とは独立したトグル。ON時は未確定（仮）案件を持つ行をプライマリキーで上位へ。
   dndTentativeFirst = !dndTentativeFirst;
+  dndApplyVehicleSort();
+  dndUpdateSortBtnUI();
+  renderDndTimeline();
+}
+
+function dndToggleAvailableFirst() {
+  // 重量順・未確定優先とは独立したトグル。ON時は当日空き（未割当）の行を最優先キーで上位へ。
+  dndAvailableFirst = !dndAvailableFirst;
   dndApplyVehicleSort();
   dndUpdateSortBtnUI();
   renderDndTimeline();
@@ -42080,31 +42120,10 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(v,hi)); }
   //  担当フィルタバーの設置
   // ════════════════════════════════════════════════════════════════
   function ensureAssignFilterBar() {
-    if (document.getElementById('assign-filter-bar')) return;
-    const wb = document.getElementById('dispatch-warning-bar');
-    if (!wb) return;
-    const bar = document.createElement('div');
-    bar.className = 'assign-filter-bar';
-    bar.id = 'assign-filter-bar';
-    bar.innerHTML = `
-      <div class="afb-axis-segment" id="afb-axis-segment" role="tablist" aria-label="絞り込み軸">
-        <span class="afb-axis-item ${filterAxis==='owner'?'active':''}" data-axis="owner" onclick="window.setFilterAxis('owner')" role="tab" aria-selected="${filterAxis==='owner'}">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-          担当
-        </span>
-        <span class="afb-axis-item ${filterAxis==='base'?'active':''}" data-axis="base" onclick="window.setFilterAxis('base')" role="tab" aria-selected="${filterAxis==='base'}">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h2M9 13h2M9 17h2M13 9h2M13 13h2M13 17h2"/></svg>
-          拠点
-        </span>
-        <span class="afb-axis-item ${filterAxis==='all'?'active':''}" data-axis="all" onclick="window.setFilterAxis('all')" role="tab" aria-selected="${filterAxis==='all'}">
-          すべて
-        </span>
-      </div>
-      <div class="afb-axis-divider"></div>
-      <div class="afb-chips" id="afb-chips"></div>
-    `;
-    wb.parentNode.insertBefore(bar, wb.nextSibling);
-    refreshAssignFilterBar();
+    // 担当/拠点フィルター（絞り込み）バーは廃止。
+    // 既存の DOM が残っていれば撤去し、全車両を常時表示する（フィルタ無効＝'all'）。
+    const existing = document.getElementById('assign-filter-bar');
+    if (existing) existing.remove();
   }
 
   function refreshAssignFilterBar() {
