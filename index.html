@@ -27199,40 +27199,10 @@ function renderDnd() {
 //  リレー案件が存在する時のみ表示。束ね/分散切替＋リセット
 // ═══════════════════════════════════════════════════════════════
 function renderDndRelayToggle() {
+  // リレー輸送トグル（リレー◯件 / 束ね / 分散 / リセット）のUIは廃止。
+  // ホストを空にして何も表示しない。リレー案件は常に既定の「束ね（grouped）」表示。
   const host = document.getElementById('dnd-relay-toggle-host');
-  if (!host) return;
-  if (typeof processingCases === 'undefined') {
-    host.innerHTML = '';
-    return;
-  }
-  const relayCases = processingCases.filter(c =>
-    c.vehicleMode === 'relay' && c.legs && c.legs.length > 0
-  );
-  if (relayCases.length === 0) {
-    host.innerHTML = '';
-    return;
-  }
-  if (typeof window.__relayDisplayMode === 'undefined') {
-    window.__relayDisplayMode = 'grouped';
-  }
-  const mode = window.__relayDisplayMode;
-  host.innerHTML = `
-    <div class="dnd-relay-toggle">
-      <span class="dnd-relay-toggle-label">🔁 リレー ${relayCases.length}件</span>
-      <button class="dnd-relay-mode-btn ${mode==='grouped'?'active':''}"
-              onclick="window.__setRelayDisplayMode('grouped')"
-              title="同案件のレッグを1行にまとめて表示">束ね</button>
-      <button class="dnd-relay-mode-btn ${mode==='separate'?'active':''}"
-              onclick="window.__setRelayDisplayMode('separate')"
-              title="各レッグをドライバー行に分散して表示">分散</button>
-      <button class="dnd-relay-reset-btn"
-              onclick="window.__resetRelayDisplay()"
-              title="リレー輸送モードの案件を全て1台モードに戻す">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 10 9 10"/></svg>
-        リセット
-      </button>
-    </div>
-  `;
+  if (host) host.innerHTML = '';
 }
 
 // 切替（モード変更）
