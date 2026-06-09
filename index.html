@@ -13053,13 +13053,18 @@ function _dndPlateShort(plate) {
   const m = String(plate).match(/(\d{3,4})(?!.*\d)/);
   return m ? m[1] : String(plate).replace(/^車両/, '').replace(/^V/, '');
 }
-// ブロックの実効車両情報。block.vehicleId が行の既定と異なれば override=true。
+// ブロックの実効車両情報。block.vehicleId が行の既定と異なれば override=true。傭車は hired=true。
 function _dndBlockVehicleInfo(d, block) {
+  // 論点D：傭車（協力会社車両・自社マスタ外）。行の既定車両にフォールバックさせない。
+  if (block && (block._hired || block.partnerVehicle)) {
+    const co = block._hiredCompany || '';
+    return { effectiveId: null, override: true, hired: true, plate: '傭車（協力会社）' + (co ? '：' + co : ''), shortPlate: '傭車', company: co };
+  }
   const def = _dndRowDefaultVehicleId(d);
   const own = (block && block.vehicleId) ? block.vehicleId : null;
   const eff = own || def;
   const override = !!(own && def && own !== def);
-  return { effectiveId: eff, override: override, plate: _dndVehiclePlate(eff), shortPlate: _dndPlateShort(_dndVehiclePlate(eff)) };
+  return { effectiveId: eff, override: override, hired: false, plate: _dndVehiclePlate(eff), shortPlate: _dndPlateShort(_dndVehiclePlate(eff)) };
 }
 window._dndBlockVehicleInfo = _dndBlockVehicleInfo;
 window._dndRowDefaultVehicleId = _dndRowDefaultVehicleId;
@@ -29590,6 +29595,20 @@ function _applyVehicleAxisView() {
     ${rows}`;
 }
 
+// 論点F：ボードのドロップ先（ドライバー×車両ペア）に対する AI 2軸推薦（車両軸/ドライバー軸スコア）。
+function _boardAxisRec(driverId, caseObj) {
+  if (typeof calcAxisScores !== 'function' || !caseObj) return null;
+  const row = (typeof dndDrivers !== 'undefined') ? dndDrivers.find(d => d.id === driverId) : null;
+  if (!row) return null;
+  const vid = row._vehicleId || row.id;
+  const vm = (typeof getVehicleById === 'function') ? getVehicleById(vid) : null;
+  const candId = '車両' + String(vid || '').replace(/^V/, '');
+  const baseName = (vm && typeof getBaseById === 'function' && vm.baseId) ? ((getBaseById(vm.baseId) || {}).name || '') : '';
+  const cand = { id: candId, driver: row.driver, base: baseName, cap: (row.maxLoad ? row.maxLoad.toLocaleString() + 'kg' : ''), avail: '空車', stars: 4, law: { status: 'ok', items: [{ ok: true }, { ok: true }] } };
+  try { return calcAxisScores(candId, caseObj, cand); } catch (e) { return null; }
+}
+window._boardAxisRec = _boardAxisRec;
+
 function renderDndTimeline() {
   const wrap = document.getElementById('dnd-timeline');
   if (!wrap) return;
@@ -29663,7 +29682,8 @@ function renderDndTimeline() {
             _relayLegNo: leg.legNo,
             _relayTotalLegs: _legsV.length,
             _relayCaseId: c.id,
-            vehicleId: leg.vehicleRefId || null,   // 論点D：区間で独立選択された車両
+            vehicleId: leg.partnerVehicle ? null : (leg.vehicleRefId || null),   // 論点D：区間で独立選択された車両
+            _hired: !!leg.partnerVehicle, _hiredCompany: leg.partnerCompany || '',  // 論点D：傭車
             start: leg.startTime || '00:00',
             end: leg.endTime || '00:00',
             client: c.client,
@@ -29703,7 +29723,8 @@ function renderDndTimeline() {
             _multiCaseId: c.id,
             _multiLegNo: leg.legNo,
             _multiTotalLegs: c.legs.length,
-            vehicleId: leg.vehicleRefId || null,   // 論点D：増車便で独立選択された車両
+            vehicleId: leg.partnerVehicle ? null : (leg.vehicleRefId || null),   // 論点D：増車便で独立選択された車両
+            _hired: !!leg.partnerVehicle, _hiredCompany: leg.partnerCompany || '',  // 論点D：傭車
             start: leg.startTime || '08:00',
             end: leg.endTime || '12:00',
             client: c.client, from: c.from, to: c.to,
@@ -29779,11 +29800,13 @@ function renderDndTimeline() {
         : (a.confirmed
             ? `<span class="dnd-block-status confirmed" title="仮確定済みの配車">✓ 確定</span>`
             : `<span class="dnd-block-status tentative" title="未確定（ドラッグ＆ドロップで仮割当・仮確定前）"><span class="so-dot"></span>仮</span>`);
-      // 論点D：ブロック固有車両が行の既定と異なる場合は「別車両」チップを表示
+      // 論点D：別車両チップ／傭車（協力会社）チップ
       const _vehInfo = _dndBlockVehicleInfo(d, a);
-      const vehChip = _vehInfo.override
-        ? `<span class="dnd-block-veh" title="この便は既定と異なる車両：${_vehInfo.plate.replace(/"/g, '&quot;')}" style="font-size:9px;font-weight:700;background:rgba(255,255,255,.28);border:1px solid rgba(255,255,255,.5);border-radius:3px;padding:0 3px;margin-left:4px">🚚${_vehInfo.shortPlate}</span>`
-        : '';
+      const vehChip = _vehInfo.hired
+        ? `<span class="dnd-block-veh" title="${_vehInfo.plate.replace(/"/g, '&quot;')}" style="font-size:9px;font-weight:700;background:rgba(255,247,237,.95);color:#9a3412;border:1px solid #fdba74;border-radius:3px;padding:0 3px;margin-left:4px">🤝傭車</span>`
+        : (_vehInfo.override
+          ? `<span class="dnd-block-veh" title="この便は既定と異なる車両：${_vehInfo.plate.replace(/"/g, '&quot;')}" style="font-size:9px;font-weight:700;background:rgba(255,255,255,.28);border:1px solid rgba(255,255,255,.5);border-radius:3px;padding:0 3px;margin-left:4px">🚚${_vehInfo.shortPlate}</span>`
+          : '');
       return `<div class="dnd-block ${isNew ? 'new-arrival' : ''} ${a.confirmed ? 'is-confirmed' : (isTentativeBlock ? 'is-tentative' : '')} ${blockKaizenCls} ${relayLegCls} ${multiDayCls}"
                    style="left:${left}%;width:${width}%;background:${a.color}"
                    data-driver-id="${d.id}"
@@ -29800,7 +29823,7 @@ function renderDndTimeline() {
         ${segmentsHtml}
         ${statusChip}
         ${leftMarker}
-        <div class="dnd-block-title">${a.label}${mdm.sequenceTotal > 1 ? `<span class="dnd-block-seq">${mdm.sequenceCurrent}/${mdm.sequenceTotal}</span>` : ''}${vehChip}</div>
+        <div class="dnd-block-title">${vehChip}${a.label}${mdm.sequenceTotal > 1 ? `<span class="dnd-block-seq">${mdm.sequenceCurrent}/${mdm.sequenceTotal}</span>` : ''}</div>
         <div class="dnd-block-sub">${a.start}〜${a.end}${a.sub ? ' · ' + a.sub : ''}</div>
         ${rightMarker}
         ${interactiveForBlock ? `<button class="dnd-block-edit" onclick="event.stopPropagation();openBoardBlockEditor('${d.id}',${idx})" title="ドライバー/車両を変更（独立選択）" style="position:absolute;top:2px;right:20px;width:15px;height:15px;border:none;border-radius:3px;background:rgba(255,255,255,.85);color:#0d4a3a;font-size:9px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center">🔧</button>` : ''}
@@ -30620,9 +30643,20 @@ function showDropTimePreview(track, e, driverId, ok) {
     prev.classList.add('warn');
     label = '注意: ' + (ctx.kaizenIssues[0] || '');
   }
+  // 論点F：配置可能かつ警告なしのときは AI 2軸推薦（車両軸/ドライバー軸）を提示
+  let _recPositive = false;
+  if (ctx.canDrop && !label) {
+    const _rec = _boardAxisRec(driverId, dndUnassignedCases.find(x => x.id === dndDraggingCaseId));
+    if (_rec && _rec.vehicleScore != null && _rec.driverScore != null) {
+      label = `🤖 AI推薦 🚚車両${_rec.vehicleScore} / 👤ドライバー${_rec.driverScore}`;
+      _recPositive = true;
+    }
+  }
   if (warnEl) {
     warnEl.textContent = label;
     warnEl.style.display = label ? '' : 'none';
+    warnEl.style.color = _recPositive ? '#047857' : '';
+    warnEl.style.fontWeight = _recPositive ? '800' : '';
   }
 
   // 端寄り判定（ラベル位置を逃がす）
@@ -32752,6 +32786,16 @@ function dndTrackDrop(e, driverId) {
   } catch(e) {
     console.warn('[case schedule sync] failed:', e);
   }
+
+  // 論点F：ドロップ確定時、選んだドライバー×車両ペアの AI 2軸推薦をトーストで提示
+  try {
+    if (isNewAssignment) {
+      const _rec = _boardAxisRec(driverId, caseObj);
+      if (_rec && _rec.vehicleScore != null && typeof showDndToast === 'function') {
+        showDndToast('配車しました（🤖AI推薦 🚚車両' + _rec.vehicleScore + ' / 👤ドライバー' + _rec.driverScore + '）');
+      }
+    }
+  } catch (e) { /* noop */ }
 
   // ─────────────────────────────────────────────────────────────
   // Phase 1d：D&D配車時のクロス警告
