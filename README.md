@@ -167,6 +167,20 @@ SSoT 未接続のままでした）。
 - ✅ **C7 最終形の足場：永続ケースストア `createCaseStore()`**: 運行層の `createOperationStore` と同型の
   永続ケースストア（`syncFromCases`／`getUnprocessed`/`getProcessing`/`getProcessed`/`getMaster`／`overview`）を
   資産に追加。`verify_cases.mjs`（10件）でロスレス保持・再同期を検証。**資産のみ・本体UI非変更**。
+- ✅ **C7 status enum 統一・第1段（正準化アダプタ）**: 案件 status が「日本語語彙（未処理/未解析/
+  要確認/処理中/完了/過去）」と「英語語彙（unprocessed/processing/processed）」の2系統に分裂し、配列所属(phase)・
+  `analyzed` フラグと同じ意味軸を多重表現していた（C7）。これを「ライフサイクル相 / 解析済みか / 過去か」の
+  **3つの直交軸へ分解する純関数 `normalizeOrderStatus`** を資産に追加。`ingestCases` は `raw` を無加工で温存
+  しつつ正準3軸を `_norm` に併置（ロスレス維持）、表示ラベル/CSSクラスの単一窓口 `orderStatusLabel`/
+  `orderStatusClass` も公開。`verify_cases.mjs`（計18件）で正準マップ/フォールバック/analyzed/isPast/
+  アダプタ/相整合/純関数性/決定性を検証。**資産のみ・本体UI非変更**。
+- ✅ **C7 status enum 統一・第2段（DnD reader 切替）**: 本体 `index.html` のDnD配車盤 reader 3箇所
+  （フィルタ絞り込み / `statusLabel` / `statusClass`）を、生 status の直接比較・CSSクラス直結から正準相
+  アクセサ `_orderStatusCanon`/`_orderStatusClass`（`LogipokeDB.normalizeOrderStatus` 経由・非ロード時は
+  素の status へフォールバック）へ切替。`verify_c7_render.mjs`（6件）で**到達する全 status 値で旧式==新式の
+  描画切替パリティ**とフォールバック縮退を保証（＝挙動不変）。未処理リストの 未解析/要確認 バッジ（L14833）は
+  seed の `status`/`analyzed` 不整合により正準化で表示が変わるため、種データを浄化する**Step 5 へ繰越**（正準
+  ライフサイクル相では 未解析/要確認 を区別しないサブ状態のため）。
 - 🔜 **C7 最終形（残・大規模・段階適用）**: 上記ストアを本体に常設し、4配列を「単一ストアの**ライブ派生
   ビュー**」へ降格、全 case writer を store-first 化する。ただし案件の**構造変異だけで27箇所**（フェーズ間
   移動 push/unshift/splice）＋要素変異（`recalcAllScores`/billing 確定/scaleout）が**UI全域・複数スコープ**
