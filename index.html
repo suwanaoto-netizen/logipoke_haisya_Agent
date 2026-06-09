@@ -19296,6 +19296,10 @@ function confirmMatching() {
     analyzed: c.analyzed,
     aiResult: c.aiResult,
     ch: c.ch,
+    // 請求情報を充足：運賃(amount)・取引先電話・請求内訳を未処理から引き継ぎ、確定時の請求生成に備える
+    amount: getCaseAmount(c),
+    clientTel: c.clientTel || (typeof getClientTel === 'function' ? getClientTel(c.client) : ''),
+    fareResult: deriveCaseFareBreakdown(c),
     onHold: c.onHold
   });
   // 未処理から削除
@@ -19478,8 +19482,10 @@ function confirmDispatch() {
     const _sof = c.scaleOutFare || null;
     const _partnerLegs = c.scaleOutPartnerLegs || [];
     const _totalLegs = c.legs.length + _partnerLegs.length;
-    const _salesPerLeg = _sof ? Math.round(_sof.sales / _totalLegs) : Math.round(45000 / c.legs.length);
-    const _ownCostPerLeg = _sof ? Math.round(_sof.ownCost / Math.max(1, c.legs.length)) : Math.round(16000 / c.legs.length);
+    // 増車プラン運賃が無ければ案件の運賃(amount)を便数で按分（旧:一律 45000 のハードコード）
+    const _caseFare = deriveCaseFareBreakdown(c);
+    const _salesPerLeg = _sof ? Math.round(_sof.sales / _totalLegs) : Math.round(_caseFare.sales / c.legs.length);
+    const _ownCostPerLeg = _sof ? Math.round(_sof.ownCost / Math.max(1, c.legs.length)) : Math.round(_caseFare.fuel / c.legs.length);
     c.legs.forEach((leg, li) => {
       const legSales  = _salesPerLeg;
       // #4 傭車便は自社燃料ではなく傭車料を原価(other)に計上し粗利を圧縮
@@ -19560,7 +19566,8 @@ function confirmDispatch() {
       client: c.client, from: c.from, to: c.to,
       goods: c.goods, completion: now.toLocaleDateString('ja-JP') + ' 完了',
       distance: c.distance, delay: 'なし', driver: c.driver, vehicle: c.vehicle,
-      sales: 45000, fuel: 16000, other: 0, profit: 29000, margin: 64,
+      // 請求情報を充足：案件の運賃(amount)から内訳を生成（旧:一律 45000 のハードコード）
+      ...deriveCaseFareBreakdown(c),
       invoiceNo: invBase,
       invoiceDate: formatDateSlash(now), due: formatDateSlash(new Date(now.getTime()+30*86400000)), paid: false,
       progress:50, truckTop:50, progressPct:50, remain:'—', eta:'—', donekm:0
@@ -20908,14 +20915,19 @@ function fmtYen(n) {
 // 所要時間・重量・緊急度をベースに、ID由来のばらつきを加えて1000円単位に丸める。
 function deriveCaseAmount(c) {
   if (!c) return 0;
-  const h = (c.durationH != null) ? c.durationH : 3;
+  // 所要時間：保持値が無ければ発着ルートから推定（未割当カード／未処理／処理中で同一値になるよう統一）
+  const h = (c.durationH != null) ? c.durationH
+          : (typeof _deriveDurationFromRoute === 'function' ? _deriveDurationFromRoute(c.from, c.to) : 3);
   let amt = h * 12000;
   const kgMatch = String(c.goods || '').match(/(\d[\d,]*)\s*kg/);
   if (kgMatch) {
     const kg = parseInt(kgMatch[1].replace(/,/g, ''), 10) || 0;
     amt += Math.round(kg / 100) * 500;
   }
-  if (c.urgent) amt += 15000;
+  // 緊急：保持値が無ければ希望納期から推定
+  const urgent = (c.urgent != null) ? c.urgent
+               : (typeof _deriveUrgentFromDeadline === 'function' ? _deriveUrgentFromDeadline(c.deadline) : false);
+  if (urgent) amt += 15000;
   let seed = 0; const s = String(c.id || c.client || '');
   for (let i = 0; i < s.length; i++) seed = (seed * 31 + s.charCodeAt(i)) >>> 0;
   const jitter = ((seed % 31) - 15) / 100; // -0.15 〜 +0.15
@@ -20926,6 +20938,35 @@ function deriveCaseAmount(c) {
 function getCaseAmount(c) {
   if (c && c.amount != null && !isNaN(Number(c.amount))) return Number(c.amount);
   return deriveCaseAmount(c);
+}
+
+// ── 請求情報充足の単一ロジック（SSoT）─────────────────────────────────
+// すべての処理済み（請求対象）案件は、登録経路（新規登録／AI電話受付／メール・FAX）に
+// 依らず、ここで運賃 → 請求内訳・請求書フィールドを生成して情報を充足させる。
+// 売上(sales)から燃料費・その他費用を控除して粗利(profit)・粗利率(margin)を算出。
+// 燃料費率 0.38 は処理済み実績（売上比 35〜41%）の中央値を採用。
+function deriveFareBreakdownFromSales(sales) {
+  const s = Math.max(0, Math.round(Number(sales) || 0));
+  const fuel = Math.round(s * 0.38);
+  const other = 0;
+  const profit = s - fuel - other;
+  const margin = s ? Math.round(profit / s * 100) : 0;
+  return { sales: s, fuel: fuel, other: other, profit: profit, margin: margin };
+}
+// 案件カードから請求内訳 {sales,fuel,other,profit,margin} を導出（運賃は getCaseAmount に委譲）。
+function deriveCaseFareBreakdown(c) {
+  return deriveFareBreakdownFromSales(getCaseAmount(c));
+}
+// 請求書フィールド {invoiceNo,invoiceDate,due,paid} を採番（請求処理に必須な6項目のうち4項目を充足）。
+function makeInvoiceFields(seqSuffix) {
+  const now = new Date();
+  const base = 'INV-' + formatDateYYYYMM(now) + '-' + String(Math.floor(Math.random() * 900) + 100).padStart(5, '0');
+  return {
+    invoiceNo: base + (seqSuffix || ''),
+    invoiceDate: formatDateSlash(now),
+    due: formatDateSlash(new Date(now.getTime() + 30 * 86400000)),
+    paid: false
+  };
 }
 
 function dvApplyPreset(p) {
@@ -24982,6 +25023,12 @@ function dndCaseToProcessed(caseListId, driverId, dateKey, start, end) {
   }
   if (!movedCase) return;
 
+  // 運賃(amount)の確定：案件保持値 → 配車計画表カード(dndUnassignedCases)の保持値 → 案件内容から算出 の優先順
+  if (movedCase.amount == null && typeof dndUnassignedCases !== 'undefined') {
+    const _bc = dndUnassignedCases.find(c => c.caseListId === caseListId);
+    if (_bc && _bc.amount != null) movedCase.amount = _bc.amount;
+  }
+
   // processedCasesに簡易エントリとして追加（既に存在しなければ）
   if (!processedCases.some(c => c.id === caseListId)) {
     const drv = dndDrivers.find(d => d.id === driverId);
@@ -25003,8 +25050,9 @@ function dndCaseToProcessed(caseListId, driverId, dateKey, start, end) {
       vehicle: drv ? (drv.vehicle.match(/\d+/) || ['—'])[0] : '—',
       vehicleType: drv ? drv.type : '—',
       vehicleCap: drv ? drv.maxLoad : 0,
-      sales: 0, fuel: 0, other: 0, profit: 0, margin: 0,
-      invoiceNo: '—', invoiceDate: '—', due: '—', paid: false,
+      // 請求情報を充足：運賃(amount)から内訳と請求書フィールドを生成（旧:sales 0／請求書番号 '—' で請求不能だった）
+      ...deriveCaseFareBreakdown(movedCase),
+      ...makeInvoiceFields(),
       progress: 0, truckTop: 0, progressPct: 0, remain: '—', eta: '—', donekm: 0,
       billingConfirmed: false,
       // D&D由来の案件をマーク（元フェーズに戻すために保持）
@@ -34429,6 +34477,12 @@ function confirmPartnerDispatch() {
   const poTax     = Math.round(poTotal * 0.1);
   const poIssuedAt = poConfirmed ? new Date().toISOString() : null;
 
+  // 請求情報を充足：売上は案件の運賃(amount)、原価は傭車料(poTotal)。粗利・粗利率を算出（旧:一律 42000）
+  const _pdSales  = getCaseAmount(caseData);
+  const _pdOther  = poTotal || 38000;
+  const _pdProfit = _pdSales - _pdOther;
+  const _pdMargin = _pdSales ? Math.round(_pdProfit / _pdSales * 100) : 0;
+
   // 処理済みへ追加
   processedCases.unshift({
     id: caseData.id, status:'完了',
@@ -34439,7 +34493,7 @@ function confirmPartnerDispatch() {
     completion: new Date().toLocaleDateString('ja-JP') + ' 協力会社依頼',
     distance: caseData.distance||'—', delay: 'なし',
     driver: '協力会社', vehicle: p.name,
-    sales: 42000, fuel: 0, other: poTotal || 38000, profit: 4000, margin: 10,
+    sales: _pdSales, fuel: 0, other: _pdOther, profit: _pdProfit, margin: _pdMargin,
     invoiceNo: 'INV-P-' + String(Math.floor(Math.random()*9000)+1000),
     invoiceDate: formatDateSlash(new Date()), due: formatDateSlash(new Date(Date.now()+30*86400000)), paid: false,
     progress: 0, truckTop: 50, progressPct: 0, remain: '—', eta: '—', donekm: 0,
